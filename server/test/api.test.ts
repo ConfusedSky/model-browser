@@ -19,7 +19,13 @@ import type {
 import { createApp } from "../src/app";
 import { ThumbCache } from "../src/cache";
 import { type ExecFn, createLauncher } from "../src/launch";
-import { LOOPBACK, libraryFor, makeFixtures, realTempDir } from "./helpers";
+import {
+  LOOPBACK,
+  libraryFor,
+  makeFixtures,
+  realTempDir,
+  stlBytes,
+} from "./helpers";
 
 const fx = makeFixtures();
 const cacheDir = mkdtempSync(join(tmpdir(), "mb-cache-"));
@@ -237,6 +243,14 @@ describe("GET /api/file byte ranges", () => {
         `bytes */${size}`,
       ]);
       expect([header, (await bytes(res)).length]).toEqual([header, 0]);
+      // D6: an answer about the source's current *size*, and a source can grow. The
+      // `etag` is asserted null, not merely absent from the 416's own literal — a
+      // helper that staged its headers on the context would leave the tag here.
+      expect([header, res.headers.get("cache-control")]).toEqual([
+        header,
+        "no-store",
+      ]);
+      expect([header, res.headers.get("etag")]).toEqual([header, null]);
     }
   });
 
@@ -321,6 +335,382 @@ describe("GET /api/file byte ranges", () => {
     const res = await get(entry, { ...LOOPBACK, range: "bytes=0-9" });
     expect(res.status).toBe(200);
     expect((await bytes(res)).equals(fx.boxStl)).toBe(true);
+  });
+});
+
+describe("model byte cacheability", () => {
+  // `byte-route-cache-headers` D3. The `mtime` parameter is an assertion about the
+  // source's version, never a selector: the bytes are its current bytes whatever it says.
+  const url = "/api/file?path=/loose.stl";
+  const loose = join(fx.dir, "loose.stl");
+  const PINNED = "public, max-age=31536000, immutable";
+
+  /** The strong validator both byte routes issue: `"<mtimeMs>-<size>"`. */
+  function currentTag(file = loose): string {
+    const s = statSync(file);
+    return `"${s.mtimeMs}-${s.size}"`;
+  }
+
+  async function bytes(res: Response): Promise<Buffer> {
+    return Buffer.from(await res.arrayBuffer());
+  }
+
+  let whole: Buffer;
+  beforeAll(async () => {
+    whole = await bytes(await get(url));
+  });
+
+  it("declares the three tiers over the version named, under one validator", async () => {
+    const s = statSync(loose);
+    const tag = `"${s.mtimeMs}-${s.size}"`;
+
+    const pinned = await get(`${url}&mtime=${s.mtimeMs}`);
+    expect(pinned.status).toBe(200);
+    expect(pinned.headers.get("cache-control")).toBe(PINNED);
+    // The pinned row carries the tag where `thumbHitTiers`' equivalent does not: this
+    // route serves 206s, and a resumption has nothing to condition on otherwise (D3).
+    expect(pinned.headers.get("etag")).toBe(tag);
+    expect((await bytes(pinned)).equals(whole)).toBe(true);
+
+    // Some other version: the current bytes and `no-cache`, which is what makes the
+    // mis-keyed caller re-read the listing — and the tag all the same. A listing blind
+    // to an overwrite (issue #34) can leave a caller in this tier indefinitely, where a
+    // missing validator would mean a full download on every visit (D3).
+    const other = await get(`${url}&mtime=${s.mtimeMs - 5000}`);
+    expect(other.status).toBe(200);
+    expect(other.headers.get("cache-control")).toBe("no-cache");
+    expect(other.headers.get("etag")).toBe(tag);
+    expect((await bytes(other)).equals(whole)).toBe(true);
+
+    const versionless = await get(url);
+    expect(versionless.status).toBe(200);
+    expect(versionless.headers.get("cache-control")).toBe("no-cache");
+    // One representation, one validator: all three tags are byte-identical, so the
+    // directive is the only thing a tier moves.
+    expect([
+      pinned.headers.get("etag"),
+      other.headers.get("etag"),
+      versionless.headers.get("etag"),
+    ]).toEqual([tag, tag, tag]);
+  });
+
+  it("pins the version the listing reported, fraction and all", async (ctx) => {
+    // Goes red if anything ever rounds `DirEntry.mtime` (D1). Its own library — a
+    // second model in the shared fixture would rewrite every listing cell in this file.
+    const dir = realTempDir("mb-mtime-");
+    const fracCache = realTempDir("mb-mtime-cache-");
+    try {
+      const file = join(dir, "fractional.stl");
+      writeFileSync(file, stlBytes(7));
+      // A **number** of seconds, not a `Date`: a `Date` truncates to integer
+      // milliseconds on both runtimes, so the fraction this cell is about would never
+      // exist and the skip below would fire forever while asserting nothing.
+      utimesSync(file, 1789446597.1234567, 1789446597.1234567);
+      const mtimeMs = statSync(file).mtimeMs;
+      if (Number.isInteger(mtimeMs)) {
+        // Reported rather than failed — and named, or a skip for the wrong reason
+        // (a `Date` fixture, a rounding listing) would look exactly like this one.
+        console.log(
+          `model byte cacheability: skipping the fractional-version cell — the filesystem truncated the fraction (mtimeMs=${mtimeMs}), the listing did not`,
+        );
+        ctx.skip();
+      }
+      const fracApp = createApp(
+        new ThumbCache(fracCache),
+        undefined,
+        undefined,
+        libraryFor(dir),
+      );
+      const listing = (await (
+        await fracApp.request("/api/dir?path=/", { headers: LOOPBACK })
+      ).json()) as DirListing;
+      const entry = listing.entries.find(
+        (e) => e.name === "fractional.stl",
+      ) as DirEntry;
+      expect(entry.mtime).toBe(mtimeMs);
+
+      const res = await fracApp.request(
+        `/api/file?path=/fractional.stl&mtime=${String(entry.mtime)}`,
+        { headers: LOOPBACK },
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe(PINNED);
+      expect(res.headers.get("etag")).toBe(currentTag(file));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(fracCache, { recursive: true, force: true });
+    }
+  });
+
+  it("reads a malformed version as absent rather than refusing the bytes", async () => {
+    // A cache hint is never a selector, so a bad one degrades the declaration and
+    // nothing else (D2). `mtime=` is the arm that needs its own case: `Number("")` is
+    // `0`, which would otherwise name version zero.
+    for (const spelling of ["", "abc", "NaN"]) {
+      const res = await get(`${url}&mtime=${spelling}`);
+      expect([spelling, res.status]).toEqual([spelling, 200]);
+      expect([spelling, res.headers.get("cache-control")]).toEqual([
+        spelling,
+        "no-cache",
+      ]);
+      expect([spelling, res.headers.get("etag")]).toEqual([
+        spelling,
+        currentTag(),
+      ]);
+      expect([spelling, (await bytes(res)).equals(whole)]).toEqual([
+        spelling,
+        true,
+      ]);
+    }
+  });
+
+  it("answers the validator it issued with a 304, and any other with the bytes", async () => {
+    const first = await get(url);
+    const tag = first.headers.get("etag");
+    expect(tag).toBe(currentTag());
+
+    const again = await get(url, {
+      ...LOOPBACK,
+      "if-none-match": tag as string,
+    });
+    expect(again.status).toBe(304);
+    expect((await again.arrayBuffer()).byteLength).toBe(0);
+    expect(again.headers.get("etag")).toBe(tag);
+    expect(again.headers.get("cache-control")).toBe("no-cache");
+
+    const mismatched = await get(url, {
+      ...LOOPBACK,
+      "if-none-match": '"0-0"',
+    });
+    expect(mismatched.status).toBe(200);
+    expect((await bytes(mismatched)).equals(whole)).toBe(true);
+  });
+
+  it("gives a 206 the declaration its 200 would have carried", async () => {
+    // Leaving the partial answer undeclared is the same bug one status code down: a
+    // range request would bypass the cache the 200 populates (D6).
+    const s = statSync(loose);
+    const pinned = await get(`${url}&mtime=${s.mtimeMs}`, {
+      ...LOOPBACK,
+      range: "bytes=0-9",
+    });
+    expect(pinned.status).toBe(206);
+    expect(pinned.headers.get("cache-control")).toBe(PINNED);
+    expect(pinned.headers.get("etag")).toBe(currentTag());
+    expect((await bytes(pinned)).equals(whole.subarray(0, 10))).toBe(true);
+
+    const versionless = await get(url, { ...LOOPBACK, range: "bytes=0-9" });
+    expect(versionless.status).toBe(206);
+    expect(versionless.headers.get("cache-control")).toBe("no-cache");
+    expect(versionless.headers.get("etag")).toBe(currentTag());
+    expect((await bytes(versionless)).equals(whole.subarray(0, 10))).toBe(true);
+  });
+
+  it("versions an archive entry by its archive, not by the entry", async () => {
+    // D4: `DirEntry.mtime` for a zip entry is the containing zip's, and the byte route
+    // compares against the same file — so the tag names the *archive's* size too,
+    // which is what distinguishes this from a tag keyed on the entry's own bytes.
+    const zip = statSync(fx.zipPath);
+    expect(zip.size).not.toBe(fx.boxStl.length);
+    const entry = `/api/file?path=${encodeURIComponent("/models.zip!/box.stl")}`;
+
+    const pinned = await get(`${entry}&mtime=${zip.mtimeMs}`);
+    expect(pinned.status).toBe(200);
+    expect(pinned.headers.get("cache-control")).toBe(PINNED);
+    expect(pinned.headers.get("etag")).toBe(`"${zip.mtimeMs}-${zip.size}"`);
+    expect((await bytes(pinned)).equals(fx.boxStl)).toBe(true);
+
+    // A version that is not the archive's — the entry's own recorded timestamp is one
+    // such value, DOS-resolution and never the archive's `mtimeMs` — degrades the
+    // directive and keeps the archive's tag, so the mis-keyed caller revalidates.
+    const stale = await get(`${entry}&mtime=1`);
+    expect(stale.status).toBe(200);
+    expect(stale.headers.get("cache-control")).toBe("no-cache");
+    expect(stale.headers.get("etag")).toBe(`"${zip.mtimeMs}-${zip.size}"`);
+    expect((await bytes(stale)).equals(fx.boxStl)).toBe(true);
+
+    // This branch reads the entry into memory and ignores `Range` as it always has
+    // (D6); the declaration rides the whole-entry 200 all the same.
+    const ranged = await get(`${entry}&mtime=${zip.mtimeMs}`, {
+      ...LOOPBACK,
+      range: "bytes=0-9",
+    });
+    expect(ranged.status).toBe(200);
+    expect(ranged.headers.get("cache-control")).toBe(PINNED);
+    expect((await bytes(ranged)).equals(fx.boxStl)).toBe(true);
+  });
+
+  it("takes an archive entry's version from the listing that reported it", async () => {
+    // The listing and the route pinned to agree: whatever `/api/dir` says an entry's
+    // mtime is, feeding it straight back is the pinned tier.
+    const listing = (await (
+      await get("/api/dir?path=/models.zip")
+    ).json()) as DirListing;
+    const box = listing.entries.find((e) => e.name === "box.stl") as DirEntry;
+    expect(box.mtime).toBe(statSync(fx.zipPath).mtimeMs);
+
+    const res = await get(
+      `/api/file?path=${encodeURIComponent(box.path)}&mtime=${String(box.mtime)}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe(PINNED);
+  });
+
+  it("answers a zip entry's own validator with a 304", async () => {
+    // The zip branch's conditional: every other one here targets a loose file. Where
+    // its 304 sits relative to `extractEntry` stays unpinned from out here — the status
+    // is the same either side of it, and only a spy on the extract would say.
+    const zip = statSync(fx.zipPath);
+    const tag = `"${zip.mtimeMs}-${zip.size}"`;
+    const res = await get(
+      `/api/file?path=${encodeURIComponent("/models.zip!/box.stl")}`,
+      { ...LOOPBACK, "if-none-match": tag },
+    );
+    expect(res.status).toBe(304);
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
+    expect(res.headers.get("etag")).toBe(tag);
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+  });
+
+  it("honours if-range: a matching tag keeps the slice, a stale one gives the whole file", async () => {
+    // RFC 9110 §13.1.5. Ignoring `If-Range` was defensible only while the server handed
+    // out no validator; once it does, ignoring it lets a client stitch a slice of new
+    // bytes onto a stale prefix (D7).
+    const fresh = await get(url, {
+      ...LOOPBACK,
+      range: "bytes=0-9",
+      "if-range": currentTag(),
+    });
+    expect(fresh.status).toBe(206);
+    expect((await bytes(fresh)).equals(whole.subarray(0, 10))).toBe(true);
+
+    const stale = await get(url, {
+      ...LOOPBACK,
+      range: "bytes=0-9",
+      "if-range": '"0-0"',
+    });
+    expect(stale.status).toBe(200);
+    expect(stale.headers.get("content-length")).toBe(String(whole.length));
+    expect((await bytes(stale)).equals(whole)).toBe(true);
+
+    // With no range there is nothing to condition, so it is ignored either way.
+    const noRange = await get(url, { ...LOOPBACK, "if-range": '"0-0"' });
+    expect(noRange.status).toBe(200);
+    expect((await bytes(noRange)).equals(whole)).toBe(true);
+  });
+
+  it("resumes a pinned download against the tag the pinned row carries", async () => {
+    // Why the pinned row carries a tag at all (D3): without one a resumption of a
+    // pinned download has nothing to condition on.
+    const res = await get(`${url}&mtime=${statSync(loose).mtimeMs}`, {
+      ...LOOPBACK,
+      range: "bytes=0-9",
+      "if-range": currentTag(),
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("cache-control")).toBe(PINNED);
+    expect(res.headers.get("etag")).toBe(currentTag());
+    expect((await bytes(res)).equals(whole.subarray(0, 10))).toBe(true);
+  });
+
+  it("puts a matching not-modified check ahead of the range", async () => {
+    // RFC 9110 §13.2.2, *Precedence of Preconditions* — a 304, not a 206.
+    const res = await get(url, {
+      ...LOOPBACK,
+      range: "bytes=0-9",
+      "if-none-match": currentTag(),
+    });
+    expect(res.status).toBe(304);
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+  });
+
+  it("honours a not-modified check while the request names the current version", async () => {
+    // One rule across all three tiers, not a property of the version-less one: it turns
+    // on the tag matching the source's *current* version, never on what was claimed.
+    const tag = (await get(url)).headers.get("etag") as string;
+    const res = await get(`${url}&mtime=${statSync(loose).mtimeMs}`, {
+      ...LOOPBACK,
+      "if-none-match": tag,
+    });
+    expect(res.status).toBe(304);
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
+    expect(res.headers.get("cache-control")).toBe(PINNED);
+    expect(res.headers.get("etag")).toBe(tag);
+  });
+
+  it("honours a not-modified check while the request names a stale version", async () => {
+    const tag = (await get(url)).headers.get("etag") as string;
+    const res = await get(`${url}&mtime=1`, {
+      ...LOOPBACK,
+      "if-none-match": tag,
+    });
+    expect(res.status).toBe(304);
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  it("never lets one of its own 404s be stored, or validated", async () => {
+    // An ETag on a 404 invites a 304 that means "your miss is still current".
+    for (const path of ["/notes.txt", "/gone.stl"]) {
+      const res = await get(`/api/file?path=${encodeURIComponent(path)}`);
+      expect([path, res.status]).toEqual([path, 404]);
+      expect([path, res.headers.get("cache-control")]).toEqual([
+        path,
+        "no-store",
+      ]);
+      expect([path, res.headers.get("etag")]).toEqual([path, null]);
+    }
+  });
+
+  it("never lets a rejected request or an unreadable archive be stored", async () => {
+    // The last of the three leaves by `throw` and is rendered by `app.onError`, which
+    // is the only place that hole closes. Each case pins the status it answers today
+    // too, so one that moves is caught here rather than silently re-declared.
+    const cases: [string, number][] = [
+      ["/api/file?path=", 400],
+      [`/api/file?path=${encodeURIComponent("/a.zip!/b.zip")}`, 400],
+      [`/api/file?path=${encodeURIComponent("/missing.zip!/x.stl")}`, 404],
+    ];
+    for (const [target, status] of cases) {
+      const res = await get(target);
+      expect([target, res.status]).toEqual([target, status]);
+      expect([target, res.headers.get("cache-control")]).toEqual([
+        target,
+        "no-store",
+      ]);
+      expect([target, res.headers.get("etag")]).toEqual([target, null]);
+    }
+  });
+
+  it("leaks no validator onto a 422 raised after the tier was decided", async () => {
+    // The load-bearing cell for the *pure* helper (D8): the archive's stat succeeds, so
+    // the pinned tier — tag and all — is decided before `extractEntry` throws, and a
+    // helper that staged its headers would ship that tag on this 422. The missing-archive
+    // case above cannot show it: its version is unknown, so there is no tag to leak.
+    const bad = join(fx.dir, "corrupt-cache.zip");
+    writeFileSync(bad, Buffer.from("this is not a zip archive at all"));
+    try {
+      const res = await get(
+        `/api/file?path=${encodeURIComponent("/corrupt-cache.zip!/x.stl")}&mtime=${statSync(bad).mtimeMs}`,
+      );
+      expect(res.status).toBe(422);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(res.headers.get("etag")).toBeNull();
+    } finally {
+      unlinkSync(bad);
+    }
+  });
+
+  it("answers an entry the archive does not contain with 422, stored nowhere", async () => {
+    // Leaks by the same route the corrupt archive does, with the central directory
+    // readable. The status is pinned because 422 is today's answer and nothing else in
+    // the suite says so, while 404 is the number an implementer would expect here.
+    const res = await get(
+      `/api/file?path=${encodeURIComponent("/models.zip!/nope.stl")}&mtime=${statSync(fx.zipPath).mtimeMs}`,
+    );
+    expect(res.status).toBe(422);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("etag")).toBeNull();
   });
 });
 

@@ -8,20 +8,25 @@ interface Fake {
 
 function makeLru(budget: number, sizes: Record<string, number>) {
   const disposed: string[] = [];
+  const load = vi.fn((path: string, _mtime?: number) =>
+    Promise.resolve({
+      object: { path, dispose: vi.fn() },
+      bytes: sizes[path] ?? 0,
+    }),
+  );
   const lru = new MeshLru<Fake>(
-    (path) =>
-      Promise.resolve({
-        object: { path, dispose: vi.fn() },
-        bytes: sizes[path] ?? 0,
-      }),
+    load,
     (obj) => {
       disposed.push(obj.path);
       obj.dispose();
     },
     budget,
   );
-  return { lru, disposed };
+  return { lru, disposed, load };
 }
+
+/** Fractional on purpose: a rounding on the way to `load` fails here (D5). */
+const MODEL_MTIME = 1789446597239.1736;
 
 describe("MeshLru", () => {
   it("evicts by total byte budget, not entry count", async () => {
@@ -100,6 +105,28 @@ describe("MeshLru", () => {
     );
     expect(() => lru.warm("x")).not.toThrow();
     await new Promise((r) => setTimeout(r, 5));
+  });
+
+  it("hands the version to load, on acquire and on warm", async () => {
+    const { lru, load } = makeLru(100, { a: 10, b: 10 });
+    await lru.acquire("a", MODEL_MTIME);
+    expect(load).toHaveBeenCalledWith("a", MODEL_MTIME);
+    lru.warm("b", MODEL_MTIME);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(load).toHaveBeenLastCalledWith("b", MODEL_MTIME);
+  });
+
+  // D4: the key is the path alone, in both maps. Re-keying by `path + mtime`
+  // would make a hover warm and a press under a newer listing two entries and
+  // double the resident bytes for one model.
+  it("keys by path alone — a second version reuses the resident mesh", async () => {
+    const { lru, load } = makeLru(100, { a: 10 });
+    const first = await lru.acquire("a", 1);
+    const second = await lru.acquire("a", 2);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+    // `has` takes no version, and answers for the path it was given.
+    expect(lru.has("a")).toBe(true);
   });
 
   it("clear disposes everything", async () => {

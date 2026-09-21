@@ -293,7 +293,7 @@ export async function renderEntryThumbnail(
       cached.axis ?? fromPose?.axis ?? defaultAxisFor(formatOfEntry(entry));
   }
 
-  const object = await deps.lru.acquire(entry.path);
+  const object = await deps.lru.acquire(entry.path, entry.mtime);
   await deps.queue.whenResumed();
   const png = await renderThumbnail(object, camera, axis, ao);
   const written = await deps.api
@@ -481,7 +481,7 @@ export function setOrbitAxis(
     try {
       // Gated twice: `push` alone cannot stop a started job (D2/D3).
       await host.queue.whenResumed();
-      const object = await host.lru.acquire(entry.path);
+      const object = await host.lru.acquire(entry.path, entry.mtime);
       await host.queue.whenResumed();
       // What an ordinary visit resolves to for an axis with no camera, so the
       // tile and the next sweep agree.

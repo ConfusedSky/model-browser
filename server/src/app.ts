@@ -708,6 +708,10 @@ export function createApp(
    * `hostDetails`; the fall-through may be a host path, hence `viewerError`.
    */
   app.onError((err, c) => {
+    // No route here has a cacheable error, and a 404 with no directive is
+    // heuristically cacheable (RFC 9111 §4.2.2) — the hole the byte routes cannot
+    // close themselves, since most of their failures never reach handler code.
+    c.header("cache-control", "no-store");
     if (err instanceof LibraryError)
       return c.json({ error: err.message }, err.status);
     if (err instanceof ListingError)
@@ -874,7 +878,7 @@ export function createApp(
   app.get("/api/file", async (c) => {
     const path = c.req.query("path");
     if (path === undefined || path === "")
-      return c.json({ error: "path is required" }, 400);
+      return c.json({ error: "path is required" }, 400, NO_STORE);
     // Canonicalised like every sibling route; the spelling reaches only the 404.
     const libPath = canonicalLibPath(path);
     const { fsPath, entry } = await library.resolve(libPath);
@@ -887,7 +891,14 @@ export function createApp(
     };
     if (entry !== undefined) {
       if (/\.zip$/i.test(entry))
-        return c.json({ error: "nested zips are unsupported" }, 400);
+        return c.json({ error: "nested zips are unsupported" }, 400, NO_STORE);
+      // The version is the archive's and is read *before* the bytes, so a rewrite
+      // between the two can only under-claim (D5). A failed stat is version
+      // unknown, never a 404 — that status stays `extractEntry`'s below.
+      const archive = await stat(fsPath).catch(() => null);
+      const tiers = byteTiers(c, archive?.mtimeMs ?? null, archive?.size ?? 0);
+      // Before the extract: a 304 must not decompress a body it discards.
+      if (tiers.notModified) return c.body(null, 304, tiers.headers);
       let bytes;
       try {
         bytes = await extractEntry(fsPath, entry);
@@ -896,23 +907,41 @@ export function createApp(
         if (err instanceof ZipError) throw err;
         throw new ListingError(404, `cannot read zip: ${archiveOf(libPath)}`);
       }
-      return c.body(new Uint8Array(bytes), 200, headers);
+      return c.body(new Uint8Array(bytes), 200, {
+        ...headers,
+        ...tiers.headers,
+      });
     }
     // Model formats only, by the predicate a listing decides with, and answered as
     // missing rather than refused: a distinct status would confirm it exists.
     if (modelFormat(libPath) === undefined) {
-      return c.json({ error: `no such file: ${libPath}` }, 404);
+      return c.json({ error: `no such file: ${libPath}` }, 404, NO_STORE);
     }
     const s = await stat(fsPath).catch(() => null);
     if (s === null || !s.isFile())
-      return c.json({ error: `no such file: ${libPath}` }, 404);
+      return c.json({ error: `no such file: ${libPath}` }, 404, NO_STORE);
+    // Decided before the range is parsed: a not-modified check outranks `Range`
+    // (RFC 9110 §13.2.2). Deciding costs nothing because it declares nothing (D8).
+    const tiers = byteTiers(c, s.mtimeMs, s.size);
+    if (tiers.notModified) return c.body(null, 304, tiers.headers);
     // The zip branch has the entry in memory already and ignores `Range`.
     const ranged = { ...headers, "accept-ranges": "bytes" };
-    const range = parseRange(c.req.header("range"), s.size);
+    // A resumption conditioned on a tag the source no longer has gets the whole
+    // representation, or the client stitches new bytes onto a stale prefix
+    // (RFC 9110 §13.1.5). An `if-range` with no `range` is ignored either way.
+    const staleIfRange =
+      c.req.header("if-range") !== undefined &&
+      c.req.header("if-range") !== tiers.etag;
+    const range = staleIfRange
+      ? null
+      : parseRange(c.req.header("range"), s.size);
     if (range === "unsatisfiable") {
+      // An answer about the source's current size, not about its bytes, and a
+      // source can grow — so it is never stored and never validated (D6).
       return c.body(null, 416, {
         ...ranged,
         "content-range": `bytes */${s.size}`,
+        ...NO_STORE,
       });
     }
     if (range !== null) {
@@ -922,12 +951,17 @@ export function createApp(
       ) as ReadableStream;
       return c.body(part, 206, {
         ...ranged,
+        ...tiers.headers,
         "content-range": `bytes ${start}-${end}/${s.size}`,
         "content-length": String(end - start + 1),
       });
     }
     const stream = Readable.toWeb(createReadStream(fsPath)) as ReadableStream;
-    return c.body(stream, 200, { ...ranged, "content-length": String(s.size) });
+    return c.body(stream, 200, {
+      ...ranged,
+      ...tiers.headers,
+      "content-length": String(s.size),
+    });
   });
 
   // An STL model's geometry as an indexed, position-only GLB, converted on
@@ -937,7 +971,7 @@ export function createApp(
   app.get("/api/model.glb", async (c) => {
     const path = c.req.query("path");
     if (path === undefined || path === "")
-      return c.json({ error: "path is required" }, 400);
+      return c.json({ error: "path is required" }, 400, NO_STORE);
     const libPath = canonicalLibPath(path);
     const { fsPath, entry } = await library.resolve(libPath);
     const headers = {
@@ -946,17 +980,26 @@ export function createApp(
     };
     // Answered as missing rather than refused, exactly as `/api/file` is.
     if (modelFormat(libPath) !== "stl")
-      return c.json({ error: `no such file: ${libPath}` }, 404);
+      return c.json({ error: `no such file: ${libPath}` }, 404, NO_STORE);
 
     // Staleness is the source's mtime — the archive's for a zip entry, whose
     // own mtime moves whenever an entry does.
     const s = await stat(fsPath).catch(() => null);
     if (s === null || !s.isFile())
-      return c.json({ error: `no such file: ${libPath}` }, 404);
+      return c.json({ error: `no such file: ${libPath}` }, 404, NO_STORE);
     const mtime = s.mtimeMs;
 
+    // The source STL's version, which is exactly what its GLB is keyed by, and read
+    // ahead of the conversion so a revalidation never reconverts (D9).
+    const tiers = byteTiers(c, mtime, s.size);
+    if (tiers.notModified) return c.body(null, 304, tiers.headers);
+
     const cached = await meshCache.read(libPath, mtime);
-    if (cached !== null) return c.body(new Uint8Array(cached), 200, headers);
+    if (cached !== null)
+      return c.body(new Uint8Array(cached), 200, {
+        ...headers,
+        ...tiers.headers,
+      });
 
     let stl: ArrayBuffer;
     if (entry !== undefined) {
@@ -976,7 +1019,9 @@ export function createApp(
     try {
       glb = stlToGlb(stl);
     } catch (err) {
-      if (err instanceof GlbError) return c.json({ error: err.message }, 422);
+      // The tier is already decided above, and a failure must not hand out its tag (D8).
+      if (err instanceof GlbError)
+        return c.json({ error: err.message }, 422, NO_STORE);
       throw err;
     }
     // A read-only cache dir must not fail the request: serve without
@@ -988,7 +1033,7 @@ export function createApp(
         `mesh cache not persisted (${String(err)}); converting per request`,
       );
     });
-    return c.body(new Uint8Array(glb), 200, headers);
+    return c.body(new Uint8Array(glb), 200, { ...headers, ...tiers.headers });
   });
 
   /**
@@ -1406,6 +1451,63 @@ export function createApp(
       return c.json({ error: `invalid ao: ${aoParam}` }, 400);
     }
     return { libPath: canonicalLibPath(path), mtime, ao: aoParam !== "off" };
+  }
+
+  /** Every failure a byte route answers: never stored, and never validated (D3). */
+  const NO_STORE = { "cache-control": "no-store" };
+
+  /**
+   * The strong validator both byte routes issue (D7). Strong because `If-Range` is
+   * unusable without one, and both components come from the `stat` the version needs.
+   */
+  function byteEtag(version: number, size: number): string {
+    return `"${version}-${size}"`;
+  }
+
+  /**
+   * The tiers a model's **bytes** are served under (`byte-route-cache-headers` D3), over
+   * the optional `mtime` the listing reports for the source — the archive's for a zip
+   * entry; a `null` version is *unknown* and gets no tag. Only the directive varies:
+   * every byte-carrying answer of a known version carries the same validator, so a
+   * caller keyed on a version this source no longer has costs a revalidation rather
+   * than a download. Unlike its sibling `thumbHitTiers` this stages nothing on the
+   * context (D8): a header set here would ride every failure reached after it, and
+   * since `c.header` is `Headers.set`, a later `no-store` would replace the directive
+   * while the stale `ETag` survived beside it.
+   */
+  function byteTiers(
+    c: Context,
+    version: number | null,
+    size: number,
+  ): {
+    headers: Record<string, string>;
+    etag: string | null;
+    notModified: boolean;
+  } {
+    if (version === null)
+      return {
+        headers: { "cache-control": "no-cache" },
+        etag: null,
+        notModified: false,
+      };
+    const etag = byteEtag(version, size);
+    const notModified = c.req.header("if-none-match") === etag;
+    const named = c.req.query("mtime");
+    // `Number("")` is `0`, so the empty spelling needs its own arm or it names version
+    // zero. Everything else malformed becomes `NaN`, which matches no version and so
+    // lands in `no-cache` — a bad hint degrades the declaration, it never refuses (D2).
+    const asked = named === undefined || named === "" ? NaN : Number(named);
+    const pinned = asked === version;
+    return {
+      headers: {
+        "cache-control": pinned
+          ? "public, max-age=31536000, immutable"
+          : "no-cache",
+        etag,
+      },
+      etag,
+      notModified,
+    };
   }
 
   /**

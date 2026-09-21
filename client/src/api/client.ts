@@ -97,10 +97,28 @@ export interface ApiClient {
    *  (folder-contact-sheets D1). `n` defaults to 4 and is capped at 8 server
    *  side; a zip answers `[]` rather than an error. */
   peek(path: string, n?: number): Promise<DirEntry[]>;
-  fetchModel(path: string): Promise<ArrayBuffer>;
-  /** An STL model's geometry as a derived GLB (server-glb-cache). The viewer
-   *  calls this for `stl` and keeps `fetchModel` for `obj`/`3mf`. */
-  fetchModelGlb(path: string): Promise<ArrayBuffer>;
+  /**
+   * A model's own bytes. `mtime` is the version the caller believes the source
+   * is at — the listing entry's modification time, which for an entry inside a
+   * zip is the archive's — and earns an answer the reader may pin. Omitting it
+   * asks the version-less tier: a revalidation rather than a pin, and otherwise
+   * identical, so a caller holding only a path keeps working. It is sent
+   * exactly as the listing reported it, fraction included: a rounded version is
+   * one the source never had, so nothing would ever pin (D2/D5).
+   *
+   * (One block, not several: only the last of several consecutive JSDoc
+   * comments reaches a hover.)
+   */
+  fetchModel(path: string, mtime?: number): Promise<ArrayBuffer>;
+  /**
+   * An STL model's geometry as a derived GLB (server-glb-cache). The viewer
+   * calls this for `stl` and keeps `fetchModel` for `obj`/`3mf`.
+   *
+   * `mtime` is `fetchModel`'s: the listing entry's version, the archive's for a
+   * zip entry, never rounded; omitted, the request is today's version-less one
+   * (D2/D5).
+   */
+  fetchModelGlb(path: string, mtime?: number): Promise<ArrayBuffer>;
   /** One entry's effective overrides, `{}` where nothing resolves
    *  (`library-overrides` D3). One path per call is the trade the route exists
    *  to make: a listing would resolve hundreds to serve one lightbox. */
@@ -411,17 +429,19 @@ export class HttpApiClient implements ApiClient {
     return jsonOrThrow<CreditedKit[]>(res);
   }
 
-  async fetchModel(path: string): Promise<ArrayBuffer> {
+  async fetchModel(path: string, mtime?: number): Promise<ArrayBuffer> {
+    // Appended only when it says something, and interpolated rather than
+    // formatted: the fraction is part of the version the server compares (D5).
     const res = await this.fetchFn(
-      `/api/file?path=${encodeURIComponent(path)}`,
+      `/api/file?path=${encodeURIComponent(path)}${mtime !== undefined ? `&mtime=${mtime}` : ""}`,
     );
     if (!res.ok) throw await errorOf(res);
     return res.arrayBuffer();
   }
 
-  async fetchModelGlb(path: string): Promise<ArrayBuffer> {
+  async fetchModelGlb(path: string, mtime?: number): Promise<ArrayBuffer> {
     const res = await this.fetchFn(
-      `/api/model.glb?path=${encodeURIComponent(path)}`,
+      `/api/model.glb?path=${encodeURIComponent(path)}${mtime !== undefined ? `&mtime=${mtime}` : ""}`,
     );
     if (!res.ok) throw await errorOf(res);
     return res.arrayBuffer();

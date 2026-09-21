@@ -915,6 +915,13 @@ All re-runnable; say whose run when quoting.
   deciding (Masa: later): from a US vantage against an EU test box measure
   first paint, a scroll screen of sheets, a lightbox open, one search —
   the per-interaction shapes, not a bare ping.
+  *(Settled 2026-09-18: option (c) was built. The zone moved to Cloudflare and
+  `models.masamaeda.com` is proxied, with cache rules on `/api/thumb/image` and
+  `/api/model.glb` and a bypass for the rest of `/api/*`. `deploy/demo/README.md`
+  §10 is the record — what was configured, the direct baseline it is measured
+  against, and what staying proxied costs. The remaining question is narrower than
+  this paragraph's: whether object storage near the visitor is worth building for
+  the model bytes that miss the edge, which issue #39 decides on a measurement.)*
   **EU options, priced** (this session, 2026-09-04, Masa's ask — the row above
   re-admitted them without numbers; USD at €1 = $1.1622, £1 = $1.353,
   api.frankfurter.dev 2026-09-04; all ex-VAT, which is what a non-EU customer

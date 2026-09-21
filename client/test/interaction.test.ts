@@ -73,7 +73,21 @@ describe("hover warmer (linger debounce)", () => {
     vi.advanceTimersByTime(HOVER_LINGER_MS - 1);
     expect(warm).not.toHaveBeenCalled();
     vi.advanceTimersByTime(2);
-    expect(warm).toHaveBeenCalledWith("/a.stl");
+    // Entered with no version, so none reaches the warm: what the version-less
+    // path has to preserve is the URL, and `HttpApiClient` appends nothing for
+    // an undefined version (apiClient.test.ts).
+    expect(warm).toHaveBeenCalledWith("/a.stl", undefined);
+  });
+
+  it("carries the version across the linger to the warm", () => {
+    const warm = vi.fn();
+    const h = createHoverWarmer(warm);
+    // Fractional on purpose: a rounding at this seam fails here (D5).
+    h.enter("/a.stl", 1789446597239.1736);
+    vi.advanceTimersByTime(HOVER_LINGER_MS + 1);
+    // D6: the warm and the press it precedes must name one URL, or the warm
+    // populates a cache entry the press cannot use.
+    expect(warm).toHaveBeenCalledWith("/a.stl", 1789446597239.1736);
   });
 
   it("sweeping across tiles fires nothing", () => {

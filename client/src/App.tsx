@@ -1445,7 +1445,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const hover = useMemo(() => createHoverWarmer((p) => lru.warm(p)), [lru]);
+  const hover = useMemo(
+    () => createHoverWarmer((p, m) => lru.warm(p, m)),
+    [lru],
+  );
 
   viewerRef.current = viewer;
 
@@ -1771,7 +1774,8 @@ export default function App() {
   );
 
   const onModelHover = useCallback(
-    (p: string | null) => (p !== null ? hover.enter(p) : hover.leave()),
+    (p: string | null, m?: number) =>
+      p !== null ? hover.enter(p, m) : hover.leave(),
     [hover],
   );
 

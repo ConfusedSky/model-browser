@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 export LC_ALL=C   # $EPOCHREALTIME and awk both parse decimals; a comma locale breaks sub()
-# Baseline for the CDN question (.ai/todo.md §0): what a visitor pays today, and how much
-# that varies while the box does other work. One sample per interval, CSV to the output
-# file, which is locked so two runs cannot interleave rows into one file.
+# Baseline for the CDN question (issue #24; deploy/demo/README.md §10 holds the numbers and
+# the summarising snippet): what a visitor pays today, and how much that varies while the
+# box does other work. One sample per interval, CSV to the output file, which is locked so
+# two runs cannot interleave rows into one file.
+#
+# Do not edit this script while a run is using it: bash reads a script incrementally, so a
+# run started before the edit carries on writing the old columns into the new file.
 #
 #   .ai/probe-demo-latency.sh <output.csv> [samples] [interval-seconds]
 #

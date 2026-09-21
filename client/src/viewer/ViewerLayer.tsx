@@ -269,7 +269,10 @@ export default function ViewerLayer({
               camera: fromPose?.camera,
               axis: fromPose?.axis ?? fallbackAxis,
             }));
-    void Promise.all([lru.acquire(viewer.entry.path), savedPromise])
+    void Promise.all([
+      lru.acquire(viewer.entry.path, viewer.entry.mtime),
+      savedPromise,
+    ])
       .then(([object, saved]) => {
         if (!alive) return;
         // A reset pressed while this was in flight wins: `saved` is the very

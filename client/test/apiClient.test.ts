@@ -13,6 +13,11 @@ import {
   type FramingStorage,
 } from "../src/api/localFramings";
 
+/** A listing mtime with a fraction: the version must reach the wire spelled
+ *  exactly this way, since `byteTiers` compares it to the source's `mtimeMs`
+ *  for equality and a rounded value is a version no source ever had (D5). */
+const MODEL_MTIME = 1789446597239.1736;
+
 const CAM = {
   az: 1,
   el: 0.5,
@@ -625,6 +630,58 @@ describe("HttpApiClient contract", () => {
       .mockResolvedValue(new Response("bad", { status: 422 }));
     const api = new HttpApiClient(fetchFn as unknown as typeof fetch);
     await expect(api.fetchModelGlb("/m.stl")).rejects.toThrow();
+  });
+
+  it("fetchModel and fetchModelGlb name the version they are given", async () => {
+    // A fresh Response per call — one body can only be read once.
+    const fetchFn = vi.fn(
+      async (_url: string) => new Response(new Uint8Array([1, 2, 3])),
+    );
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch);
+    await api.fetchModel("/m.stl", MODEL_MTIME);
+    expect(fetchFn.mock.calls[0]![0]).toBe(
+      "/api/file?path=%2Fm.stl&mtime=1789446597239.1736",
+    );
+    fetchFn.mockClear();
+    await api.fetchModelGlb("/m.stl", MODEL_MTIME);
+    expect(fetchFn.mock.calls[0]![0]).toBe(
+      "/api/model.glb?path=%2Fm.stl&mtime=1789446597239.1736",
+    );
+  });
+
+  // A zip entry's version is the archive's, and that is the listing's doing:
+  // the client sends `entry.mtime` for every entry and has no archive case.
+  it("names an archive entry's version on its virtual path", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(new Response(new Uint8Array([1, 2, 3])));
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch);
+    await api.fetchModelGlb("/kit/pack.zip!/x.stl", MODEL_MTIME);
+    expect(fetchFn.mock.calls[0]![0]).toBe(
+      "/api/model.glb?path=%2Fkit%2Fpack.zip!%2Fx.stl&mtime=1789446597239.1736",
+    );
+  });
+
+  it("fetchModelGlb throws on a non-2xx status with a version named", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(new Response("bad", { status: 422 }));
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch);
+    await expect(api.fetchModelGlb("/m.stl", MODEL_MTIME)).rejects.toThrow();
+  });
+
+  // The optional half of the seam: a caller holding only a path issues the URL
+  // it always issued — no trailing `&mtime=`, no `undefined` in the query.
+  it("omits the version entirely when none is given", async () => {
+    const fetchFn = vi.fn(
+      async (_url: string) => new Response(new Uint8Array([1, 2, 3])),
+    );
+    const api = new HttpApiClient(fetchFn as unknown as typeof fetch);
+    await api.fetchModel("/m.stl");
+    expect(fetchFn.mock.calls[0]![0]).toBe("/api/file?path=%2Fm.stl");
+    fetchFn.mockClear();
+    await api.fetchModelGlb("/m.stl");
+    expect(fetchFn.mock.calls[0]![0]).toBe("/api/model.glb?path=%2Fm.stl");
   });
 
   // The pixel field has three states on the wire, and `null` is the one that

@@ -20,7 +20,7 @@ export class MeshLru<T> {
   private waiters: (() => void)[] = [];
 
   constructor(
-    private load: (path: string) => Promise<LoadedModel<T>>,
+    private load: (path: string, mtime?: number) => Promise<LoadedModel<T>>,
     private disposeFn: (object: T) => void,
     private budget: number = DEFAULT_BUDGET,
     private parseConcurrency: number = 2,
@@ -36,7 +36,10 @@ export class MeshLru<T> {
     return this.entries.has(path);
   }
 
-  async acquire(path: string): Promise<T> {
+  /** `mtime` is the version the caller's listing entry reports, read only on
+   *  the miss path — the key stays the path alone, so two callers naming
+   *  different versions share one mesh under whichever arrived first (D4). */
+  async acquire(path: string, mtime?: number): Promise<T> {
     const hit = this.entries.get(path);
     if (hit !== undefined) {
       this.entries.delete(path);
@@ -47,7 +50,7 @@ export class MeshLru<T> {
     if (pending !== undefined) return pending;
 
     const promise = this.slot(async () => {
-      const { object, bytes } = await this.load(path);
+      const { object, bytes } = await this.load(path, mtime);
       this.insert(path, object, bytes);
       return object;
     }).finally(() => this.loading.delete(path));
@@ -56,8 +59,8 @@ export class MeshLru<T> {
   }
 
   /** Hover-warm; the real use surfaces the errors this swallows. */
-  warm(path: string): void {
-    void this.acquire(path).catch(() => {});
+  warm(path: string, mtime?: number): void {
+    void this.acquire(path, mtime).catch(() => {});
   }
 
   clear(): void {

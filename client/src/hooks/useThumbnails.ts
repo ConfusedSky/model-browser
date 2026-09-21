@@ -534,7 +534,7 @@ export function useThumbnails(
                 // Nothing drives the shared renderer while a view is active.
                 await queue.whenResumed();
                 if (!alive()) return dropStale();
-                const object = await lru.acquire(entry.path);
+                const object = await lru.acquire(entry.path, entry.mtime);
                 if (!alive()) return dropStale();
                 await queue.whenResumed();
                 if (!alive()) return dropStale();
