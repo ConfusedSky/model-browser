@@ -58,12 +58,11 @@ export default function IntroBanner({
           {meaningRunnable ? SENTENCE_WITH_SEARCH : SENTENCE_PLAIN}
         </p>
         {/* One swipeable row on a phone, so the strip never buries the grid
-            it introduces; wrapped and cut at six wider, the rest one "Surprise
-            me" away. */}
+            it introduces; every chip, wrapped, wider. */}
         {meaningRunnable && (
           <div
             data-intro-chips
-            className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:[&>button:nth-of-type(n+7)]:hidden"
+            className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
           >
             {queries.map((q) => (
               <button
