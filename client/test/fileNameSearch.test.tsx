@@ -557,6 +557,39 @@ describe("file name search", () => {
     expect(labels()).toEqual(["Alpha", "Bravo", "widget.stl"]);
   });
 
+  it("Escape from its input gives the keyboard back to the tile it was opened from", async () => {
+    // The input unmounts under the keyboard, and focus left on <body> would
+    // make the next arrow key do nothing. The tile the user left, not the first.
+    tiles()[2]!.focus(); // widget.stl
+    await openFind();
+    expect(document.activeElement).toBe(findInput());
+
+    await act(async () => {
+      findInput()!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    await wait(50); // the hand-back waits a frame, for the input to go
+
+    expect(findInput()).toBeNull();
+    expect(document.activeElement).toBe(tiles()[2]);
+  });
+
+  it("ArrowDown from its input moves the keyboard onto the first tile it left standing", async () => {
+    await openFind();
+    await type(findInput()!, "ravo");
+
+    await act(async () => {
+      findInput()!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+
+    expect(document.activeElement).toBe(tiles()[0]);
+    expect(labels()).toEqual(["Bravo"]); // still narrowed: only the keyboard moved
+    expect(findInput()).not.toBeNull();
+  });
+
   it("the control survives a listing that outlives the reveal delay", async () => {
     // Unmounting it across the skeleton shifted the grid by its height and
     // re-stole focus when the new listing landed — the movement 27cb4df had

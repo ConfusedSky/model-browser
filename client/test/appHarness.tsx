@@ -113,6 +113,15 @@ export const openWith = vi.fn().mockResolvedValue(undefined);
 // default so a test that does not opt in fails loudly rather than silently
 // resolving `undefined`.
 export const similar = vi.fn();
+// The name count asked beside a meaning search. The method is optional on the
+// client, so the mock client carries it only once a cell calls
+// `offerNameProbe()` — every cell written before it existed sees no note it
+// did not choose.
+export const nameMatchCount = vi.fn();
+let nameProbeOffered = false;
+export function offerNameProbe(): void {
+  nameProbeOffered = true;
+}
 // The pose wave a plain listing fires once it has landed (pose-for-every-model
 // D3). Unlike `similar` it has a default, and the default is the answer an
 // index that is not running gives — no poses — so every test written before the
@@ -190,6 +199,9 @@ export function apiClientModule(): Record<string, unknown> {
       features = features;
       open = openApp;
       openWith = openWith;
+      get nameMatchCount(): typeof nameMatchCount | undefined {
+        return nameProbeOffered ? nameMatchCount : undefined;
+      }
     },
   };
 }
@@ -512,6 +524,8 @@ export async function unmountApp(): Promise<void> {
   // Reset on teardown, not on mount: the index's availability is read during
   // mount, so a test has to be able to configure it *before* mounting.
   indexAvailability.mockResolvedValue({ state: "absent" });
+  nameProbeOffered = false;
+  nameMatchCount.mockReset();
   // Same rule again: the state is read during mount, so a test configures it
   // before mounting and the ready default is restored on the way out.
   library.mockResolvedValue({

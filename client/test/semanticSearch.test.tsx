@@ -21,6 +21,8 @@ import {
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  nameMatchCount,
+  offerNameProbe,
   openPanel,
   pathInput,
   pressEnter,
@@ -1481,5 +1483,200 @@ describe("meaning search", () => {
       expect.any(AbortSignal),
     );
     expect(location.search).not.toContain("mode=meaning");
+  });
+});
+
+/** `n` models whose best z is `top`, each place 0.05 below the one before. */
+function scoredSet(
+  n: number,
+  top: number,
+  over: Partial<SemanticListing> = {},
+): SemanticListing {
+  const entries = Array.from({ length: n }, (_, i) =>
+    model(`Kits/g${String(i).padStart(2, "0")}.stl`),
+  );
+  return {
+    path: "/models",
+    entries,
+    poses: {},
+    scores: Object.fromEntries(
+      entries.map((e, i) => [
+        e.path,
+        { score: 0.1 - i / 1000, z: top - i / 20 },
+      ]),
+    ),
+    scope: scope(),
+    weak: false,
+    capped: false,
+    ...over,
+  };
+}
+/** A button in the results line's notes, by what it says. */
+const noteButton = (text: string): HTMLButtonElement | undefined =>
+  Array.from(container.querySelectorAll<HTMLButtonElement>("main button")).find(
+    (b) => b.textContent === text,
+  );
+
+describe("a weak set, and the names beside a meaning search", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+  async function meaningSearch(phrase: string): Promise<void> {
+    await click(modeButton("meaning")!);
+    await type(searchInput(), phrase);
+    await pressEnter(searchInput());
+    await settle();
+  }
+
+  it("says nothing stood out, shows a row of guesses, and gives the rest on asking", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(15, 2.3, { weak: true }));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    expect(resultsLabel()).toBe("No strong matches “winged demon”");
+    expect(container.textContent).toContain(
+      "Nothing stood out — here are the closest guesses.",
+    );
+    // The best twelve, in the index's order — not twelve of them.
+    expect(labels()).toEqual(
+      Array.from(
+        { length: 12 },
+        (_, i) => `g${String(i).padStart(2, "0")}.stl`,
+      ),
+    );
+
+    await click(noteButton("Show all 15")!);
+    expect(tiles()).toHaveLength(15);
+    expect(container.textContent).toContain(
+      "Nothing stood out — these are the closest guesses.",
+    );
+    expect(noteButton("Show all 15")).toBeUndefined();
+  });
+
+  it("reads a set as weak from its best z too, when the index does not flag it", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 2.3));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    expect(resultsLabel()).toBe("No strong matches “winged demon”");
+    // Nothing held back from a set that fits in the row already.
+    expect(tiles()).toHaveLength(3);
+    expect(noteButton("Show all 3")).toBeUndefined();
+  });
+
+  it("offers the same words to the names instead, which re-runs them there", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 2.3, { weak: true }));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("winged-demon.stl")],
+    });
+
+    await click(noteButton("Search names instead")!);
+    await settle();
+
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+    expect(listDir).toHaveBeenLastCalledWith(
+      "/models",
+      expect.objectContaining({ q: "winged demon" }),
+      expect.anything(),
+    );
+    expect(labels()).toEqual(["winged-demon.stl"]);
+  });
+
+  it("says how many names match beside a set that is not weak, and shows them on asking", async () => {
+    offerNameProbe();
+    nameMatchCount.mockResolvedValue(3);
+    semanticSearch.mockResolvedValue(scoredSet(3, 3.9));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    // Asked where the meaning search ran, under the name options in force.
+    expect(nameMatchCount).toHaveBeenCalledWith(
+      "/models",
+      "winged demon",
+      true,
+      expect.any(AbortSignal),
+    );
+    expect(container.textContent).toContain(
+      "3 names match “winged demon” too. Show them",
+    );
+
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("winged-demon.stl")],
+    });
+    await click(noteButton("Show them")!);
+    await settle();
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("puts the count on a weak set's own way out, instead of a second note", async () => {
+    offerNameProbe();
+    nameMatchCount.mockResolvedValue(4);
+    semanticSearch.mockResolvedValue(scoredSet(3, 2.3, { weak: true }));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    expect(noteButton("See the 4 name matches")).toBeDefined();
+    expect(noteButton("Search names instead")).toBeUndefined();
+    expect(container.textContent).not.toContain("names match");
+  });
+
+  it("says nothing about names where the client cannot count them", async () => {
+    // The harness client carries no `nameMatchCount` unless a cell offers it,
+    // so the count is refused — and a refused count says nothing.
+    semanticSearch.mockResolvedValue(scoredSet(3, 3.9));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    expect(resultsLabel()).toBe("3 closest matches “winged demon”");
+    expect(container.textContent).not.toContain("names match");
+    expect(container.textContent).not.toContain("name matches");
+  });
+
+  it("calls no result better than fair when the set's best is only middling", async () => {
+    // z 3.2 alone reads "Good"; beside a best of 3.2 it is capped, since a set
+    // whose top is middling has no good match in it to point at.
+    const MODEST = scoredSet(2, 3.2);
+    const STRONGER: SemanticListing = {
+      ...MODEST,
+      scores: {
+        [MODEST.entries[0]!.path]: { score: 0.12, z: 3.9 },
+        [MODEST.entries[1]!.path]: { score: 0.11, z: 3.2 },
+      },
+    };
+    semanticSearch.mockResolvedValueOnce(MODEST);
+    semanticSearch.mockResolvedValueOnce(STRONGER);
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    const named = (): string[] =>
+      tiles().map((t) => t.getAttribute("aria-label") ?? "");
+    expect(named()).toEqual([
+      "Kits/g00.stl — fair match",
+      "Kits/g01.stl — fair match",
+    ]);
+
+    // The control: the same z of 3.2 under a set whose best is higher.
+    await type(searchInput(), "winged demon rising");
+    await pressEnter(searchInput());
+    await settle();
+    expect(named()).toEqual([
+      "Kits/g00.stl — good match",
+      "Kits/g01.stl — good match",
+    ]);
   });
 });

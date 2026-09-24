@@ -31,6 +31,11 @@
 - Read the results line through the harness's `resultsLabel()` (`2 results “found”`, null
   over a plain listing) rather than a sentence in `container.textContent`: when the copy
   changes, a `not.toContain` on the old sentence keeps passing and asserts nothing
+- The name count beside a meaning search (`nameMatchCount`) is opt-in: the harness client
+  carries it only after `offerNameProbe()`. App wraps the client in `withLocalFramings`,
+  whose method always exists and *rejects* when the inner one is missing, so "no method"
+  reaches App as a refused count — falsify that case on the rejection path, not on App's
+  `ask === undefined` guard, which the wrapper never lets fire
 - Preference modules (`aoToggle.ts`, `lib/searchOptions.ts`) hold state in a
   module closure: `localStorage.clear()` does not reset them and tests inherit each other's
   settings. Reset via their setters in `beforeEach`, or re-import after `vi.resetModules()`
