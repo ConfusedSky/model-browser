@@ -9,17 +9,16 @@ import { LOOPBACK, libraryFor, makeFixtures, realTempDir } from "./helpers";
  * The same-origin guard once it can be told its origins (`public-deployment`
  * D3, task 7.2).
  *
- * The first block is the **byte-identical** claim, and it is tested rather than
- * re-spelt: the cells make the same requests `api.test.ts`'s `same-origin
- * guard` block makes, against an app built exactly as that one is — no origins
- * configured — so a change that widens the unconfigured guard fails here as
- * well as there. The second block is what configuring an origin adds, and the
- * cells inside it are as much about what it must *not* add.
+ * The first block pins what the guard allows with no origins configured:
+ * loopback in every spelling it accepts — the two literal addresses,
+ * `localhost` and any name under it, in any case — and nothing else. Every
+ * edge of that set has a cell here, so widening it further fails this block.
+ * The second block is what configuring an origin adds, and the cells inside it
+ * are as much about what it must *not* add.
  *
- * `/api/dir` is the route, for the byte-identical claim's sake; since
- * `listing-tree-cache` §6.9 that means the index gets probed, so `fetch` is
- * stubbed refused (absent index = the plain walk) rather than left to whatever
- * is on :8077.
+ * `/api/dir` is the route; since `listing-tree-cache` §6.9 that means the index
+ * gets probed, so `fetch` is stubbed refused (absent index = the plain walk)
+ * rather than left to whatever is on :8077.
  */
 const fx = makeFixtures();
 const cacheDir = realTempDir("mb-guard-cache-");
@@ -60,7 +59,7 @@ const configured = createApp(
 const ask = (app: typeof unconfigured, headers: Record<string, string>) =>
   app.request("/api/dir?path=/", { headers });
 
-describe("the unconfigured guard is exactly what it was", () => {
+describe("the unconfigured guard allows loopback and nothing else", () => {
   it("refuses cross-origin requests", async () => {
     const res = await ask(unconfigured, {
       ...LOOPBACK,
@@ -92,7 +91,61 @@ describe("the unconfigured guard is exactly what it was", () => {
     // Absent Origin passes by design (curl, tests, same-origin GETs); rebinding
     // without one is what the Host check catches.
     expect((await ask(unconfigured, LOOPBACK)).status).toBe(200);
+    expect((await ask(unconfigured, { host: "[::1]:3177" })).status).toBe(200);
     expect((await ask(unconfigured, {})).status).toBe(403);
+  });
+
+  it("allows a .localhost name nothing configures", async () => {
+    // The reserved TLD is loopback whatever the label, and however many: the
+    // name resolves to this machine without ever reaching DNS.
+    for (const name of ["evil.localhost:5173", "a.b.localhost:5173"]) {
+      const res = await ask(unconfigured, {
+        host: name,
+        origin: `http://${name}`,
+      });
+      expect(res.status, name).toBe(200);
+    }
+  });
+
+  it("refuses names that only look like localhost", async () => {
+    // The anchors, not the label class: `$` means the name must end at
+    // `localhost`, and reaching the word needs a dot or the start of the
+    // string before it.
+    for (const host of ["localhost.evil.com", "notlocalhost"]) {
+      const byHost = await ask(unconfigured, {
+        host,
+        origin: "http://localhost:5173",
+      });
+      expect(byHost.status, host).toBe(403);
+      expect(await byHost.json()).toEqual({ error: "forbidden host" });
+
+      const byOrigin = await ask(unconfigured, {
+        ...LOOPBACK,
+        origin: `http://${host}`,
+      });
+      expect(byOrigin.status, host).toBe(403);
+      expect(await byOrigin.json()).toEqual({ error: "forbidden origin" });
+    }
+  });
+
+  // D3, split in two so each pattern's `i` is falsifiable on its own: a proxy
+  // or a hand-written request is where mixed case comes from, since browsers
+  // lowercase the host before sending either header.
+  it("reads a mixed-case .localhost Host as loopback", async () => {
+    expect(
+      (await ask(unconfigured, { host: "Build-A.localhost:5173" })).status,
+    ).toBe(200);
+  });
+
+  it("reads a mixed-case .localhost Origin as loopback", async () => {
+    expect(
+      (
+        await ask(unconfigured, {
+          ...LOOPBACK,
+          origin: "http://Build-A.localhost:5173",
+        })
+      ).status,
+    ).toBe(200);
   });
 
   it("refuses the origin a configured deployment would allow", async () => {
@@ -146,6 +199,9 @@ describe("a configured origin", () => {
     expect(
       (await ask(configured, { ...LOOPBACK, origin: "http://localhost:5173" }))
         .status,
+    ).toBe(200);
+    expect(
+      (await ask(configured, { host: "build-a.localhost:5173" })).status,
     ).toBe(200);
   });
 

@@ -30,7 +30,16 @@ header that is not an allowed origin SHALL be refused, requests whose `Host` hea
 not an allowed host SHALL be refused, and CORS headers SHALL never be emitted. The
 listening address SHALL likewise be configured and SHALL default to loopback. Loopback
 SHALL remain allowed whatever else is configured, so that a health check or an operator's
-own request from the machine itself is not refused by the deployment it is checking. Binding
+own request from the machine itself is not refused by the deployment it is checking.
+Loopback SHALL mean the loopback addresses and the whole `.localhost` top-level domain that
+RFC 6761 §6.3 reserves for it — any name whose labels end at `localhost` — and not merely the
+bare name `localhost`, since browsers resolve such a name to this machine without a DNS
+lookup, so a deployment reached under one is being reached by the machine it runs on. A name
+that ends elsewhere SHALL NOT be loopback however it is spelt, whether it carries the word as a
+label of some other domain or merely ends in the word with no label boundary before it. Which of
+these a request names SHALL NOT depend on the case it is written in. The `.localhost` rule does
+not widen the listening address: what a deployment binds to SHALL stay an address the operating
+system itself resolves. Binding
 alone is NOT sufficient, since on a loopback deployment any page open in the user's
 browser can reach a localhost port, and on a public deployment any client anywhere can
 reach the address at all. A deployment that answers a public origin SHALL therefore
@@ -58,7 +67,20 @@ trusted user. Because no-cors subresource embeds (`<img src>`, `<script src>`) c
 
 #### Scenario: An unconfigured server is loopback-only
 - **WHEN** the server runs with no configured origin
-- **THEN** it allows exactly the loopback origins and hosts it allows today, and refuses every other
+- **THEN** it allows exactly the loopback origins and hosts — the loopback addresses and every
+  name under `.localhost` — and refuses every other
+
+#### Scenario: A name under the reserved .localhost domain is loopback
+- **WHEN** a request states a host or an origin under `.localhost` that no configuration names,
+  such as one dev build's `build-a.localhost`
+- **THEN** it is served, with no entry in the deployment's configured origins and whatever case
+  the name is written in
+
+#### Scenario: A name that only looks like loopback is refused
+- **WHEN** a request states a host or an origin that contains `localhost` without its labels
+  ending at it — a name under another domain (`localhost.evil.com`), or one that ends in the word
+  with no label boundary before it (`notlocalhost`)
+- **THEN** it is refused, as any other unconfigured public name is
 
 #### Scenario: A public deployment answers its own origin and no other
 - **WHEN** a deployment configures a public origin and a request arrives from a different public origin

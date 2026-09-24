@@ -69,6 +69,10 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   like `dev:demo` does it, same default. The posture is the reason to prefer this one
   remotely: every capability off, so no `/api/open` and no thumbnail writes from another
   machine
+- A `*.localhost` dev name (`build-a.localhost:5173`) needs **no** `origins` entry: the
+  guard counts the whole reserved TLD as loopback and Vite's `allowedHosts` admits it by
+  default. A tailnet name is routable and still needs one — which is why `dev:remote` warns
+  when the tailnet origin is absent and `dev:remote-demo` writes a copy of the configuration
 - Semantic search needs a second server, not started by `bun run dev` (its collection root
   must lie inside the library, or the index covers nothing):
   `cd <mini-classify checkout> && .venv/bin/python serve_api.py [<collection root>] --cache-dir <cache> [--no-volume] --port 8077`

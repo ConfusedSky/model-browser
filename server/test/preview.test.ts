@@ -452,4 +452,23 @@ describe("which origin the metadata advertises", () => {
     expect(answer.url).toBe("https://models.masamaeda.com/");
     expect(answer.image).toBe("https://models.masamaeda.com/og.png");
   });
+
+  it("counts a .localhost entry as loopback, leaving no origin to declare", async () => {
+    // D2: `og:url` is an address a consumer re-fetches from its own machine,
+    // where a `.localhost` name resolves to that machine — so a deployment whose
+    // only entry is one states the requesting host instead, and a `.localhost`
+    // request is told about the library like any other loopback name.
+    const answer = await ask(`/?model=${dragonPath}`, {
+      origins: ["http://x.localhost:5173"],
+      host: "build-a.localhost:5173",
+    });
+    expect(answer.url).toBe(
+      `http://build-a.localhost:5173/?model=${dragonPath}`,
+    );
+    expect(JSON.stringify(answer)).not.toContain("x.localhost");
+    expect(answer.title).toBe("Dragon Boss");
+    expect(answer.image).toContain(
+      "http://build-a.localhost:5173/api/thumb/image",
+    );
+  });
 });

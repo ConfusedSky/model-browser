@@ -1,7 +1,19 @@
 import type { MiddlewareHandler } from "hono";
 
-const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
-const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+/**
+ * What loopback means, in the two shapes a request names it. Names under
+ * `.localhost` are included because RFC 6761 §6.3 reserves that TLD to loopback
+ * and browsers resolve it there with no DNS lookup, so `build-a.localhost` is
+ * this machine and nothing else can claim it. The anchors carry the safety: `$`
+ * keeps `localhost.evil.com` out — the name must end at `localhost` — and `^`
+ * with the dot each label ends in keeps `notlocalhost` out, since the word can
+ * only be reached from the start of the string or across a dot. The `i` is
+ * because DNS names are case-insensitive.
+ */
+const LOOPBACK_ORIGIN =
+  /^https?:\/\/(([a-z0-9-]+\.)*localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const LOOPBACK_HOST =
+  /^(([a-z0-9-]+\.)*localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 
 /**
  * Loopback in the `scheme://host[:port]` spelling. Exported so the guard's rule
