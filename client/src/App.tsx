@@ -40,7 +40,6 @@ import {
   resettable,
   type FramingWrite,
   type StoredFraming,
-  LIGHTBOX_MENU_EXCLUDES,
   LIGHTBOX_PANEL_EXCLUDES,
   openEntryIn,
   openInApps,
@@ -52,7 +51,6 @@ import {
   type CommandId,
   type EntryCommand,
   type LiveFramingView,
-  type MenuItemId,
 } from "./lib/entryActions";
 import { GestureTracker } from "./lib/gesture";
 import { createHoverWarmer } from "./lib/hover";
@@ -81,7 +79,7 @@ import {
   setSearchMode,
   setSearchTuning,
   resolveTuning,
-  TUNING_DEFAULTS,
+  optionsOffDefault,
   looksLikeFileName,
   type SearchKinds,
   type SearchMode,
@@ -220,15 +218,6 @@ function carriedPreviewsFor(entries: DirEntry[]): Map<string, DirEntry[]> {
   return map;
 }
 const NO_SUBJECT: Subject = { kind: "none" };
-
-const NO_EXCLUDES: readonly MenuItemId[] = [];
-
-/** Only the lightbox withholds: the orbit overlay is the tile it covers. */
-function menuExcludes(
-  surface: "tile" | "orbit" | "lightbox",
-): readonly MenuItemId[] {
-  return surface === "lightbox" ? LIGHTBOX_MENU_EXCLUDES : NO_EXCLUDES;
-}
 
 function baseName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
@@ -459,17 +448,14 @@ export default function App() {
   findOpenRef.current = findOpen;
 
   /** **Not a viewer**: it never sets `viewer`, which the render-queue
-   *  suspension keys off (2.4). `surface` is not derivable from `viewer`
-   *  either — an orbit overlay leaves the rest of the grid right-clickable. */
+   *  suspension keys off (2.4). Raised from a tile or from the orbit overlay
+   *  over one, which is the tile it covers; the lightbox raises none — its
+   *  panel carries every command. */
   const [menu, setMenu] = useState<{
     entry: DirEntry;
     el: HTMLElement | null;
     x: number;
     y: number;
-    surface: "tile" | "orbit" | "lightbox";
-    /** Present only on the lightbox's menu, whose live session Reset framing
-     *  must move; the orbit overlay keeps the tile's queued body (6.8). */
-    live?: () => LiveFramingView | null;
   } | null>(null);
   const menuRef = useRef<typeof menu>(null);
   menuRef.current = menu;
@@ -1222,8 +1208,15 @@ export default function App() {
       // lands on and retraces the way ↑ does (retrace-placement D3). `entry`,
       // not `up`: no folder was left, so there is no child to centre.
       const base = liveView(stateRef.current);
+      // The view it lands on, options restored and all, is the one the trail
+      // filed when the listing was left.
+      const prefs =
+        otherwise.type === "clearSubject" || otherwise.type === "queryText"
+          ? otherwise.prefs
+          : undefined;
       const key = listingKey({
         ...base,
+        ...prefs,
         subject: { kind: "none" },
         model: null,
       });
@@ -1242,7 +1235,7 @@ export default function App() {
     // in-app similarity view returns where the ✕ returns. Ordinary typing
     // asserts nothing and owns no URL.
     if (value.trim() === "" && live.subject.kind !== "none") {
-      leaveSubject({ type: "queryText", text: value });
+      leaveSubject({ type: "queryText", text: value, prefs: ownPrefs() });
       return;
     }
     dispatch({ type: "queryText", text: value });
@@ -1322,6 +1315,13 @@ export default function App() {
    *  decision submit shares (R6), so the flip defers where a submit would. */
   function setMode(next: SearchMode): void {
     setSearchMode(next);
+    commit({ type: "setMode", mode: next });
+  }
+
+  /** The results line's "the other corpus" links: this search, asked of the
+   *  other corpus, and the profile's own choice left as it was — leaving the
+   *  results puts it back (`clearSubject`'s `prefs`). */
+  function switchModeOnce(next: SearchMode): void {
     commit({ type: "setMode", mode: next });
   }
 
@@ -1421,7 +1421,9 @@ export default function App() {
   // It does not stop renders already started, so it narrows that contention
   // rather than removing it.
   const searchInFlight =
-    state.inflight !== null && state.inflight.view.subject.kind !== "none";
+    state.inflight !== null &&
+    state.inflight.followUp !== true &&
+    state.inflight.view.subject.kind !== "none";
   useEffect(() => {
     if (viewer !== null || searchInFlight) queue.suspend();
     else queue.resume();
@@ -1819,23 +1821,34 @@ export default function App() {
   /** How many entries a name search would find for the meaning query on
    *  screen, asked beside it. */
   const [nameHits, setNameHits] = useState<{
-    query: string;
+    key: string;
     count: number;
   } | null>(null);
   const hitsPath = state.result?.forView.path;
+  /** The whole question — where, how names match, and what — so an answer is
+   *  never shown for another folder or another option. */
+  const hitsKey =
+    labelQuery !== null && label.meaning && hitsPath !== undefined
+      ? `${hitsPath}\u0000${live.folderMatching}\u0000${labelQuery}`
+      : null;
   useEffect(() => {
-    if (labelQuery === null || !label.meaning || hitsPath === undefined) return;
-    const ask = api.nameMatchCount;
-    if (ask === undefined) return;
+    setNameHits(null);
+    if (hitsKey === null || labelQuery === null || hitsPath === undefined)
+      return;
     const ctrl = new AbortController();
-    const query = labelQuery;
-    ask.call(api, hitsPath, query, live.folderMatching, ctrl.signal).then(
-      (count) => setNameHits({ query, count }),
-      () => {},
-    );
+    const key = hitsKey;
+    api
+      .nameMatchCount?.(hitsPath, labelQuery, live.folderMatching, ctrl.signal)
+      .then(
+        (count) => setNameHits({ key, count }),
+        () => {},
+      );
     return () => ctrl.abort();
+    // `hitsKey` carries every input the question reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, labelQuery, label.meaning, hitsPath]);
+  }, [api, hitsKey]);
+  const nameMatches =
+    nameHits !== null && nameHits.key === hitsKey ? nameHits.count : 0;
   /** The query whose weak guesses were all asked for, past the first row. */
   const [allGuessesFor, setAllGuessesFor] = useState<string | null>(null);
   const guessesCapped =
@@ -2072,31 +2085,14 @@ export default function App() {
       el: HTMLElement | null,
       at: { x: number; y: number },
     ): void => {
-      setMenu({ entry, el, x: at.x, y: at.y, surface: "tile" });
+      setMenu({ entry, el, x: at.x, y: at.y });
     },
     [],
   );
-  /** A different *surface*, not a different menu (D6) — read from `viewerRef`,
-   *  so this stays stable as a prop. */
+  /** The orbit overlay swallows `contextmenu` for the tile it sits over. */
   const onViewerEntryMenu = useCallback(
-    (
-      entry: DirEntry,
-      el: HTMLElement | null,
-      at: { x: number; y: number },
-      live?: () => LiveFramingView | null,
-    ): void => {
-      const surface =
-        viewerRef.current?.mode === "lightbox" ? "lightbox" : "orbit";
-      // Only the lightbox's menu: the overlay keeps the tile's body (6.8).
-      setMenu({
-        entry,
-        el,
-        x: at.x,
-        y: at.y,
-        surface,
-        live: surface === "lightbox" ? live : undefined,
-      });
-    },
+    (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }) =>
+      setMenu({ entry, el, x: at.x, y: at.y }),
     [],
   );
   const closeMenu = useCallback((): void => {
@@ -2108,14 +2104,6 @@ export default function App() {
       const raised = menuRef.current;
       closeMenu();
       if (raised === null) return;
-      // The LIVE body: the generic one would queue a render behind the viewer's
-      // suspension and lose to the closing persist (`resetFramingLive`). Read
-      // now rather than at raise time, so a reframe between the two is not
-      // stale.
-      if (command.id === "resetFraming" && raised.live !== undefined) {
-        resetFramingLive(raised.entry, actionHost, raised.live());
-        return;
-      }
       command.run?.(raised.entry, actionHost, raised.el);
     },
     [closeMenu, actionHost],
@@ -2124,11 +2112,7 @@ export default function App() {
    *  not offered. From the thumbs map, which is what the tile drew; a model
    *  never given one is marked at the default it is framed about. */
   const menuAxis = useMemo<OrbitAxis | null>(() => {
-    if (
-      menu === null ||
-      !orbitAxisApplies(menu.entry, menuExcludes(menu.surface))
-    )
-      return null;
+    if (menu === null || !orbitAxisApplies(menu.entry)) return null;
     return (
       thumbs.get(menu.entry.path)?.axis ??
       defaultAxisFor(formatOfEntry(menu.entry))
@@ -2151,11 +2135,7 @@ export default function App() {
    *  affordance that does nothing. From `apps`, so raising fires no request. */
   const menuOpenIn = useMemo(() => {
     if (menu === null) return null;
-    const list = openInApps(
-      menu.entry,
-      { index: state.index, apps, features },
-      menuExcludes(menu.surface),
-    );
+    const list = openInApps(menu.entry, { index: state.index, apps, features });
     return list.length === 0 ? null : list;
   }, [menu, state.index, apps, features]);
   const onChooseApp = useCallback(
@@ -2170,11 +2150,7 @@ export default function App() {
     () =>
       menu === null
         ? []
-        : commandsFor(
-            menu.entry,
-            { index: state.index, apps, features },
-            menuExcludes(menu.surface),
-          ),
+        : commandsFor(menu.entry, { index: state.index, apps, features }),
     [menu, state.index, apps, features],
   );
 
@@ -2448,37 +2424,31 @@ export default function App() {
                     {guessesCapped && " · "}
                     <button
                       type="button"
-                      onClick={() => setMode("name")}
+                      onClick={() => switchModeOnce("name")}
                       className={NOTE_ACTION_CLASS}
                     >
-                      {nameHits !== null &&
-                      nameHits.query === labelQuery &&
-                      nameHits.count > 0
-                        ? `See the ${nameHits.count} name ${nameHits.count === 1 ? "match" : "matches"}`
+                      {nameMatches > 0
+                        ? `See the ${nameMatches} name ${nameMatches === 1 ? "match" : "matches"}`
                         : "Search names instead"}
                     </button>
                   </>
                 ),
                 // Asked beside every meaning search: a model's own name is
                 // never lost among guesses.
-                label.meaning &&
-                  !weakSet &&
-                  nameHits !== null &&
-                  nameHits.query === labelQuery &&
-                  nameHits.count > 0 && (
-                    <>
-                      {nameHits.count}{" "}
-                      {nameHits.count === 1 ? "name matches" : "names match"} “
-                      {labelQuery}” too.{" "}
-                      <button
-                        type="button"
-                        onClick={() => setMode("name")}
-                        className={NOTE_ACTION_CLASS}
-                      >
-                        Show them
-                      </button>
-                    </>
-                  ),
+                label.meaning && !weakSet && nameMatches > 0 && (
+                  <>
+                    {nameMatches}{" "}
+                    {nameMatches === 1 ? "name matches" : "names match"} “
+                    {labelQuery}” too.{" "}
+                    <button
+                      type="button"
+                      onClick={() => switchModeOnce("name")}
+                      className={NOTE_ACTION_CLASS}
+                    >
+                      Show them
+                    </button>
+                  </>
+                ),
                 // Not the ranking's horizon but the index's own ceiling (D2).
                 label.capped &&
                   "The index returned fewer than asked for — its cap.",
@@ -2487,7 +2457,7 @@ export default function App() {
                     Searched file names — “{labelQuery}” looks like one.{" "}
                     <button
                       type="button"
-                      onClick={() => setMode("meaning")}
+                      onClick={() => switchModeOnce("meaning")}
                       className={NOTE_ACTION_CLASS}
                     >
                       Search by meaning instead
@@ -2510,7 +2480,14 @@ export default function App() {
   /** Always present, so the grid starts at the same height in every state, the
    *  skeleton included. Opposite ends, so a long query cannot push the caveat
    *  off screen. */
-  const noticeBar = (summary: string, caveat: string, stale = false) => (
+  const noticeBar = (
+    summary: string,
+    caveat: string,
+    stale = false,
+    /** Off over the skeleton: the renders it would count belong to the
+     *  listing that just left. */
+    status = true,
+  ) => (
     <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pt-3 pb-1 text-[13px]">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {resultsHead !== null ? (
@@ -2540,7 +2517,7 @@ export default function App() {
             onClick={() => {
               // The button unmounts with the results it leaves.
               arrivalFocusRef.current = {};
-              leaveSubject({ type: "clearSubject" });
+              leaveSubject({ type: "clearSubject", prefs: ownPrefs() });
             }}
             // One sentence for both destinations: where it lands is the entry's
             // provenance, and reading `history.state` during a render would
@@ -2557,7 +2534,7 @@ export default function App() {
           it will restart. The whole of §5.2's affordance — not a panel, an
           overlay or a spinner, but the same weight as the notes below. On a
           phone it takes its own line rather than crowd the count. */}
-      {stale ? (
+      {!status ? null : stale ? (
         <p
           aria-live="polite"
           className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
@@ -2687,13 +2664,11 @@ export default function App() {
 
   /** Any search option off its default — name or meaning — marked on the
    *  button that opens them. */
-  const optionsChanged =
-    !live.folderMatching ||
-    live.kinds !== "both" ||
-    live.tuning.raw !== TUNING_DEFAULTS.raw ||
-    live.tuning.pool !== TUNING_DEFAULTS.pool ||
-    live.tuning.top !== TUNING_DEFAULTS.top ||
-    live.tuning.minScore !== TUNING_DEFAULTS.minScore;
+  const optionsChanged = optionsOffDefault(
+    live.folderMatching,
+    live.kinds,
+    live.tuning,
+  );
 
   /** Meaning is offered where it can run, and shown wherever it is in force:
    *  a link can put the app in meaning mode on a machine with no index, and a
@@ -2759,6 +2734,7 @@ export default function App() {
             type="button"
             onClick={() => navigate("/")}
             title="Library top"
+            aria-label="Model Browser — library top"
             className="flex shrink-0 items-center gap-2 rounded-md py-1 pr-1.5 pl-1 text-ink hover:bg-surface touch:py-2"
           >
             <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-ink">
@@ -2861,6 +2837,7 @@ export default function App() {
                 type="button"
                 onClick={() => runQuery(pickExample(EXAMPLE_QUERIES))}
                 title="Run an example search"
+                aria-label="Surprise me"
                 className="hidden h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink sm:flex"
               >
                 <Icon name="dice" />
@@ -2872,6 +2849,7 @@ export default function App() {
             {introOffered && (
               <a
                 href={ABOUT_URL}
+                aria-label="About"
                 className="flex h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink touch:h-11"
               >
                 <Icon name="info" />
@@ -3079,7 +3057,7 @@ export default function App() {
                   onDown={focusFirstTile}
                 />
               )}
-              {noticeBar("", "")}
+              {noticeBar("", "", false, false)}
               <SkeletonGrid size={tileSize} />
             </>
           ) : (

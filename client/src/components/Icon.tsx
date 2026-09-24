@@ -7,9 +7,6 @@ const PATHS = {
   arrowLeft: "M19 12H5M12 19l-7-7 7-7",
   archive: "M3 4h18v4H3zM5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4",
   box: "M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8",
-  check: "M5 12l5 5L20 7",
-  chevronDown: "M6 9l6 6 6-6",
-  chevronLeft: "M15 18l-6-6 6-6",
   chevronRight: "M9 18l6-6-6-6",
   copy: "M9 9h11v11H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",
   cornerUp: "M14 9l-5-5-5 5M20 20h-7a4 4 0 0 1-4-4V4",
@@ -25,7 +22,6 @@ const PATHS = {
   layers: "M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5",
   maximize:
     "M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3",
-  message: "M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   refresh: "M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5",
   rotate: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5",

@@ -718,26 +718,13 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
 ];
 
 /**
- * The per-*surface* axis of the table above, as a call-site filter so no row has
- * to know where it is rendered (D6). *Re-render* goes because its render waits
- * on `queue.whenResumed()` while the open view holds the suspension (D2/D3);
- * *reset framing* is rerouted to `resetFramingLive` rather than withheld.
- *
- * **The orbit overlay must not be filtered by this list**: filtering it gives a
- * right-click within a second of an orbit the three-item lightbox menu.
- */
-export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
-  "open",
-  "reRenderThumbnail",
-  "orbitAxis",
-];
-
-// Neither list names the container rows: the lightbox only opens a model.
-
-/**
- * Deliberately not the menu's list on the same surface: the panel already shows
- * the path it would copy. The launch rows are deliberately *absent* from this
- * list (L10) — a one-shot launch changes nothing in this view.
+ * The per-*surface* axis of the table above, as a call-site filter so no row
+ * has to know where it is rendered (D6): the lightbox panel's rows. The panel
+ * already shows the path it would copy; *re-render* waits on
+ * `queue.whenResumed()` while the open view holds the suspension (D2/D3). The
+ * launch rows are deliberately *absent* from this list (L10) — a one-shot
+ * launch changes nothing in this view. It names no container rows: the
+ * lightbox only opens a model.
  */
 export const LIGHTBOX_PANEL_EXCLUDES: readonly MenuItemId[] = [
   "open",

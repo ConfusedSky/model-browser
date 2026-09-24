@@ -32,7 +32,19 @@ export default function PathBar({ path, api, onNavigate }: Props) {
   useLayoutEffect(() => {
     const ol = olRef.current;
     if (ol === null || fold >= MAX_FOLD) return;
-    if (ol.scrollWidth > ol.clientWidth + 1) setFold(fold + 1);
+    if (fold < 2) {
+      if (ol.scrollWidth > ol.clientWidth + 1) setFold(fold + 1);
+      return;
+    }
+    // At the second fold the current name may give way, but only down to a
+    // readable width — or its own, if shorter; squeezed past that, the top
+    // folds too.
+    const label = ol.querySelector<HTMLElement>("[data-crumb-current]");
+    if (
+      label !== null &&
+      label.clientWidth + 1 < Math.min(READABLE_PX, label.scrollWidth)
+    )
+      setFold(fold + 1);
   });
   useEffect(() => {
     const row = rowRef.current;
@@ -146,14 +158,11 @@ export default function PathBar({ path, api, onNavigate }: Props) {
                 <li
                   key={c === null ? "gap" : c.path}
                   // Whole crumbs while folding can still make room; from the
-                  // second fold the current folder gives way too, down to a
-                  // readable width, and past that the top folds as well.
+                  // second fold the current name gives way to the room left.
                   className={
-                    !last || fold < 2
-                      ? "flex shrink-0 items-center"
-                      : fold === MAX_FOLD
-                        ? "flex min-w-0 shrink items-center"
-                        : "flex min-w-40 shrink items-center"
+                    last && fold >= 2
+                      ? "flex min-w-0 shrink items-center"
+                      : "flex shrink-0 items-center"
                   }
                 >
                   {i > 0 && (
@@ -189,6 +198,7 @@ export default function PathBar({ path, api, onNavigate }: Props) {
                         <Icon name="home" className="size-3.5" />
                       )}
                       <span
+                        data-crumb-current={last ? "" : undefined}
                         className={
                           c.path === "/"
                             ? "hidden truncate sm:inline"
@@ -248,6 +258,9 @@ export function crumbsOf(path: string): { label: string; path: string }[] {
 }
 
 const MAX_FOLD = 3;
+/** How narrow the current folder's name may be squeezed before the top folds
+ *  away to give it room. */
+const READABLE_PX = 160;
 
 /** The crumbs at a fold level: 0 all of them, 1 the top, "…" and the last two,
  *  2 the top, "…" and the current folder, 3 "…" and the current folder (the

@@ -215,3 +215,20 @@ export function looksLikeFileName(text: string): boolean {
   const t = text.trim();
   return t.length >= 3 && !/\s/.test(t) && /[_\-.0-9]/.test(t);
 }
+
+/** Any search option off its default — what the Options dot marks, in the
+ *  toolbar and on the panel's own tab alike. */
+export function optionsOffDefault(
+  folderMatching: boolean,
+  kinds: SearchKinds,
+  tuning: Tuning,
+): boolean {
+  return (
+    !folderMatching ||
+    kinds !== "both" ||
+    tuning.raw !== TUNING_DEFAULTS.raw ||
+    tuning.pool !== TUNING_DEFAULTS.pool ||
+    tuning.top !== TUNING_DEFAULTS.top ||
+    tuning.minScore !== TUNING_DEFAULTS.minScore
+  );
+}

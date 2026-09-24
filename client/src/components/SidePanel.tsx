@@ -7,7 +7,12 @@ import {
 } from "../../../shared/types";
 import type { JobOperation } from "../jobs/bulkJobs";
 import type { SearchKinds, SearchMode, Tuning } from "../lib/searchOptions";
-import { clampCount, POOLS, TUNING_DEFAULTS } from "../lib/searchOptions";
+import {
+  clampCount,
+  optionsOffDefault,
+  POOLS,
+  TUNING_DEFAULTS,
+} from "../lib/searchOptions";
 import { stored } from "../lib/stored";
 import { meaningRunnableAt } from "../state/selectors";
 import Icon from "./Icon";
@@ -342,7 +347,7 @@ export default function SidePanel({
   }, [showLibrary, countFn, recountKey]);
 
   // Answers "why are my results strange?" without opening the panel (D5).
-  const nonDefault = !folderMatching || kinds !== "both";
+  const nonDefault = optionsOffDefault(folderMatching, kinds, tuning);
 
   // Ready is necessary and not sufficient: the index covers one collection and
   // no archive interiors. The shared rule, not a copy — two affordances over

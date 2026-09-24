@@ -142,6 +142,8 @@ export default function EntryMenu({
     const el = ref.current;
     if (el === null) return;
     setFocused(0);
+    // Raised afresh, perhaps by the pointer this time: asked again below.
+    shownRef.current = null;
     const r = el.getBoundingClientRect();
     setPos(
       clampToViewport(

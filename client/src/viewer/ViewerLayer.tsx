@@ -100,15 +100,14 @@ interface Props {
   onDismiss: () => void;
   onPersist: (session: ViewerSession) => Promise<void>;
   onLoadError: (message: string) => void;
-  /** Both modes report it, because both swallow `contextmenu` — the orbit
-   *  overlay sits over the very tile whose handler would otherwise see the
-   *  press, and keeps sitting there through the persist hold. */
+  /** The orbit overlay reports it, because it swallows `contextmenu` for the
+   *  very tile whose handler would otherwise see the press, and keeps sitting
+   *  there through the persist hold. The lightbox raises no menu: its panel
+   *  carries every command. */
   onEntryMenu: (
     entry: DirEntry,
     el: HTMLElement | null,
     at: { x: number; y: number },
-    /** Read at press time; the session is private to this component. */
-    live?: () => LiveFramingView | null,
   ) => void;
   /** A ref, not a value: a changing prop would re-run the focus-trap effect
    *  below and pull focus out of the menu it just raised. */
@@ -630,12 +629,10 @@ export default function ViewerLayer({
       return;
     }
     e.preventDefault();
-    onEntryMenu(
-      viewer.entry,
-      containerRef.current,
-      { x: e.clientX, y: e.clientY },
-      liveFramingView,
-    );
+    onEntryMenu(viewer.entry, containerRef.current, {
+      x: e.clientX,
+      y: e.clientY,
+    });
   }
 
   useEffect(() => () => clearTimeout(copyTimerRef.current), []);

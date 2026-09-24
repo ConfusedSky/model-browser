@@ -14,6 +14,7 @@ import {
   click,
   container,
   dir,
+  dismissButton,
   getThumb,
   indexAvailability,
   labels,
@@ -1517,6 +1518,42 @@ const noteButton = (text: string): HTMLButtonElement | undefined =>
   Array.from(container.querySelectorAll<HTMLButtonElement>("main button")).find(
     (b) => b.textContent === text,
   );
+
+describe("a file name asked of the names", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("is that one search: leaving it puts the profile's meaning mode back for the next phrase", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("meaning")!);
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("abc_1.stl")],
+    });
+    await type(searchInput(), "abc_1");
+    await pressEnter(searchInput());
+    await settle();
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+
+    await click(dismissButton()!);
+    await settle();
+    expect(modeButton("meaning")!.getAttribute("aria-pressed")).toBe("true");
+
+    semanticSearch.mockClear();
+    await type(searchInput(), "a stone golem");
+    await pressEnter(searchInput());
+    await settle();
+    expect(semanticSearch).toHaveBeenCalledTimes(1);
+    expect(semanticSearch.mock.calls[0]![0]).toBe("a stone golem");
+  });
+});
 
 describe("a weak set, and the names beside a meaning search", () => {
   beforeEach(() => {
