@@ -208,3 +208,10 @@ export function setSearchKinds(value: SearchKinds): void {
   kinds = value;
   kindsStore.write(value);
 }
+
+/** One token with a file name's marks — a `_`, `-` or `.`, or a digit — and no
+ *  spaces: typed into meaning search it matches nothing it names. */
+export function looksLikeFileName(text: string): boolean {
+  const t = text.trim();
+  return t.length >= 3 && !/\s/.test(t) && /[_\-.0-9]/.test(t);
+}

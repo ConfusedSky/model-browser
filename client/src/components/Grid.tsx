@@ -108,6 +108,8 @@ interface Props {
   size?: TileSize;
   /** The raw score pair on each result, rather than the strength alone. */
   showScores?: boolean;
+  /** The set's best is middling; strength words stop at "Fair". */
+  modestSet?: boolean;
 }
 
 function menuAt(
@@ -143,6 +145,7 @@ function Grid({
   scrollRoot,
   size = "m",
   showScores = false,
+  modestSet = false,
 }: Props) {
   const gridRef = useRef<HTMLDivElement>(null);
   /** Each observed tile's last record from each observer. A tile heard by one
@@ -357,6 +360,7 @@ function Grid({
             score={scoreScale === null ? undefined : scoreFor(entry.path)}
             scale={scoreScale}
             showScores={showScores}
+            modest={modestSet}
           />
         );
       })}
@@ -381,14 +385,19 @@ function ParentLine({ name }: { name: string }) {
   const slash = name.lastIndexOf("/");
   if (slash <= 0) return null;
   const inArchive = name.includes("!/");
-  const parts = name
-    .slice(0, slash)
-    .replace(/!(?=\/|$)/g, "")
-    .split("/");
-  const last = parts[parts.length - 1]!;
-  const head = parts.slice(0, -1).join("/");
-  // The nearest folder is what tells twins apart, so it is the part kept
-  // whole and the rest gives way from its end; an archive says it is one.
+  const raw = name.slice(0, slash).split("/");
+  // Inside an archive the archive is what tells the copy apart from its
+  // extracted twin, so its name is the part kept whole.
+  const zipAt = raw.findIndex((p) => p.endsWith("!"));
+  const keep = inArchive && zipAt >= 0 ? zipAt : raw.length - 1;
+  const clean = raw.map((p) => p.replace(/!$/, ""));
+  const last =
+    keep === raw.length - 1
+      ? clean[keep]!
+      : `${clean[keep]} › ${clean[clean.length - 1]}`;
+  const head = clean.slice(0, keep).join("/");
+  // Otherwise the nearest folder is kept whole, and the rest gives way from
+  // its end.
   return (
     <span
       data-tile-parent
@@ -478,10 +487,11 @@ function ThumbView({
   if (thumb?.status === "error") {
     return (
       <span
-        className="flex flex-col items-center gap-1 text-danger/80"
+        className="flex flex-col items-center gap-1.5 text-ink-3"
         title="Failed to load model"
       >
-        <Icon name="warning" className="size-6" strokeWidth={1.5} />
+        <Icon name="warning" className="size-5" strokeWidth={1.5} />
+        <span className="text-xs">Couldn't render</span>
       </span>
     );
   }
@@ -596,6 +606,7 @@ interface TileProps {
   score: IndexScore | undefined;
   scale: ScoreScale | null;
   showScores: boolean;
+  modest: boolean;
   /** The map's own array (see `Grid`), so compared by identity. */
   preview: DirEntry[] | undefined;
   /** Rebuilt every render, so `tilePropsEqual` compares it elementwise. */
@@ -638,6 +649,7 @@ const Tile = memo(function Tile({
   score,
   scale,
   showScores,
+  modest,
   preview,
   previewThumbs,
 }: TileProps) {
@@ -685,7 +697,7 @@ const Tile = memo(function Tile({
         const r = e.currentTarget.getBoundingClientRect();
         onEntryMenu(entry, tile, { x: r.left, y: r.bottom + 4 });
       }}
-      className="absolute top-1.5 right-1.5 z-tile-badge flex size-8 items-center touch:size-10 justify-center rounded-md bg-canvas/80 text-ink-2 opacity-0 ring-1 ring-line-strong backdrop-blur-sm transition-opacity group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 hover:text-ink [@media(hover:none)]:opacity-100"
+      className="absolute top-1.5 right-1.5 z-tile-badge flex size-8 items-center touch:size-10 justify-center rounded-md bg-black/45 text-ink-2 opacity-0 ring-1 ring-white/10 backdrop-blur-sm transition-opacity group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 hover:text-ink [@media(hover:none)]:opacity-100"
     >
       <Icon name="more" className="size-4" strokeWidth={2.5} />
     </button>
@@ -803,7 +815,7 @@ const Tile = memo(function Tile({
         title={
           badges === null
             ? entry.name
-            : `${entry.name}\n${strengthOf(badges.score.z)} match`
+            : `${entry.name}\n${strengthOf(badges.score.z, modest)} match`
         }
         // An accessible name *replaces* the contents rather than joining them, so
         // the full path, the anchor and the badge numbers are only announced if
@@ -817,7 +829,7 @@ const Tile = memo(function Tile({
             ? ""
             : showScores
               ? ` — ${SCALE_SPOKEN[badges.scale]} ${formatCosine(badges.score.score)}, ${Z_LABEL} ${formatZ(badges.score.z)}`
-              : ` — ${strengthOf(badges.score.z).toLowerCase()} match`)
+              : ` — ${strengthOf(badges.score.z, modest).toLowerCase()} match`)
         }
         className={`${base} cursor-grab touch-none select-none active:cursor-grabbing ${markClass} ${anchorClass}`}
         onPointerDown={(e) => onModelPointerDown(e, entry, e.currentTarget)}

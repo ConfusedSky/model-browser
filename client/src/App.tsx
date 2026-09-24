@@ -81,6 +81,8 @@ import {
   setSearchMode,
   setSearchTuning,
   resolveTuning,
+  TUNING_DEFAULTS,
+  looksLikeFileName,
   type SearchKinds,
   type SearchMode,
   type Tuning,
@@ -145,7 +147,7 @@ import {
 } from "./three/models";
 import { POSE_VERSION } from "./three/pose";
 import { RenderQueue, type Band } from "./three/queue";
-import { RIG_VERSION, THUMB_LIGHTING } from "./three/renderer";
+import { RIG_VERSION, THUMB_LIGHTING, onContextLost } from "./three/renderer";
 import ViewerLayer, { type ViewerState } from "./viewer/ViewerLayer";
 import { aoEnabled, setAoEnabled } from "./viewer/aoToggle";
 import type { ViewerSession } from "./viewer/session";
@@ -186,13 +188,12 @@ const NO_PREVIEW: DirEntry[] = [];
  *  2.4 — so this catches most nonsense and a few vague phrases, never a
  *  strong one. */
 const WEAK_TOP_Z = 2.5;
-
-/** One token with a file name's marks — a `_`, `-` or `.`, or a digit — and no
- *  spaces: typed into meaning search it matches nothing it names. */
-function looksLikeFileName(text: string): boolean {
-  const t = text.trim();
-  return t.length >= 3 && !/\s/.test(t) && /[_\-.0-9]/.test(t);
-}
+/** Below this top z no result in the set is called better than "Fair". */
+const STRONG_TOP_Z = 3.5;
+/** How many guesses a weak set shows before "Show all". */
+const WEAK_SHOWN = 12;
+const NOTE_ACTION_CLASS =
+  "font-medium text-accent underline-offset-2 hover:underline touch:py-2";
 
 const TILE_SIZES = ["s", "m", "l"] as const;
 const TILE_SIZE_NAME: Record<TileSize, string> = {
@@ -635,6 +636,12 @@ export default function App() {
   const [panelOpen, setPanelOpen] = useState(() => !collapseStore.read());
   const panelToggleRef = useRef<HTMLButtonElement>(null);
   const [showScores, setShowScores] = useState(() => showScoresStore.read());
+  /** The GPU context is gone: nothing more will draw until it comes back. */
+  const [glLost, setGlLost] = useState(false);
+  useEffect(() => onContextLost(setGlLost), []);
+  /** A visitor who has searched has met the app: the introduction does not
+   *  come back when they leave the results, for the rest of this page. */
+  const [searchedOnce, setSearchedOnce] = useState(false);
   /** The query last sent to the names because it looked like a file name. */
   const [autoNamed, setAutoNamed] = useState<string | null>(null);
   const [tileSize, setTileSize] = useState<TileSize>(() =>
@@ -1274,7 +1281,12 @@ export default function App() {
     if (main !== null) tilesIn(main)[0]?.focus();
   }
 
+  /** The tile the keyboard was on when Narrow opened, to come back to. */
+  const findFromRef = useRef<string | null>(null);
   function openFind(): void {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.dataset.entryTile !== undefined)
+      findFromRef.current = active.dataset.entryTile;
     setFindOpen(true);
     setFindFocus((n) => n + 1);
   }
@@ -1282,10 +1294,20 @@ export default function App() {
   /** A closed control must never leave the grid silently narrowed. */
   function closeFind(): void {
     const fromBar = document.activeElement?.closest("[data-find-bar]") != null;
+    const back = findFromRef.current;
+    findFromRef.current = null;
     setFindOpen(false);
     setFindText("");
-    // The bar's input is about to unmount under the keyboard.
-    if (fromBar) requestAnimationFrame(focusFirstTile);
+    // The bar's input is about to unmount under the keyboard: back to the
+    // tile it was raised from, if it is still there.
+    if (fromBar)
+      requestAnimationFrame(() => {
+        const main = mainRef.current;
+        const tile =
+          main !== null && back !== null ? findTile(main, back) : null;
+        if (tile !== null) tile.focus();
+        else focusFirstTile();
+      });
   }
 
   /** Decides what the *server* returns, so a committed query is re-issued (D3).
@@ -1307,6 +1329,7 @@ export default function App() {
    *  *is* the visitor choosing meaning mode; `commit` and not `dispatch`, so
    *  Back from the results returns to the view it was clicked from (D4). */
   function runQuery(text: string): void {
+    setSearchedOnce(true);
     setSearchMode("meaning");
     commit({ type: "runQuery", text, mode: "meaning" });
   }
@@ -1361,6 +1384,7 @@ export default function App() {
   function submitSearch(): void {
     const text = state.drafts.queryText.trim();
     if (text === "") return;
+    setSearchedOnce(true);
     // Asked of the names for this one search, and said so over the results,
     // with the way back to meaning one click away.
     if (live.mode === "meaning" && looksLikeFileName(text)) {
@@ -1384,10 +1408,16 @@ export default function App() {
   // One renderer, one purpose at a time (D2/D3). Keyed off `viewer` — what is
   // mounted — never off `view.model`, which disagrees with it for the whole
   // teardown (R7).
+  //
+  // A search in flight holds the queue too: the index shares the GPU and the
+  // page's main thread with the renders, and thumbnails for the view being
+  // replaced were slowing the answer that replaces it.
+  const searchInFlight =
+    state.inflight !== null && state.inflight.view.subject.kind !== "none";
   useEffect(() => {
-    if (viewer !== null) queue.suspend();
+    if (viewer !== null || searchInFlight) queue.suspend();
     else queue.resume();
-  }, [viewer, queue]);
+  }, [viewer, searchInFlight, queue]);
 
   // A separate service that may start after this app did, so it is re-read on
   // the interactions the app already makes rather than on a timer (3.8).
@@ -1743,21 +1773,74 @@ export default function App() {
   const kept = useMemo(() => {
     const k = byKind(state);
     const v = state.result?.forView;
-    // A flat view is asked for to see the models; the folders it also lists
-    // are a way onward, so they go after rather than burying the first model.
-    if (v === undefined || !v.flat || v.subject.kind !== "none") return k;
+    // A flat view or a name search is asked for to find models; the folders
+    // they also list are a way onward, so they go after rather than burying
+    // the first model. A meaning search keeps its ranking.
+    if (v === undefined) return k;
+    const meaning =
+      state.result?.scope !== undefined && state.result.scope !== null;
+    const flatPlain = v.flat && v.subject.kind === "none";
+    const byName = v.subject.kind === "query" && !meaning;
+    if (!flatPlain && !byName) return k;
     return [
       ...k.filter((e) => e.kind === "model"),
       ...k.filter((e) => e.kind !== "model"),
     ];
   }, [state.result]);
-  const filteredListing = useMemo(
-    () =>
+  /** The strongest z among the results. The index's own `weak` flag misses
+   *  some phrases that match nothing, and a top this low reads as a guess
+   *  whatever the flag says. */
+  const topZ = useMemo(() => {
+    let top = Number.NEGATIVE_INFINITY;
+    if (label.meaning)
+      for (const e of kept) {
+        const z = scoreFor(e.path)?.z;
+        if (z !== undefined && z > top) top = z;
+      }
+    return top;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kept, label.meaning, scoreFor]);
+  const weakSet =
+    labelQuery !== null &&
+    label.meaning &&
+    (label.weak || (Number.isFinite(topZ) && topZ < WEAK_TOP_Z));
+  /** A set whose best is only middling: its words stop at "Fair", so a guess
+   *  is never called a good match. */
+  const modestSet =
+    label.meaning && Number.isFinite(topZ) && topZ < STRONG_TOP_Z;
+  /** How many entries a name search would find for the meaning query on
+   *  screen, asked beside it. */
+  const [nameHits, setNameHits] = useState<{
+    query: string;
+    count: number;
+  } | null>(null);
+  const hitsPath = state.result?.forView.path;
+  useEffect(() => {
+    if (labelQuery === null || !label.meaning || hitsPath === undefined) return;
+    const ask = api.nameMatchCount;
+    if (ask === undefined) return;
+    const ctrl = new AbortController();
+    const query = labelQuery;
+    ask.call(api, hitsPath, query, live.folderMatching, ctrl.signal).then(
+      (count) => setNameHits({ query, count }),
+      () => {},
+    );
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, labelQuery, label.meaning, hitsPath]);
+  /** The query whose weak guesses were all asked for, past the first row. */
+  const [allGuessesFor, setAllGuessesFor] = useState<string | null>(null);
+  const guessesCapped =
+    weakSet && allGuessesFor !== labelQuery && kept.length > WEAK_SHOWN;
+
+  const filteredListing = useMemo(() => {
+    const narrowed =
       needle === ""
         ? kept
-        : kept.filter((e) => e.name.toLowerCase().includes(needle)),
-    [kept, needle],
-  );
+        : kept.filter((e) => e.name.toLowerCase().includes(needle));
+    // A weak set is a row of guesses, not a page of them, until asked.
+    return guessesCapped ? narrowed.slice(0, WEAK_SHOWN) : narrowed;
+  }, [kept, needle, guessesCapped]);
   // Prepended here and nowhere earlier, so it is shown and never counted —
   // **exempt from the find filter** too, or the neighbours have nothing to say
   // what they are near.
@@ -2305,17 +2388,6 @@ export default function App() {
     [commit],
   );
 
-  /** The strongest z among the results. The index's own `weak` flag misses
-   *  some phrases that match nothing, and a top this low reads as a guess
-   *  whatever the flag says. */
-  let topZ = Number.NEGATIVE_INFINITY;
-  if (label.meaning)
-    for (const e of kept) {
-      const z = scoreFor(e.path)?.z;
-      if (z !== undefined && z > topZ) topZ = z;
-    }
-  const weakSet = label.weak || (Number.isFinite(topZ) && topZ < WEAK_TOP_Z);
-
   /**
    * The results line: the count first, so a narrow screen truncates the query
    * rather than the number, then the query as a chip, then whatever qualifies
@@ -2333,23 +2405,72 @@ export default function App() {
       ? {
           count: searchHasNoMatches
             ? "No matches"
-            : label.meaning
-              ? // A different act from the index's ceiling, in different
-                // words (D9). Gated on *both* bounds being in force: floorless,
-                // `matched` is everything scored, and countless the short set
-                // is the cap saying so twice.
-                label.capping &&
-                label.matched !== undefined &&
-                label.matched > label.shown
-                ? `Top ${label.shown} of ${label.matched} matches`
-                : `${label.shown} closest ${label.shown === 1 ? "match" : "matches"}`
-              : `${kept.length} ${kept.length === 1 ? "result" : "results"}`,
+            : weakSet
+              ? "No strong matches"
+              : label.meaning
+                ? // A different act from the index's ceiling, in different
+                  // words (D9). Gated on *both* bounds being in force: floorless,
+                  // `matched` is everything scored, and countless the short set
+                  // is the cap saying so twice.
+                  label.capping &&
+                  label.matched !== undefined &&
+                  label.matched > label.shown
+                  ? `Top ${label.shown} of ${label.matched} matches`
+                  : `${label.shown} closest ${label.shown === 1 ? "match" : "matches"}`
+                : `${kept.length} ${kept.length === 1 ? "result" : "results"}`,
           query: labelQuery,
           icon: label.meaning ? "sparkles" : "type",
           notes: searchHasNoMatches
             ? []
             : [
-                weakSet && "Nothing stood out — these are the closest guesses.",
+                weakSet && (
+                  <>
+                    Nothing stood out —{" "}
+                    {guessesCapped ? "here are" : "these are"} the closest
+                    guesses.{" "}
+                    {guessesCapped && (
+                      <button
+                        type="button"
+                        onClick={() => setAllGuessesFor(labelQuery)}
+                        className={NOTE_ACTION_CLASS}
+                      >
+                        Show all {label.shown}
+                      </button>
+                    )}
+                    {guessesCapped && " · "}
+                    <button
+                      type="button"
+                      onClick={() => setMode("name")}
+                      className={NOTE_ACTION_CLASS}
+                    >
+                      {nameHits !== null &&
+                      nameHits.query === labelQuery &&
+                      nameHits.count > 0
+                        ? `See the ${nameHits.count} name ${nameHits.count === 1 ? "match" : "matches"}`
+                        : "Search names instead"}
+                    </button>
+                  </>
+                ),
+                // Asked beside every meaning search: a model's own name is
+                // never lost among guesses.
+                label.meaning &&
+                  !weakSet &&
+                  nameHits !== null &&
+                  nameHits.query === labelQuery &&
+                  nameHits.count > 0 && (
+                    <>
+                      {nameHits.count}{" "}
+                      {nameHits.count === 1 ? "name matches" : "names match"} “
+                      {labelQuery}” too.{" "}
+                      <button
+                        type="button"
+                        onClick={() => setMode("name")}
+                        className={NOTE_ACTION_CLASS}
+                      >
+                        Show them
+                      </button>
+                    </>
+                  ),
                 // Not the ranking's horizon but the index's own ceiling (D2).
                 label.capped &&
                   "The index returned fewer than asked for — its cap.",
@@ -2359,7 +2480,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setMode("meaning")}
-                      className="font-medium text-accent underline-offset-2 hover:underline"
+                      className={NOTE_ACTION_CLASS}
                     >
                       Search by meaning instead
                     </button>
@@ -2391,7 +2512,9 @@ export default function App() {
             </p>
             <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface py-1 pr-2.5 pl-2 text-xs text-ink-2 ring-1 ring-line">
               <Icon name={resultsHead.icon} className="size-3 text-ink-3" />
-              <span className="truncate">“{resultsHead.query}”</span>
+              <span className="min-w-[6ch] truncate">
+                “{resultsHead.query}”
+              </span>
             </span>
           </>
         ) : (
@@ -2406,7 +2529,11 @@ export default function App() {
         {dismissable && (
           <button
             type="button"
-            onClick={() => leaveSubject({ type: "clearSubject" })}
+            onClick={() => {
+              // The button unmounts with the results it leaves.
+              arrivalFocusRef.current = {};
+              leaveSubject({ type: "clearSubject" });
+            }}
             // One sentence for both destinations: where it lands is the entry's
             // provenance, and reading `history.state` during a render would
             // read it one render stale.
@@ -2417,29 +2544,35 @@ export default function App() {
             <Icon name="x" className="size-3.5" strokeWidth={2.25} />
           </button>
         )}
-        {/* The whole of §5.2's affordance: not a panel, an overlay or a
-            spinner, but the same weight as the caveat opposite. */}
-        {stale && (
-          <p aria-live="polite" className="shrink-0 text-xs text-ink-3">
-            Refreshing…
-          </p>
-        )}
       </div>
-      <div className="flex shrink-0 items-center gap-4">
-        {pendingThumbs > 0 && (
-          <p className="flex items-center gap-2 text-xs text-ink-3">
+      {/* One status at a time on the right: a refresh outranks the renders
+          it will restart. The whole of §5.2's affordance — not a panel, an
+          overlay or a spinner, but the same weight as the notes below. On a
+          phone it takes its own line rather than crowd the count. */}
+      {stale ? (
+        <p
+          aria-live="polite"
+          className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
+        >
+          Refreshing…
+        </p>
+      ) : (
+        pendingThumbs > 0 && (
+          <p className="flex shrink-0 items-center gap-2 text-xs text-ink-3 max-sm:basis-full">
             <span
               aria-hidden="true"
               className="size-3 animate-[spin_1s_linear_infinite] rounded-full border-[1.5px] border-white/10 border-t-white/50"
             />
             Rendering {pendingThumbs} thumbnail{pendingThumbs === 1 ? "" : "s"}…
           </p>
-        )}
-        {caveat !== "" && <p className="text-xs text-warn">{caveat}</p>}
-      </div>
-      {resultsHead !== null && resultsHead.notes.length > 0 && (
-        <div className="flex basis-full flex-wrap gap-x-4 text-xs text-ink-3">
-          {resultsHead.notes.map((n, i) => (
+        )
+      )}
+      {/* What qualifies the set, on its own line under it. */}
+      {(caveat !== "" ||
+        (resultsHead !== null && resultsHead.notes.length > 0)) && (
+        <div className="flex basis-full flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
+          {caveat !== "" && <p className="text-warn">{caveat}</p>}
+          {resultsHead?.notes.map((n, i) => (
             <p key={i}>{n}</p>
           ))}
         </div>
@@ -2544,6 +2677,16 @@ export default function App() {
         ? { text: error, tone: "error" }
         : null);
 
+  /** Any search option off its default — name or meaning — marked on the
+   *  button that opens them. */
+  const optionsChanged =
+    !live.folderMatching ||
+    live.kinds !== "both" ||
+    live.tuning.raw !== TUNING_DEFAULTS.raw ||
+    live.tuning.pool !== TUNING_DEFAULTS.pool ||
+    live.tuning.top !== TUNING_DEFAULTS.top ||
+    live.tuning.minScore !== TUNING_DEFAULTS.minScore;
+
   /** Meaning is offered where it can run, and shown wherever it is in force:
    *  a link can put the app in meaning mode on a machine with no index, and a
    *  mode you cannot see or leave is a trap. */
@@ -2573,7 +2716,7 @@ export default function App() {
     state.view.path === "/" &&
     state.view.subject.kind === "none" &&
     !state.view.flat;
-  const bannerDrawn = introOffered && !introDismissed && atTop;
+  const bannerDrawn = introOffered && !introDismissed && !searchedOnce && atTop;
   /** For a visitor the banner no longer reaches (D6), and withheld wherever the
    *  example as typed would fail to find what it names. */
   const placeholderExample = useCyclingPlaceholder(
@@ -2608,7 +2751,7 @@ export default function App() {
             type="button"
             onClick={() => navigate("/")}
             title="Library top"
-            className="flex shrink-0 items-center gap-2 rounded-md py-1 pr-1.5 pl-1 text-ink hover:bg-surface"
+            className="flex shrink-0 items-center gap-2 rounded-md py-1 pr-1.5 pl-1 text-ink hover:bg-surface touch:py-2"
           >
             <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-ink">
               <Icon name="box" className="size-4" strokeWidth={2} />
@@ -2619,7 +2762,7 @@ export default function App() {
           </button>
           <div
             role="search"
-            className="mx-auto flex h-10 min-w-0 max-w-2xl flex-1 items-center rounded-lg border border-line bg-surface pr-1 transition-colors focus-within:border-accent/60 focus-within:bg-raised"
+            className="mx-auto flex h-10 min-w-0 max-w-2xl flex-1 items-center rounded-lg border border-line bg-surface pr-1 transition-colors touch:h-12 focus-within:border-accent/60 focus-within:bg-raised"
           >
             <Icon
               name={live.mode === "meaning" && showMode ? "sparkles" : "search"}
@@ -2676,8 +2819,8 @@ export default function App() {
                     aria-label={m === "name" ? "Name" : "Meaning"}
                     className={
                       live.mode === m
-                        ? "flex h-7 items-center gap-1 rounded bg-raised px-2 font-medium capitalize text-ink shadow-sm ring-1 ring-line-strong touch:h-9 touch:px-3"
-                        : "flex h-7 items-center gap-1 rounded px-2 capitalize text-ink-3 hover:text-ink-2 touch:h-9 touch:px-3"
+                        ? "flex h-7 items-center gap-1 rounded bg-raised px-2 font-medium capitalize text-ink shadow-sm ring-1 ring-line-strong touch:h-10 touch:px-3"
+                        : "flex h-7 items-center gap-1 rounded px-2 capitalize text-ink-3 hover:text-ink-2 touch:h-10 touch:px-3"
                     }
                   >
                     <Icon
@@ -2699,7 +2842,7 @@ export default function App() {
                   : "Search this folder and everything below it by name — files and folders"
               }
               aria-label="Search"
-              className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-white/5 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+              className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-white/5 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent touch:size-11"
             >
               <Icon name="arrowLeft" className="size-4 rotate-180" />
             </button>
@@ -2721,7 +2864,7 @@ export default function App() {
             {introOffered && (
               <a
                 href={ABOUT_URL}
-                className="flex h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink"
+                className="flex h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink touch:h-11"
               >
                 <Icon name="info" />
                 <span className="hidden lg:inline">About</span>
@@ -2773,7 +2916,10 @@ export default function App() {
               <Icon name="layers" className="size-3.5" />
               <span className="hidden sm:inline">Flat</span>
             </button>
-            <span aria-hidden="true" className="mx-1 h-5 w-px bg-line" />
+            <span
+              aria-hidden="true"
+              className="mx-1 hidden h-5 w-px bg-line sm:block"
+            />
             <div
               role="group"
               aria-label="Tile size"
@@ -2818,7 +2964,9 @@ export default function App() {
                 setAoEnabled(!ao);
                 setAoState(!ao);
               }}
-              className="flex h-8 items-center gap-2 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink touch:h-11"
+              // On a phone the toolbar's room goes to the path; the switch
+              // lives in Options there.
+              className="hidden h-8 items-center gap-2 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink touch:h-11 sm:flex"
             >
               <span className="hidden md:inline">Occlusion</span>
               <span className="md:hidden">AO</span>
@@ -2860,7 +3008,7 @@ export default function App() {
             >
               <Icon name="sliders" className="size-3.5" />
               <span className="hidden lg:inline">Options</span>
-              {(!live.folderMatching || live.kinds !== "both") && (
+              {optionsChanged && (
                 <span
                   aria-hidden="true"
                   className="absolute top-1 right-1 size-1.5 rounded-full bg-accent"
@@ -2873,10 +3021,12 @@ export default function App() {
           <p
             role={headerMessage.tone === "error" ? "alert" : "status"}
             data-header-message={headerMessage.tone}
+            // A failure stands in the flow until it is dealt with; a brief
+            // confirmation floats over the grid instead of shifting it.
             className={
               headerMessage.tone === "error"
                 ? "border-t border-line bg-danger/10 px-4 py-1.5 text-xs text-danger"
-                : "border-t border-line bg-surface px-4 py-1.5 text-xs text-ink-2"
+                : "pointer-events-none absolute top-full left-1/2 mt-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-line-strong bg-raised px-3.5 py-1.5 text-xs whitespace-nowrap text-ink shadow-xl shadow-black/50"
             }
           >
             {headerMessage.text}
@@ -2918,6 +3068,7 @@ export default function App() {
                   focusSignal={findFocus}
                   onChange={setFindText}
                   onClose={closeFind}
+                  onDown={focusFirstTile}
                 />
               )}
               {noticeBar("", "")}
@@ -2932,6 +3083,7 @@ export default function App() {
                   focusSignal={findFocus}
                   onChange={setFindText}
                   onClose={closeFind}
+                  onDown={focusFirstTile}
                 />
               )}
               {deferredSubject.kind !== "none" && (
@@ -2993,6 +3145,7 @@ export default function App() {
                   scrollRoot={mainRef}
                   size={tileSize}
                   showScores={showScores}
+                  modestSet={modestSet}
                 />
               ) : null}
               {emptyNotice}
@@ -3007,6 +3160,11 @@ export default function App() {
           similar={liveSimilar}
           library={libraryJobs}
           onSimilarTuning={setSimilarTuning}
+          ao={ao}
+          onAo={(on) => {
+            setAoEnabled(on);
+            setAoState(on);
+          }}
           showScores={showScores}
           onShowScores={(on) => {
             setShowScores(on);
@@ -3031,6 +3189,25 @@ export default function App() {
           onKinds={setKinds}
         />
       </div>
+      {glLost && (
+        <div
+          role="alert"
+          className="fixed bottom-4 left-1/2 z-menu flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-danger/40 bg-raised px-4 py-2.5 text-[13px] text-ink shadow-2xl shadow-black/60"
+        >
+          <Icon name="warning" className="size-4 text-danger" />
+          <span>
+            Graphics stopped — the GPU dropped this page's drawing context.
+            Models and thumbnails won't draw until it is back.
+          </span>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink hover:bg-accent-hover touch:py-3"
+          >
+            Reload
+          </button>
+        </div>
+      )}
       {/* Outside the body row, so it outlives every listing navigated through
           (D2). `dismissed` hides it without cancelling anything. */}
       {job !== null && !job.dismissed && (
@@ -3074,6 +3251,7 @@ export default function App() {
           score={scoreFor(viewer.entry.path)}
           scoreScale={scoreScale}
           showScores={showScores}
+          modestSet={modestSet}
           ao={ao}
           api={api}
           lru={lru}

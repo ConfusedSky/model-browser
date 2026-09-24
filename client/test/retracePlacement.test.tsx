@@ -226,7 +226,7 @@ const showButton = (kind: string): HTMLButtonElement =>
     container.querySelectorAll<HTMLButtonElement>(
       '[role="group"][aria-label="Show"] button',
     ),
-  ).find((b) => b.textContent === kind)!;
+  ).find((b) => b.textContent?.toLowerCase() === kind)!;
 const listingRequests = (path: string): number =>
   listDir.mock.calls.filter((c) => c[0] === path).length;
 const dismiss = (): HTMLButtonElement => dismissButton()!;

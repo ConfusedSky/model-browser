@@ -85,6 +85,8 @@ interface Props {
   scoreScale: ScoreScale | null;
   /** The raw pair beside the strength word. */
   showScores?: boolean;
+  /** The set's best is middling; the strength word stops at "Fair". */
+  modestSet?: boolean;
   /** A prop, not a store read, so toggling repaints the live view. */
   ao: boolean;
   api: ApiClient;
@@ -152,6 +154,7 @@ export default function ViewerLayer({
   score,
   scoreScale,
   showScores = false,
+  modestSet = false,
   ao,
   api,
   lru,
@@ -916,11 +919,10 @@ export default function ViewerLayer({
               {baseName(viewer.entry.name)}
             </p>
             {viewer.entry.name.includes("/") && (
+              // The nearest two folders, which name the kit; the whole path
+              // is in the PATH row below.
               <p className="mt-0.5 truncate text-xs text-ink-3">
-                in{" "}
-                {viewer.entry.name
-                  .slice(0, viewer.entry.name.lastIndexOf("/"))
-                  .replace(/!$/, "")}
+                in {nearestFolders(viewer.entry.name)}
               </p>
             )}
           </div>
@@ -956,14 +958,17 @@ export default function ViewerLayer({
               <span className="text-xs font-medium tracking-wider text-ink-3 uppercase">
                 path
               </span>
+              <span role="status" className="sr-only">
+                {copied ? "Path copied." : ""}
+              </span>
               <button
                 type="button"
                 aria-label="Copy path"
                 onClick={copyPath}
                 className={
                   copied
-                    ? "h-7 rounded-md bg-accent-soft px-2.5 text-xs text-accent"
-                    : "h-7 rounded-md px-2.5 text-xs text-ink-2 ring-1 ring-line-strong hover:bg-white/5 hover:text-ink"
+                    ? "h-7 rounded-md bg-accent-soft px-2.5 text-xs text-accent touch:h-11"
+                    : "h-7 rounded-md px-2.5 text-xs text-ink-2 ring-1 ring-line-strong hover:bg-white/5 hover:text-ink touch:h-11"
                 }
               >
                 {copied ? "copied" : "copy"}
@@ -1007,7 +1012,7 @@ export default function ViewerLayer({
             {score !== undefined && scoreScale !== null && (
               <div className="flex justify-between gap-2">
                 <dt className="text-ink-3">match</dt>
-                <dd className="text-ink-2">{strengthOf(score.z)}</dd>
+                <dd className="text-ink-2">{strengthOf(score.z, modestSet)}</dd>
               </div>
             )}
             {score !== undefined && scoreScale !== null && showScores && (
@@ -1171,7 +1176,7 @@ export default function ViewerLayer({
           type="button"
           aria-label="Close"
           title="Close (Esc)"
-          className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-white/5 hover:text-ink"
+          className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-white/5 hover:text-ink touch:size-11"
           onClick={() => onCloseIntent()}
         >
           <Icon name="x" />
@@ -1179,4 +1184,14 @@ export default function ViewerLayer({
       </div>
     </div>
   );
+}
+
+/** "in Kit › Folder": the last two folders of a result's relative path, an
+ *  archive named without its `!`. */
+function nearestFolders(name: string): string {
+  const parts = name
+    .slice(0, name.lastIndexOf("/"))
+    .split("/")
+    .map((p) => p.replace(/!$/, ""));
+  return parts.slice(-2).join(" › ");
 }

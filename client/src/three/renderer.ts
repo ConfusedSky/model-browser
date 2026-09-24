@@ -50,8 +50,32 @@ export function getRenderer(): THREE.WebGLRenderer {
     renderer.setClearColor(0x000000, 0);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Optional because stand-in renderers in the suite have no canvas.
+    const canvas = renderer.domElement as HTMLCanvasElement | undefined;
+    canvas?.addEventListener("webglcontextlost", () => setContextLost(true));
+    canvas?.addEventListener("webglcontextrestored", () =>
+      setContextLost(false),
+    );
   }
   return renderer;
+}
+
+/**
+ * Whether the one renderer has lost its GPU context — a driver reset, or the
+ * GPU running out of memory. Nothing draws until it is restored, and without
+ * saying so the viewer and every waiting tile look merely slow.
+ */
+let contextLost = false;
+const contextListeners = new Set<(lost: boolean) => void>();
+function setContextLost(lost: boolean): void {
+  contextLost = lost;
+  for (const listener of contextListeners) listener(lost);
+}
+/** Calls back on every change, and returns the unsubscribe. */
+export function onContextLost(listener: (lost: boolean) => void): () => void {
+  contextListeners.add(listener);
+  if (contextLost) listener(true);
+  return () => contextListeners.delete(listener);
 }
 
 // Ambient-occlusion fit (D3), in units of the staged model's bounding-sphere

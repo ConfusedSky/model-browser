@@ -447,10 +447,10 @@ export const AXIS_CAPTION_CLASS = "px-1.5 text-ink-3";
 export const AXIS_DIVIDER_CLASS = "mx-0.5 h-4 w-px bg-line-strong";
 /** The spindle in force is the *filled* pill. */
 export const axisPillClass = (active: boolean): string =>
-  `rounded-md px-2.5 py-1.5 touch:py-2.5 ${active ? "bg-accent font-medium text-accent-ink" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
+  `rounded-md px-2.5 py-1.5 touch:px-3.5 touch:py-3.5 ${active ? "bg-accent font-medium text-accent-ink" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
 /** Neutral rather than the accent: a state, not a pick. */
 export const flipPillClass = (active: boolean): string =>
-  `rounded-md px-2.5 py-1.5 touch:py-2.5 ${active ? "bg-white/15 font-medium text-ink ring-1 ring-line-strong" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
+  `rounded-md px-2.5 py-1.5 touch:px-3.5 touch:py-3.5 ${active ? "bg-white/15 font-medium text-ink ring-1 ring-line-strong" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
 export const FLIP_TITLE = "Negate the spindle axis (+axis ↔ −axis)";
 
 /** Model-only — a container tile is a glyph with no spindle — and withheld on
@@ -689,8 +689,7 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     // Offered even on a current image: a failed one is what this exists to fix.
     // **Everything it produces is pixels** — the orientation is left as found —
     // so where the deployment would not store them the press does nothing at
-    // all, and the row goes rather than render and discard. `resetFraming`
-    // stays: giving up an orientation moves the model whoever keeps it.
+    // all, and the row goes rather than render and discard.
     applies: (entry, ctx) =>
       entry.kind === "model" && ctx.features?.thumbWrites === true,
     run: (entry, host) =>
@@ -699,7 +698,11 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
     id: "resetFraming",
     label: "Reset framing",
-    applies: (entry) => entry.kind === "model",
+    // Gated like the re-render: where the deployment keeps no framing, nothing
+    // a visitor turns outlives the viewer, so a "reset" promises a persistence
+    // the tile does not have (issue #23) — closing the view is the reset.
+    applies: (entry, ctx) =>
+      entry.kind === "model" && ctx.features?.thumbWrites === true,
     // A second command because the orientation is shared with the viewer (D7).
     run: (entry, host) =>
       refreshThumbnail(entry, host, { discardFraming: true }),

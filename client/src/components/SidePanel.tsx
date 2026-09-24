@@ -25,9 +25,11 @@ const POOL_LABEL: Record<(typeof POOLS)[number], string> = {
   softmax: "Weighted",
 };
 
+const KIND_LABEL = { both: "Both", folders: "Folders", models: "Models" };
+
 const SECTION_LABEL = "text-xs font-medium uppercase tracking-wider text-ink-3";
 const NUMBER_CLASS =
-  "w-16 rounded-md border border-line bg-surface px-2 py-1 text-ink tabular-nums outline-none focus:border-line-strong disabled:opacity-40";
+  "w-16 rounded-md border border-line bg-surface px-2 py-1 text-ink tabular-nums outline-none focus:border-line-strong disabled:opacity-40 touch:h-11";
 
 /**
  * What to say about an index that cannot serve *this path* — not the same
@@ -158,6 +160,8 @@ export default function SidePanel({
   onSimilarTuning,
   showScores,
   onShowScores,
+  ao,
+  onAo,
   open,
   onClose,
 }: {
@@ -208,6 +212,10 @@ export default function SidePanel({
   /** Absent where a caller offers no display options. */
   showScores?: boolean;
   onShowScores?: (on: boolean) => void;
+  /** The occlusion switch, repeated here for a phone's toolbar, which has no
+   *  room for it. */
+  ao?: boolean;
+  onAo?: (on: boolean) => void;
   /** Mounted while closed, so the tab and the Similar/Library lifecycles
    *  below carry on across a close. */
   open: boolean;
@@ -389,12 +397,12 @@ export default function SidePanel({
 
   const segmentClass = (on: boolean): string =>
     on
-      ? "flex-1 rounded-md bg-raised px-2 py-1 font-medium capitalize text-ink ring-1 ring-line-strong"
-      : "flex-1 rounded-md px-2 py-1 capitalize text-ink-3 hover:text-ink-2";
+      ? "flex-1 rounded-md bg-raised px-2 py-1.5 font-medium text-ink ring-1 ring-line-strong touch:py-3"
+      : "flex-1 rounded-md px-2 py-1.5 text-ink-3 hover:text-ink-2 touch:py-3";
   const boundClass = (on: boolean): string =>
     on
-      ? "rounded-md bg-accent-soft px-2.5 py-1.5 text-left font-medium text-accent disabled:cursor-default"
-      : "rounded-md px-2.5 py-1.5 text-left text-ink-3 ring-1 ring-line hover:text-ink-2";
+      ? "flex items-center gap-2 py-1.5 text-left text-ink disabled:cursor-default touch:py-3"
+      : "flex items-center gap-2 py-1.5 text-left text-ink-3 hover:text-ink-2 touch:py-3";
 
   if (!open) return null;
   return (
@@ -467,7 +475,7 @@ export default function SidePanel({
                   None yet. These options apply to the next one.
                 </p>
               ) : (
-                <p className="break-all text-[13px] text-ink">
+                <p className="text-[13px] [overflow-wrap:anywhere] text-ink">
                   Results for &ldquo;{query}&rdquo;
                 </p>
               )}
@@ -564,6 +572,7 @@ export default function SidePanel({
                       }
                       className={boundClass(tuning.top !== undefined)}
                     >
+                      <Switch on={tuning.top !== undefined} />
                       Show up to
                     </button>
                     <input
@@ -616,6 +625,7 @@ export default function SidePanel({
                       }
                       className={boundClass(tuning.minScore !== undefined)}
                     >
+                      <Switch on={tuning.minScore !== undefined} />
                       Minimum match
                     </button>
                     <input
@@ -693,7 +703,7 @@ export default function SidePanel({
                         onClick={() => onKinds(k)}
                         className={segmentClass(kinds === k)}
                       >
-                        {k}
+                        {KIND_LABEL[k]}
                       </button>
                     ))}
                   </div>
@@ -703,6 +713,24 @@ export default function SidePanel({
             {onShowScores !== undefined && (
               <section className="space-y-3 border-t border-line pt-4">
                 <h2 className={SECTION_LABEL}>Display</h2>
+                {onAo !== undefined && (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={ao === true}
+                    aria-label="Ambient occlusion switch"
+                    onClick={() => onAo(!ao)}
+                    className="flex w-full items-center justify-between gap-3 text-left text-ink-2 hover:text-ink sm:hidden"
+                  >
+                    <span>
+                      Occlusion
+                      <span className="block text-ink-3">
+                        Soft shading in creases; off turns models faster
+                      </span>
+                    </span>
+                    <Switch on={ao === true} />
+                  </button>
+                )}
                 <button
                   type="button"
                   role="switch"
@@ -774,12 +802,28 @@ export default function SidePanel({
                   the same time: two controls sharing a name are one control to
                   anything reading names. */}
             <div className="space-y-1.5">
-              <p className="text-ink-3">Pool views by</p>
+              <p className="text-ink-3">Combine each model's views by</p>
               <div
                 className="flex rounded-lg bg-sunken p-0.5"
                 role="group"
                 aria-label="Pool neighbour views by"
               >
+                {/* Absence is the index's own pooling, and naming it would
+                    guess at another process's config — so it is a choice of
+                    its own, not a row with nothing pressed. */}
+                <button
+                  type="button"
+                  data-pool=""
+                  aria-pressed={similar.pool === undefined}
+                  onClick={() => {
+                    clearTimeout(countTimerRef.current);
+                    setCountText(null);
+                    onSimilarTuning(similar.k, undefined);
+                  }}
+                  className={segmentClass(similar.pool === undefined)}
+                >
+                  Index default
+                </button>
                 {POOLS.map((p) => (
                   <button
                     key={p}
@@ -799,13 +843,6 @@ export default function SidePanel({
                   </button>
                 ))}
               </div>
-              {/* None pressed is a state: absence is the index's own pooling,
-                    and naming it would guess at another process's config. */}
-              {similar.pool === undefined && (
-                <p className="text-ink-3">
-                  Pooled however the index is configured to.
-                </p>
-              )}
             </div>
           </div>
         ) : /* The Similar branch's guard, for its reason. */

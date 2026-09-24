@@ -12,6 +12,7 @@ export default function FindBar({
   focusSignal,
   onChange,
   onClose,
+  onDown,
 }: {
   value: string;
   /** `null` while a listing is in flight, when the count would describe the
@@ -20,6 +21,8 @@ export default function FindBar({
   focusSignal: number;
   onChange: (value: string) => void;
   onClose: () => void;
+  /** ↓ leaves the box for the narrowed grid, as it does from search. */
+  onDown?: () => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
 
@@ -44,6 +47,10 @@ export default function FindBar({
           if (e.key === "Escape") {
             e.stopPropagation();
             onClose();
+          }
+          if (e.key === "ArrowDown" && onDown !== undefined) {
+            e.preventDefault();
+            onDown();
           }
         }}
         placeholder="Narrow these by name…"

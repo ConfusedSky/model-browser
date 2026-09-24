@@ -3,12 +3,12 @@
  * Mounted **outside the scroller**: inside `<main>` it would scroll away with
  * the grid, and the tiles would jump by its height when the listing landed.
  *
- * Sentence, chips and hint share one wrapping flow, the sentence and hint each
- * a full line of it; the dismiss control is the flow's sibling, not its last
- * item, so it cannot be carried onto a line of its own by the chips ahead of it. That costs
- * the row two utilities that read as one: `flex-1` is what fills the width the
- * dismiss control does not take, pinning it to the right edge, and `min-w-0`
- * lets the row shrink under its longest chip rather than push past the strip.
+ * Sentence, chips and hint stack in one column; the dismiss control is that
+ * column's sibling, not its last item, so it stays at the strip's end however
+ * the chips wrap. That costs
+ * the column two utilities that read as one: `flex-1` is what fills the width
+ * the dismiss control does not take, pinning it to the right edge, and
+ * `min-w-0` lets the chips' row scroll rather than push past the strip.
  */
 
 import Icon from "./Icon";
@@ -16,7 +16,12 @@ import Icon from "./Icon";
 /** Never glued to a `${`: Tailwind's scanner reads source text, so a computed
  *  candidate never reaches the stylesheet. */
 const CHIP_CLASS =
-  "rounded-full border border-line-strong bg-surface px-3 py-1 text-[13px] text-ink-2 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-ink touch:py-2.5";
+  "shrink-0 rounded-full border border-line-strong bg-surface px-3 py-1 text-[13px] whitespace-nowrap text-ink-2 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-ink touch:py-2.5";
+
+/** Read once: a device does not change what its pointer is mid-session. */
+const COARSE_POINTER =
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(pointer: coarse)").matches === true;
 
 /** An invitation to describe something is an offer nothing can take up once
  *  the chips are withheld. */
@@ -48,39 +53,43 @@ export default function IntroBanner({
       >
         <Icon name="sparkles" />
       </span>
-      {/* Only the first few chips are drawn — three on a phone, six wider: the
-          strip must not bury the grid it introduces, and the rest stay one
-          "Surprise me" away. */}
-      <div
-        data-intro-flow
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-2 [&>button:nth-of-type(n+4)]:hidden sm:[&>button:nth-of-type(n+4)]:inline-flex sm:[&>button:nth-of-type(n+7)]:hidden"
-      >
-        <span className="basis-full text-sm font-medium text-ink">
+      <div data-intro-flow className="min-w-0 flex-1 space-y-2.5">
+        <p className="text-sm font-medium text-ink">
           {meaningRunnable ? SENTENCE_WITH_SEARCH : SENTENCE_PLAIN}
-        </span>
-        {meaningRunnable &&
-          queries.map((q) => (
-            <button
-              key={q}
-              type="button"
-              data-example-query={q}
-              onClick={() => onRun(q)}
-              className={CHIP_CLASS}
-            >
-              {q}
-            </button>
-          ))}
-        <span className="basis-full pt-1 text-xs text-ink-3">
-          Drag any model to turn it · click it to open · right-click or ⋯ for
-          more
-        </span>
+        </p>
+        {/* One swipeable row on a phone, so the strip never buries the grid
+            it introduces; wrapped and cut at six wider, the rest one "Surprise
+            me" away. */}
+        {meaningRunnable && (
+          <div
+            data-intro-chips
+            className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:[&>button:nth-of-type(n+7)]:hidden"
+          >
+            {queries.map((q) => (
+              <button
+                key={q}
+                type="button"
+                data-example-query={q}
+                onClick={() => onRun(q)}
+                className={CHIP_CLASS}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-ink-3">
+          {COARSE_POINTER
+            ? "Drag a model to turn it · tap it to open · ⋯ for more"
+            : "Drag any model to turn it · click it to open · right-click or ⋯ for more"}
+        </p>
       </div>
       <button
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss introduction"
         title="Hide this introduction"
-        className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-surface hover:text-ink"
+        className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-surface hover:text-ink touch:size-11"
       >
         <Icon name="x" />
       </button>

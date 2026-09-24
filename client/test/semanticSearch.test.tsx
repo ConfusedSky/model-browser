@@ -1108,11 +1108,15 @@ describe("meaning search", () => {
     // focus ring left on the just-clicked button read as the selection. The
     // in-force button must carry the on-state and never the dimming, whether
     // or not it is inert.
-    expect(topBtn().classList.contains("bg-accent-soft")).toBe(true);
-    expect(topBtn().classList.contains("text-accent")).toBe(true);
+    // The on-state is the label at full strength and the switch's knob lit.
+    const knobLit = (b: HTMLButtonElement): boolean =>
+      b.querySelector("span")!.classList.contains("bg-accent");
+    expect(topBtn().classList.contains("text-ink")).toBe(true);
+    expect(knobLit(topBtn())).toBe(true);
     expect(topBtn().className).not.toContain("opacity");
-    expect(scoreBtn().classList.contains("bg-accent-soft")).toBe(false);
+    expect(scoreBtn().classList.contains("text-ink")).toBe(false);
     expect(scoreBtn().classList.contains("text-ink-3")).toBe(true);
+    expect(knobLit(scoreBtn())).toBe(false);
   });
 
   it("a typed bound reaches the URL, once, when the typing stops", async () => {

@@ -288,10 +288,11 @@ describe("file name search", () => {
     await pressEnter(searchInput());
     await settle();
 
-    expect(labels()).toEqual(["Sandy Dunes", "base.stl"]);
+    // Models lead a name search's results, then the folders.
+    expect(labels()).toEqual(["base.stl", "Sandy Dunes"]);
     expect(tiles().map((b) => b.getAttribute("title"))).toEqual([
-      "Sets/Sandy Dunes",
       "Sets/Sandy Dunes/base.stl",
+      "Sets/Sandy Dunes",
     ]);
   });
 

@@ -35,9 +35,14 @@ export const Z_LABEL = "z";
  * the collection — what a reader can act on without knowing what a cosine is.
  * The raw pair stays available behind the "Show match scores" option.
  */
-export function strengthOf(z: number): "Strong" | "Good" | "Fair" | "Weak" {
-  if (z >= 4) return "Strong";
-  if (z >= 3) return "Good";
+export function strengthOf(
+  z: number,
+  /** A set whose best is only middling: nothing in it is called better than
+   *  "Fair", so a guess never wears "good match". */
+  modest = false,
+): "Strong" | "Good" | "Fair" | "Weak" {
+  if (!modest && z >= 4) return "Strong";
+  if (!modest && z >= 3) return "Good";
   if (z >= 2) return "Fair";
   return "Weak";
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiClient } from "../api/client";
 import { getRecents } from "../lib/recents";
 import Icon from "./Icon";
@@ -19,6 +19,33 @@ export default function PathBar({ path, api, onNavigate }: Props) {
   /** Breadcrumbs stand in for the text until the input is focused. */
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  /**
+   * How far the crumbs are folded, found by measuring rather than counting:
+   * whole names first, then the middle folded to "…", then the parent too.
+   * Reset whenever the path or the room changes, and stepped up once per
+   * render while the row still overflows.
+   */
+  const [fold, setFold] = useState(0);
+  const olRef = useRef<HTMLOListElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => setFold(0), [path]);
+  useLayoutEffect(() => {
+    const ol = olRef.current;
+    if (ol === null || fold >= MAX_FOLD) return;
+    if (ol.scrollWidth > ol.clientWidth + 1) setFold(fold + 1);
+  });
+  useEffect(() => {
+    const row = rowRef.current;
+    if (row === null || typeof ResizeObserver === "undefined") return;
+    let width = row.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (row.clientWidth === width) return;
+      width = row.clientWidth;
+      setFold(0);
+    });
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, []);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Held for the debounce's reason: a timer this component starts, it cancels. */
   const blurDismiss = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -65,12 +92,9 @@ export default function PathBar({ path, api, onNavigate }: Props) {
   }
 
   const crumbs = crumbsOf(path);
-  /** Deep paths keep the top, the parent and the current folder; the middle
-   *  folds into one "…" that opens the path for typing. */
-  const shown: ({ label: string; path: string } | null)[] =
-    crumbs.length > 4 ? [crumbs[0]!, null, ...crumbs.slice(-2)] : crumbs;
+  const shown = foldCrumbs(crumbs, fold);
   return (
-    <div className="relative min-w-0 flex-1">
+    <div ref={rowRef} className="relative min-w-0 flex-1">
       <input
         ref={inputRef}
         value={value}
@@ -115,18 +139,21 @@ export default function PathBar({ path, api, onNavigate }: Props) {
           aria-label="Location"
           className="pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1 text-[13px]"
         >
-          <ol className="flex min-w-0 items-center">
+          <ol ref={olRef} className="flex min-w-0 items-center overflow-hidden">
             {shown.map((c, i) => {
               const last = i === shown.length - 1;
               return (
                 <li
                   key={c === null ? "gap" : c.path}
-                  // The two nearest keep their names whole; anything further
-                  // out gives way first.
+                  // Whole crumbs while folding can still make room; from the
+                  // second fold the current folder gives way too, down to a
+                  // readable width, and past that the top folds as well.
                   className={
-                    last || i === shown.length - 2
-                      ? "flex min-w-0 shrink items-center"
-                      : "flex min-w-0 shrink-[4] items-center"
+                    !last || fold < 2
+                      ? "flex shrink-0 items-center"
+                      : fold === MAX_FOLD
+                        ? "flex min-w-0 shrink items-center"
+                        : "flex min-w-40 shrink items-center"
                   }
                 >
                   {i > 0 && (
@@ -140,7 +167,7 @@ export default function PathBar({ path, api, onNavigate }: Props) {
                       tabIndex={-1}
                       title="Type a path"
                       onClick={() => inputRef.current?.focus()}
-                      className="pointer-events-auto rounded px-1.5 py-1 text-ink-3 hover:bg-raised hover:text-ink"
+                      className="pointer-events-auto flex h-7 min-w-7 items-center justify-center rounded px-1.5 text-ink-3 hover:bg-raised hover:text-ink touch:h-11 touch:min-w-11"
                     >
                       …
                     </button>
@@ -154,8 +181,8 @@ export default function PathBar({ path, api, onNavigate }: Props) {
                       title={c.path}
                       className={
                         last
-                          ? "pointer-events-auto flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 font-medium text-ink hover:bg-raised touch:py-2.5"
-                          : "pointer-events-auto flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 text-ink-2 hover:bg-raised hover:text-ink touch:py-2.5"
+                          ? "pointer-events-auto flex h-7 min-w-7 items-center justify-center gap-1.5 rounded px-1.5 font-medium text-ink hover:bg-raised touch:h-11 touch:min-w-11"
+                          : "pointer-events-auto flex h-7 min-w-7 items-center justify-center gap-1.5 rounded px-1.5 text-ink-2 hover:bg-raised hover:text-ink touch:h-11 touch:min-w-11"
                       }
                     >
                       {c.path === "/" && (
@@ -218,4 +245,19 @@ export function crumbsOf(path: string): { label: string; path: string }[] {
     });
   }
   return out;
+}
+
+const MAX_FOLD = 3;
+
+/** The crumbs at a fold level: 0 all of them, 1 the top, "…" and the last two,
+ *  2 the top, "…" and the current folder, 3 "…" and the current folder (the
+ *  brand already leads to the top). A path too short to fold stays whole. */
+export function foldCrumbs(
+  crumbs: { label: string; path: string }[],
+  fold: number,
+): ({ label: string; path: string } | null)[] {
+  if (fold >= 3 && crumbs.length > 1) return [null, crumbs.at(-1)!];
+  const keep = fold === 1 ? 2 : fold >= 2 ? 1 : crumbs.length;
+  if (crumbs.length <= keep + 1) return crumbs;
+  return [crumbs[0]!, null, ...crumbs.slice(-keep)];
 }

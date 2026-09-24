@@ -268,6 +268,12 @@ describe("copy-path feedback", () => {
       const copy = el.querySelector<HTMLButtonElement>(
         'button[aria-label="Copy path"]',
       )!;
+      /** What the panel's live regions are saying; the confirmation's region
+       *  stays mounted, empty, so it is heard when it fills. */
+      const said = (): string[] =>
+        Array.from(el.querySelectorAll('[role="status"]'))
+          .map((s) => s.textContent ?? "")
+          .filter((t) => t !== "");
 
       await act(async () => copy.click());
       expect(copy.textContent).toBe("copied");
@@ -275,14 +281,12 @@ describe("copy-path feedback", () => {
       // filesystem one, expanded from the library's top (library R2), which is
       // what makes the two surfaces put the identical text on the clipboard.
       expect(writeText).toHaveBeenCalledWith("/lib/models/gone.stl");
-      expect(el.querySelector('[role="status"]')).toBeNull();
+      expect(said()).toEqual(["Path copied."]);
 
       // Second copy fails inside the first one's confirmation window.
       await act(async () => copy.click());
       expect(copy.textContent).toBe("copy");
-      expect(el.querySelector('[role="status"]')?.textContent).toBe(
-        COPY_FAILED,
-      );
+      expect(said()).toEqual([COPY_FAILED]);
       // And nothing is selected: the retired fallback left a Range over the
       // path text, which is what a menu could never share.
       expect(window.getSelection?.()?.toString() ?? "").toBe("");

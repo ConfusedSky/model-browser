@@ -159,23 +159,22 @@ describe("the similarity view’s parameters", () => {
     expect(countInput()).not.toBeNull();
     expect(countInput()!.value).toBe(String(SIMILAR_K));
     expect(poolButtons().map((b) => b.dataset.pool)).toEqual([
+      "",
       "mean",
       "max",
       "softmax",
     ]);
     expect(poolButtons().map((b) => b.textContent)).toEqual([
+      "Index default",
       "Average",
       "Best view",
       "Weighted",
     ]);
-    // Nothing pressed: absence is the index's own pooling, which is not any of
-    // the three, so the panel says so rather than picking one.
+    // Absence is the index's own pooling, which is not any of the three, so
+    // the panel presses a choice of its own rather than picking one of them.
     expect(
-      poolButtons().every((b) => b.getAttribute("aria-pressed") === "false"),
-    ).toBe(true);
-    expect(container.textContent).toContain(
-      "Pooled however the index is configured to",
-    );
+      poolButtons().map((b) => b.getAttribute("aria-pressed") === "true"),
+    ).toEqual([true, false, false, false]);
     // Named by base name, like the results label: the full vpath is in the URL,
     // which is where an identity belongs.
     const subject = Array.from(container.querySelectorAll("aside h2")).find(
@@ -258,6 +257,18 @@ describe("the similarity view’s parameters", () => {
     expect(location.search).toContain("pool=max");
     expect(location.search).toContain("k=40");
     expect(poolButton("max").getAttribute("aria-pressed")).toBe("true");
+
+    // And back to the index's own: nothing sent, nothing named.
+    await click(poolButton(""));
+    await settle();
+    expect(similar).toHaveBeenLastCalledWith(
+      HERO,
+      40,
+      undefined,
+      expect.any(AbortSignal),
+    );
+    expect(location.search).not.toContain("pool=");
+    expect(poolButton("").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("a link’s parameters are the view’s, and a bad one reads as the default", async () => {

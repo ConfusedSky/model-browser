@@ -22,6 +22,7 @@ import {
   listDir,
   modelEntry,
   mountAppAtCurrentUrl,
+  resultsLabel,
   searchInput,
   semanticSearch,
   settle,
@@ -136,9 +137,9 @@ describe("the banner at the library top", () => {
   it("keeps the dismiss control out of the chips' own wrapping flow", async () => {
     // happy-dom lays nothing out and applies no Tailwind, so no rectangle here
     // means anything: what this cell can hold is the *shape* the wrap depends
-    // on. Sentence and chips must share one flow container, and the dismiss
-    // button must sit outside it — as the chips' sibling it is pushed onto a
-    // line of its own once they wrap. Judge the pixels on a real browser.
+    // on. Sentence, chip row and hint must share one column, and the dismiss
+    // button must sit outside it — as the chips' sibling it would be pushed onto
+    // a line of its own once they wrap. Judge the pixels on a real browser.
     features.mockResolvedValue(INTRO);
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
@@ -146,11 +147,13 @@ describe("the banner at the library top", () => {
 
     const flow = banner()!.querySelector<HTMLElement>("[data-intro-flow]");
     expect(flow).not.toBeNull();
-    expect(flow!.querySelector("span")!.textContent).toContain(
+    expect(flow!.querySelector("p")!.textContent).toContain(
       "Browse a library of 3D-printable miniatures",
     );
+    const row = flow!.querySelector<HTMLElement>("[data-intro-chips]");
+    expect(row).not.toBeNull();
     expect(chips().length).toBeGreaterThan(0);
-    for (const chip of chips()) expect(chip.parentElement).toBe(flow);
+    for (const chip of chips()) expect(chip.parentElement).toBe(row);
     expect(flow!.contains(dismissButton())).toBe(false);
     // After the flow, not before it: order is what puts the control at the end
     // of the strip once the chips have taken their rows.
@@ -285,7 +288,7 @@ describe("the chips follow the index, not the report", () => {
 });
 
 describe("a chip is a submitted meaning search", () => {
-  it("runs the text, names it in the URL under meaning mode, and Back returns to the top", async () => {
+  it("runs the text, names it in the URL under meaning mode, and Back returns to the top without the banner", async () => {
     features.mockResolvedValue(INTRO);
     indexAvailability.mockResolvedValue(READY);
     semanticSearch.mockResolvedValue(MEANING);
@@ -319,7 +322,10 @@ describe("a chip is a submitted meaning search", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     await settle();
-    expect(banner()).not.toBeNull();
+    expect(resultsLabel()).toBeNull();
+    // A visitor who has searched has met the app: the strip stays away for the
+    // rest of the page rather than greeting them again on every return.
+    expect(banner()).toBeNull();
   });
 
   it("the surprise action runs the query the pick chose", async () => {
@@ -480,8 +486,16 @@ describe("dismissal", () => {
     });
     await settle();
 
-    expect(banner()).not.toBeNull();
+    // Hidden for the rest of this page, but nothing was recorded — so the next
+    // load draws it again.
+    expect(banner()).toBeNull();
     expect(introDismissedStore.read()).toBe(false);
+    await unmountApp();
+    features.mockResolvedValue(INTRO);
+    indexAvailability.mockResolvedValue(READY);
+    await mountAppAtCurrentUrl("/", TOP);
+    await settle();
+    expect(banner()).not.toBeNull();
   });
 });
 
