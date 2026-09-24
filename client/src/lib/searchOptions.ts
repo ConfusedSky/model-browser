@@ -216,6 +216,13 @@ export function looksLikeFileName(text: string): boolean {
   return t.length >= 3 && !/\s/.test(t) && /[_\-.0-9]/.test(t);
 }
 
+/** Three or more plain words and no file-name token among them: typed into
+ *  name search it matches nothing, because no file is named in sentences. */
+export function looksLikeDescription(text: string): boolean {
+  const words = text.trim().split(/\s+/);
+  return words.length >= 3 && !words.some(looksLikeFileName);
+}
+
 /** Any search option off its default — what the Options dot marks, in the
  *  toolbar and on the panel's own tab alike. */
 export function optionsOffDefault(

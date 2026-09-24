@@ -1057,8 +1057,8 @@ describe("meaning search", () => {
       )!;
 
     // Resting state: both in force, both fields live.
-    expect(topBtn().getAttribute("aria-pressed")).toBe("true");
-    expect(scoreBtn().getAttribute("aria-pressed")).toBe("true");
+    expect(topBtn().getAttribute("aria-checked")).toBe("true");
+    expect(scoreBtn().getAttribute("aria-checked")).toBe("true");
     expect(topField().disabled).toBe(false);
     expect(scoreField().disabled).toBe(false);
 
@@ -1369,8 +1369,8 @@ describe("meaning search", () => {
     // request: the re-ask is issued a tick later than the state change, so
     // reading `mock.calls` here races it (it passed only while a `console.log`
     // sat in front of it, which is the tell).
-    expect(boundBtn("Show up to").getAttribute("aria-pressed")).toBe("true");
-    expect(boundBtn("Minimum match").getAttribute("aria-pressed")).toBe(
+    expect(boundBtn("Show up to").getAttribute("aria-checked")).toBe("true");
+    expect(boundBtn("Minimum match").getAttribute("aria-checked")).toBe(
       "false",
     );
     expect(resultsLabel()).toBe("2 closest matches “winged demon two”");
@@ -1552,6 +1552,33 @@ describe("a file name asked of the names", () => {
     await settle();
     expect(semanticSearch).toHaveBeenCalledTimes(1);
     expect(semanticSearch.mock.calls[0]![0]).toBe("a stone golem");
+  });
+});
+
+describe("a description asked of the names", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("runs by meaning, says so, and offers the names back for that search", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("name")!);
+    await type(searchInput(), "a stone golem");
+    await pressEnter(searchInput());
+    await settle();
+
+    expect(semanticSearch).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain(
+      "Searched by meaning — “a stone golem” reads like a description.",
+    );
+    // The profile chose names; the one search does not rewrite that.
+    expect(localStorage.getItem("model-browser:search-mode")).toBe("name");
   });
 });
 

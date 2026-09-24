@@ -44,7 +44,7 @@ import type { MeshLru } from "../three/lru";
 import { DEFAULT_CAMERA, defaultAxisFor } from "../three/camera";
 import { formatOfEntry } from "../three/models";
 import { cameraForPose } from "../three/pose";
-import { getRenderer } from "../three/renderer";
+import { getRenderer, onContextLost } from "../three/renderer";
 import { liveRenderSize } from "./renderSize";
 import { ViewerSession } from "./session";
 import Icon from "../components/Icon";
@@ -185,6 +185,9 @@ export default function ViewerLayer({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showHint, setShowHint] = useState(true);
+  // Nothing turns on a lost context, so the hint would be promising a drag
+  // that does nothing.
+  useEffect(() => onContextLost((lost) => lost && setShowHint(false)), []);
   const [copyError, setCopyError] = useState<string | null>(null);
   /** `null` for every way of having nothing to show — no store, no key, a
    *  failed read — because the panel draws them identically (D4). */
@@ -1197,12 +1200,19 @@ export default function ViewerLayer({
   );
 }
 
-/** "in Kit › Folder": the last two folders of a result's relative path, an
- *  archive named without its `!`. */
+/** "in Kit › Folder": the last two folders of a result's relative path that
+ *  say something — kits nest their files under the same few generic names —
+ *  with an archive named without its `!`. */
 function nearestFolders(name: string): string {
   const parts = name
     .slice(0, name.lastIndexOf("/"))
     .split("/")
     .map((p) => p.replace(/!$/, ""));
-  return parts.slice(-2).join(" › ");
+  const telling = parts.filter((p) => !GENERIC_FOLDER.test(p));
+  return (telling.length > 0 ? telling : parts).slice(-2).join(" › ");
 }
+
+/** Folder names that recur inside every kit and tell one from another not at
+ *  all: sizes, support states, file formats, parts. */
+const GENERIC_FOLDER =
+  /^(\d+\s?mm|(un|pre|non)?[\s_-]?supported|no[\s_-]?supports?|supports?|stls?|obj|3mf|files?|parts?|one[\s_-]?piece|split|models?|print[\s_-]?files?)$/i;

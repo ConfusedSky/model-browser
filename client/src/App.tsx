@@ -1,4 +1,5 @@
 import {
+  Fragment,
   type ReactNode,
   useCallback,
   useEffect,
@@ -80,6 +81,7 @@ import {
   setSearchTuning,
   resolveTuning,
   optionsOffDefault,
+  looksLikeDescription,
   looksLikeFileName,
   type SearchKinds,
   type SearchMode,
@@ -187,9 +189,12 @@ const NO_PREVIEW: DirEntry[] = [];
  *  strong one. */
 const WEAK_TOP_Z = 2.5;
 /** Below this top z no result in the set is called better than "Fair". */
-const STRONG_TOP_Z = 3.5;
+const STRONG_TOP_Z = 3.6;
 /** How many guesses a weak set shows before "Show all". */
 const WEAK_SHOWN = 12;
+const RENDERING_DELAY_MS = 300;
+/** What the name search answers at most, so a probe count there is a floor. */
+const NAME_COUNT_CAP = 500;
 const NOTE_ACTION_CLASS =
   "font-medium text-accent underline-offset-2 hover:underline touch:py-2";
 
@@ -628,8 +633,12 @@ export default function App() {
   /** A visitor who has searched has met the app: the introduction does not
    *  come back when they leave the results, for the rest of this page. */
   const [searchedOnce, setSearchedOnce] = useState(false);
-  /** The query last sent to the names because it looked like a file name. */
-  const [autoNamed, setAutoNamed] = useState<string | null>(null);
+  /** The query last sent to the other corpus because its words belonged
+   *  there: a file name to the names, a description to meaning. */
+  const [autoMode, setAutoMode] = useState<{
+    text: string;
+    mode: SearchMode;
+  } | null>(null);
   const [tileSize, setTileSize] = useState<TileSize>(() =>
     tileSizeStore.read(),
   );
@@ -873,6 +882,20 @@ export default function App() {
           : libraryMissingText(libraryState.root);
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS);
+  /** What the wait is for, said where the count will land: a user's request
+   *  in flight, never a background revalidation. */
+  const asked =
+    state.inflight !== null && state.inflight.followUp !== true
+      ? state.inflight.view
+      : null;
+  const waitLabel =
+    asked === null
+      ? ""
+      : asked.subject.kind === "query"
+        ? `Searching for “${asked.subject.text}”…`
+        : asked.subject.kind === "similar"
+          ? "Finding similar models…"
+          : `Opening ${asked.path === "/" ? "the library" : baseName(asked.path)}…`;
   // `busy`, not `inflight !== null`: a follow-up keeps the answered grid up,
   // and the user's place in it is real.
   busyRef.current = busy(state) || showSkeleton;
@@ -1385,14 +1408,24 @@ export default function App() {
     const text = state.drafts.queryText.trim();
     if (text === "") return;
     setSearchedOnce(true);
-    // Asked of the names for this one search, and said so over the results,
-    // with the way back to meaning one click away.
+    // Asked of the other corpus for this one search when the words plainly
+    // belong to it, and said so over the results, with the way back one click
+    // away.
     if (live.mode === "meaning" && looksLikeFileName(text)) {
-      setAutoNamed(text);
+      setAutoMode({ text, mode: "name" });
       commit({ type: "submit", mode: "name" });
       return;
     }
-    setAutoNamed(null);
+    if (
+      live.mode === "name" &&
+      looksLikeDescription(text) &&
+      meaningRunnableAt(state.index, target)
+    ) {
+      setAutoMode({ text, mode: "meaning" });
+      commit({ type: "submit", mode: "meaning" });
+      return;
+    }
+    setAutoMode(null);
     commit({ type: "submit" });
   }
 
@@ -1567,7 +1600,15 @@ export default function App() {
         return;
       }
       if (e.key !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey) return;
-      if (typing && el.closest("[data-find-bar]") === null) return;
+      // An empty search box is not typing: it is where dismissing the
+      // introduction leaves the keyboard, and Narrow is what Ctrl-F means
+      // there. A half-written query keeps the browser's own find.
+      const idleSearch =
+        el instanceof HTMLInputElement &&
+        el.hasAttribute("data-search-input") &&
+        el.value === "";
+      if (typing && el.closest("[data-find-bar]") === null && !idleSearch)
+        return;
       if (viewerRef.current !== null) return;
       e.preventDefault();
       openFind();
@@ -1889,6 +1930,10 @@ export default function App() {
     }
     return n;
   }, [shownEntries, thumbs, previews]);
+
+  /** Held a beat before it shows, so a set the caches answer at once never
+   *  flashes a count. */
+  const renderingShown = useDelayedFlag(pendingThumbs > 0, RENDERING_DELAY_MS);
 
   /** What a plain listing holds — the line a search spends on its label. */
   const listingSummary = useMemo(() => {
@@ -2372,6 +2417,54 @@ export default function App() {
     [commit],
   );
 
+  /** The probe walks the same capped search the names would, so a count at
+   *  the cap is a floor. */
+  const nameCountText =
+    nameMatches >= NAME_COUNT_CAP ? `${NAME_COUNT_CAP}+` : String(nameMatches);
+  /** A weak set's ways out, in the order they are likeliest to help. Names
+   *  are offered until the probe has said there are none. */
+  const probeSaidNone =
+    nameHits !== null && nameHits.key === hitsKey && nameHits.count === 0;
+  const weakWaysOut: { label: string; run: () => void }[] = [
+    ...(guessesCapped && labelQuery !== null
+      ? [
+          {
+            label: `Show all ${label.shown}`,
+            run: () => {
+              setAllGuessesFor(labelQuery);
+              // Onto the first guess that was held back.
+              requestAnimationFrame(() => {
+                const main = mainRef.current;
+                if (main !== null) tilesIn(main)[WEAK_SHOWN]?.focus();
+              });
+            },
+          },
+        ]
+      : []),
+    ...(probeSaidNone
+      ? []
+      : [
+          {
+            label:
+              nameMatches > 0
+                ? `See the ${nameCountText} name ${nameMatches === 1 ? "match" : "matches"}`
+                : "Search names instead",
+            run: () => switchModeOnce("name"),
+          },
+        ]),
+    ...(labelQuery !== null &&
+    state.view.path !== "/" &&
+    meaningRunnableAt(state.index, "/")
+      ? [
+          {
+            label: "Search the whole library",
+            run: () =>
+              commit({ type: "runQuery", text: labelQuery, mode: "meaning" }),
+          },
+        ]
+      : []),
+  ];
+
   /**
    * The results line: the count first, so a narrow screen truncates the query
    * rather than the number, then the query as a chip, then whatever qualifies
@@ -2399,8 +2492,10 @@ export default function App() {
                   label.capping &&
                   label.matched !== undefined &&
                   label.matched > label.shown
-                  ? `Top ${label.shown} of ${label.matched} matches`
-                  : `${label.shown} closest ${label.shown === 1 ? "match" : "matches"}`
+                  ? `Top ${label.shown} of ${label.matched} ${modestSet ? "fair " : ""}matches`
+                  : modestSet
+                    ? `${label.shown} fair ${label.shown === 1 ? "match" : "matches"}`
+                    : `${label.shown} closest ${label.shown === 1 ? "match" : "matches"}`
                 : `${kept.length} ${kept.length === 1 ? "result" : "results"}`,
           query: labelQuery,
           icon: label.meaning ? "sparkles" : "type",
@@ -2412,32 +2507,25 @@ export default function App() {
                     Nothing stood out —{" "}
                     {guessesCapped ? "here are" : "these are"} the closest
                     guesses.{" "}
-                    {guessesCapped && (
-                      <button
-                        type="button"
-                        onClick={() => setAllGuessesFor(labelQuery)}
-                        className={NOTE_ACTION_CLASS}
-                      >
-                        Show all {label.shown}
-                      </button>
-                    )}
-                    {guessesCapped && " · "}
-                    <button
-                      type="button"
-                      onClick={() => switchModeOnce("name")}
-                      className={NOTE_ACTION_CLASS}
-                    >
-                      {nameMatches > 0
-                        ? `See the ${nameMatches} name ${nameMatches === 1 ? "match" : "matches"}`
-                        : "Search names instead"}
-                    </button>
+                    {weakWaysOut.map((way, i) => (
+                      <Fragment key={way.label}>
+                        {i > 0 && " · "}
+                        <button
+                          type="button"
+                          onClick={way.run}
+                          className={NOTE_ACTION_CLASS}
+                        >
+                          {way.label}
+                        </button>
+                      </Fragment>
+                    ))}
                   </>
                 ),
                 // Asked beside every meaning search: a model's own name is
                 // never lost among guesses.
                 label.meaning && !weakSet && nameMatches > 0 && (
                   <>
-                    {nameMatches}{" "}
+                    {nameCountText}{" "}
                     {nameMatches === 1 ? "name matches" : "names match"} “
                     {labelQuery}” too.{" "}
                     <button
@@ -2452,18 +2540,35 @@ export default function App() {
                 // Not the ranking's horizon but the index's own ceiling (D2).
                 label.capped &&
                   "The index returned fewer than asked for — its cap.",
-                !label.meaning && autoNamed === labelQuery && (
-                  <>
-                    Searched file names — “{labelQuery}” looks like one.{" "}
-                    <button
-                      type="button"
-                      onClick={() => switchModeOnce("meaning")}
-                      className={NOTE_ACTION_CLASS}
-                    >
-                      Search by meaning instead
-                    </button>
-                  </>
-                ),
+                !label.meaning &&
+                  autoMode?.mode === "name" &&
+                  autoMode.text === labelQuery && (
+                    <>
+                      Searched file names — “{labelQuery}” looks like one.{" "}
+                      <button
+                        type="button"
+                        onClick={() => switchModeOnce("meaning")}
+                        className={NOTE_ACTION_CLASS}
+                      >
+                        Search by meaning instead
+                      </button>
+                    </>
+                  ),
+                label.meaning &&
+                  autoMode?.mode === "meaning" &&
+                  autoMode.text === labelQuery && (
+                    <>
+                      Searched by meaning — “{labelQuery}” reads like a
+                      description.{" "}
+                      <button
+                        type="button"
+                        onClick={() => switchModeOnce("name")}
+                        className={NOTE_ACTION_CLASS}
+                      >
+                        Search names instead
+                      </button>
+                    </>
+                  ),
               ].filter((n): n is Exclude<typeof n, false> => n !== false),
         }
       : labelModel !== null
@@ -2534,7 +2639,14 @@ export default function App() {
           it will restart. The whole of §5.2's affordance — not a panel, an
           overlay or a spinner, but the same weight as the notes below. On a
           phone it takes its own line rather than crowd the count. */}
-      {!status ? null : stale ? (
+      {!status ? null : waitLabel !== "" ? (
+        <p
+          aria-live="polite"
+          className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
+        >
+          {waitLabel}
+        </p>
+      ) : stale ? (
         <p
           aria-live="polite"
           className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
@@ -2542,6 +2654,7 @@ export default function App() {
           Refreshing…
         </p>
       ) : (
+        renderingShown &&
         pendingThumbs > 0 && (
           <p className="flex shrink-0 items-center gap-2 text-xs text-ink-3 max-sm:basis-full">
             <span
@@ -2584,6 +2697,13 @@ export default function App() {
       : "";
   // A value and not a ternary in the JSX, because this does not *replace* the
   // grid: a similarity anchor is still drawn above it.
+  /** A listing that failed with nothing else to show in its place. */
+  const failedPath =
+    state.failure !== null &&
+    state.failure.forView.subject.kind === "none" &&
+    kept.length === 0
+      ? state.failure.forView.path
+      : null;
   const emptyNotice = searchHasNoMatches ? (
     labelModel !== null ? (
       <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
@@ -2634,8 +2754,50 @@ export default function App() {
               Search the whole library
             </button>
           )}
+        {/* The other corpus, for this one search: a phrase asked of the names
+            or a name asked of meaning is the likeliest mismatch after scope. */}
+        {labelQuery !== null &&
+          (label.meaning ||
+            meaningRunnableAt(state.index, state.view.path)) && (
+            <button
+              type="button"
+              onClick={() => switchModeOnce(label.meaning ? "name" : "meaning")}
+              className="flex h-9 items-center gap-2 rounded-lg px-4 text-[13px] text-ink-2 ring-1 ring-line-strong hover:bg-surface hover:text-ink touch:h-11"
+            >
+              <Icon
+                name={label.meaning ? "type" : "sparkles"}
+                className="size-3.5"
+              />
+              {label.meaning
+                ? "Search names instead"
+                : "Search by meaning instead"}
+            </button>
+          )}
       </div>
     )
+  ) : failedPath !== null ? (
+    // A listing that could not be had: where it was asked for, and the
+    // nearest place that can be — not "nothing here", which is a claim
+    // about a folder that may not exist.
+    <div className="mx-auto mt-20 flex max-w-md flex-col items-center gap-4 px-6 text-center">
+      <Icon name="warning" className="size-8 text-ink-3" strokeWidth={1.5} />
+      <p className="text-sm leading-relaxed text-ink-2">
+        Couldn't open “
+        {failedPath === "/" ? "the library" : baseName(failedPath)}”.
+      </p>
+      {/* The top, not the parent: a mistyped path's parent is as likely
+          not to exist. */}
+      {failedPath !== "/" && (
+        <button
+          type="button"
+          onClick={() => navigate("/")}
+          className="flex h-9 items-center gap-2 rounded-lg px-4 text-[13px] text-ink-2 ring-1 ring-line-strong hover:bg-surface hover:text-ink touch:h-11"
+        >
+          <Icon name="home" className="size-3.5" />
+          Go to the library
+        </button>
+      )}
+    </div>
   ) : kindHidesAll ? (
     <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
       {counted === "folders"
@@ -2664,11 +2826,9 @@ export default function App() {
 
   /** Any search option off its default — name or meaning — marked on the
    *  button that opens them. */
-  const optionsChanged = optionsOffDefault(
-    live.folderMatching,
-    live.kinds,
-    live.tuning,
-  );
+  const optionsChanged =
+    optionsOffDefault(live.folderMatching, live.kinds, live.tuning) ||
+    (live.subject.kind === "similar" && live.subject.pool !== undefined);
 
   /** Meaning is offered where it can run, and shown wherever it is in force:
    *  a link can put the app in meaning mode on a machine with no index, and a
@@ -2735,7 +2895,7 @@ export default function App() {
             onClick={() => navigate("/")}
             title="Library top"
             aria-label="Model Browser — library top"
-            className="flex shrink-0 items-center gap-2 rounded-md py-1 pr-1.5 pl-1 text-ink hover:bg-surface touch:py-2"
+            className="flex shrink-0 items-center gap-2 rounded-md py-1 pr-1.5 pl-1 text-ink hover:bg-surface touch:min-w-11 touch:py-2"
           >
             <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-ink">
               <Icon name="box" className="size-4" strokeWidth={2} />
@@ -2803,8 +2963,8 @@ export default function App() {
                     aria-label={m === "name" ? "Name" : "Meaning"}
                     className={
                       live.mode === m
-                        ? "flex h-7 items-center gap-1 rounded bg-raised px-2 font-medium capitalize text-ink shadow-sm ring-1 ring-line-strong touch:h-10 touch:px-3"
-                        : "flex h-7 items-center gap-1 rounded px-2 capitalize text-ink-3 hover:text-ink-2 touch:h-10 touch:px-3"
+                        ? "flex h-7 items-center gap-1 rounded bg-raised px-2 font-medium capitalize text-ink shadow-sm ring-1 ring-line-strong touch:h-10 touch:min-w-11 touch:px-3"
+                        : "flex h-7 items-center gap-1 rounded px-2 capitalize text-ink-3 hover:text-ink-2 touch:h-10 touch:min-w-11 touch:px-3"
                     }
                   >
                     <Icon
@@ -2850,7 +3010,7 @@ export default function App() {
               <a
                 href={ABOUT_URL}
                 aria-label="About"
-                className="flex h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink touch:h-11"
+                className="flex h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink touch:h-11 touch:min-w-11"
               >
                 <Icon name="info" />
                 <span className="hidden lg:inline">About</span>
@@ -2880,8 +3040,8 @@ export default function App() {
               title="Narrow these by name (Ctrl-F)"
               className={
                 findOpen
-                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 bg-surface px-2.5 text-[13px] text-ink"
-                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 bg-surface px-2.5 text-[13px] text-ink"
+                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
               }
             >
               <Icon name="filter" className="size-3.5" />
@@ -2895,8 +3055,8 @@ export default function App() {
               title="Show every model under this folder in one grid"
               className={
                 live.flat
-                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 bg-accent-soft px-2.5 text-[13px] font-medium text-accent"
-                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 bg-accent-soft px-2.5 text-[13px] font-medium text-accent"
+                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
               }
             >
               <Icon name="layers" className="size-3.5" />
@@ -2952,7 +3112,7 @@ export default function App() {
               }}
               // On a phone the toolbar's room goes to the path; the switch
               // lives in Options there.
-              className="hidden h-8 items-center gap-2 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink touch:h-11 sm:flex"
+              className="hidden h-8 items-center gap-2 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink touch:h-11 touch:min-w-11 sm:flex"
             >
               <span className="hidden md:inline">Occlusion</span>
               <span className="md:hidden">AO</span>
@@ -2988,8 +3148,8 @@ export default function App() {
               }}
               className={
                 panelOpen
-                  ? "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 bg-surface px-2.5 text-[13px] text-ink"
-                  : "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+                  ? "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 bg-surface px-2.5 text-[13px] text-ink"
+                  : "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
               }
             >
               <Icon name="sliders" className="size-3.5" />
@@ -3057,7 +3217,7 @@ export default function App() {
                   onDown={focusFirstTile}
                 />
               )}
-              {noticeBar("", "", false, false)}
+              {noticeBar(waitLabel, "", false, false)}
               <SkeletonGrid size={tileSize} />
             </>
           ) : (
@@ -3112,27 +3272,37 @@ export default function App() {
               {/* An anchor is something to show, so it stays above its own
                   "nothing similar". */}
               {emptyNotice === null || anchor !== undefined ? (
-                <Grid
-                  entries={shownEntries}
-                  thumbs={thumbs}
-                  onEnter={enterEntry}
-                  onModelPointerDown={onModelPointerDown}
-                  onModelOpen={openLightbox}
-                  onModelHover={onModelHover}
-                  onEntryMenu={onEntryMenu}
-                  onImageError={reportImageError}
-                  markedPath={marked}
-                  anchorPath={anchor?.path}
-                  scoreFor={scoreFor}
-                  scoreScale={scoreScale}
-                  previews={previews}
-                  onPeek={requestPeek}
-                  onBands={reportBands}
-                  scrollRoot={mainRef}
-                  size={tileSize}
-                  showScores={showScores}
-                  modestSet={modestSet}
-                />
+                // Dimmed while the view it will be replaced by is on its way,
+                // so a press on the old answer does not read as the new one.
+                <div
+                  className={
+                    waitLabel !== ""
+                      ? "opacity-50 transition-opacity duration-150"
+                      : "transition-opacity duration-150"
+                  }
+                >
+                  <Grid
+                    entries={shownEntries}
+                    thumbs={thumbs}
+                    onEnter={enterEntry}
+                    onModelPointerDown={onModelPointerDown}
+                    onModelOpen={openLightbox}
+                    onModelHover={onModelHover}
+                    onEntryMenu={onEntryMenu}
+                    onImageError={reportImageError}
+                    markedPath={marked}
+                    anchorPath={anchor?.path}
+                    scoreFor={scoreFor}
+                    scoreScale={scoreScale}
+                    previews={previews}
+                    onPeek={requestPeek}
+                    onBands={reportBands}
+                    scrollRoot={mainRef}
+                    size={tileSize}
+                    showScores={showScores}
+                    modestSet={modestSet}
+                  />
+                </div>
               ) : null}
               {emptyNotice}
             </>

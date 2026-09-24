@@ -68,7 +68,7 @@ export default function FindBar({
         onClick={onClose}
         aria-label="Close find"
         title="Close (Esc)"
-        className="flex size-6 shrink-0 items-center justify-center rounded text-ink-3 hover:bg-white/5 hover:text-ink"
+        className="flex size-6 shrink-0 items-center justify-center rounded text-ink-3 hover:bg-white/5 hover:text-ink touch:size-11"
       >
         <Icon name="x" className="size-3.5" />
       </button>

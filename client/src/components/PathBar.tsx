@@ -19,6 +19,8 @@ export default function PathBar({ path, api, onNavigate }: Props) {
   /** Breadcrumbs stand in for the text until the input is focused. */
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** What held focus before the input took it. */
+  const cameFrom = useRef<HTMLElement | null>(null);
   /**
    * How far the crumbs are folded, found by measuring rather than counting:
    * whole names first, then the middle folded to "…", then the parent too.
@@ -117,7 +119,9 @@ export default function PathBar({ path, api, onNavigate }: Props) {
             ? "h-8 w-full rounded-md border border-line-strong bg-surface px-2.5 font-mono text-[13px] text-ink outline-none"
             : "h-8 w-full cursor-text rounded-md border border-transparent bg-transparent px-2.5 font-mono text-[13px] text-transparent outline-none hover:bg-surface"
         }
-        onFocus={() => {
+        onFocus={(e) => {
+          cameFrom.current =
+            e.relatedTarget instanceof HTMLElement ? e.relatedTarget : null;
           editing.current = true;
           setFocused(true);
           setOpen(true);
@@ -139,7 +143,10 @@ export default function PathBar({ path, api, onNavigate }: Props) {
           if (e.key === "Escape") {
             setOpen(false);
             setValue(path);
-            inputRef.current?.blur();
+            // Back where the keyboard came from, rather than to <body>.
+            const back = cameFrom.current;
+            if (back !== null && back.isConnected) back.focus();
+            else inputRef.current?.blur();
           }
         }}
       />

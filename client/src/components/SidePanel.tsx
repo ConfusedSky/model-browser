@@ -430,7 +430,12 @@ export default function SidePanel({
         }}
         className="fixed inset-x-0 bottom-0 z-lightbox flex max-h-[78dvh] flex-col rounded-t-2xl border-t border-line-strong bg-canvas shadow-2xl sm:inset-y-0 sm:right-0 sm:left-auto sm:max-h-none sm:w-80 sm:rounded-none sm:border-t-0 sm:border-l xl:static xl:z-auto xl:h-full xl:shrink-0 xl:border-line xl:shadow-none"
       >
-        <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line pr-1.5 pl-2">
+        {/* A phone's sheet says it is one: a grab handle over its top edge. */}
+        <div
+          aria-hidden="true"
+          className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/20 sm:hidden"
+        />
+        <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line pr-1.5 pl-2 touch:h-14">
           <div
             ref={tablistRef}
             role="tablist"
@@ -447,8 +452,8 @@ export default function SidePanel({
                 onClick={() => selectTab(t)}
                 className={
                   tab === t
-                    ? "relative rounded-md bg-surface px-2.5 py-1 font-medium capitalize text-ink"
-                    : "relative rounded-md px-2.5 py-1 capitalize text-ink-3 hover:text-ink-2"
+                    ? "relative rounded-md bg-surface px-2.5 py-1 font-medium capitalize text-ink touch:py-3"
+                    : "relative rounded-md px-2.5 py-1 capitalize text-ink-3 hover:text-ink-2 touch:py-3"
                 }
               >
                 {t}
@@ -464,11 +469,12 @@ export default function SidePanel({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Collapse side panel"
+            aria-label="Done, hide the side panel"
             title="Hide the side panel"
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-surface hover:text-ink"
+            className="flex h-8 min-w-8 shrink-0 items-center justify-center rounded-md px-1 text-ink-3 hover:bg-surface hover:text-ink touch:h-11 touch:min-w-11 max-sm:px-3 max-sm:text-[13px] max-sm:font-medium max-sm:text-accent"
           >
-            <Icon name="chevronRight" />
+            <Icon name="chevronRight" className="size-4 max-sm:hidden" />
+            <span className="sm:hidden">Done</span>
           </button>
         </div>
         {tab === "search" ? (
@@ -557,7 +563,8 @@ export default function SidePanel({
                   <div className="grid grid-cols-[auto_4.5rem] items-center gap-x-2 gap-y-1.5">
                     <button
                       type="button"
-                      aria-pressed={tuning.top !== undefined}
+                      role="switch"
+                      aria-checked={tuning.top !== undefined}
                       disabled={
                         tuning.top !== undefined &&
                         tuning.minScore === undefined
@@ -607,7 +614,8 @@ export default function SidePanel({
                     />
                     <button
                       type="button"
-                      aria-pressed={tuning.minScore !== undefined}
+                      role="switch"
+                      aria-checked={tuning.minScore !== undefined}
                       disabled={
                         tuning.minScore !== undefined &&
                         tuning.top === undefined
@@ -827,7 +835,7 @@ export default function SidePanel({
                   }}
                   className={segmentClass(similar.pool === undefined)}
                 >
-                  Index default
+                  Default
                 </button>
                 {POOLS.map((p) => (
                   <button

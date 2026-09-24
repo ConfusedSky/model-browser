@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { crumbsOf, foldCrumbs } from "../src/components/PathBar";
 import { strengthOf } from "../src/lib/scoreScale";
-import { looksLikeFileName } from "../src/lib/searchOptions";
+import {
+  looksLikeDescription,
+  looksLikeFileName,
+} from "../src/lib/searchOptions";
 
 describe("looksLikeFileName", () => {
   it("takes one token with a file name's marks", () => {
@@ -16,6 +19,21 @@ describe("looksLikeFileName", () => {
     expect(looksLikeFileName("dragon")).toBe(false);
     expect(looksLikeFileName("a-b c")).toBe(false);
     expect(looksLikeFileName("x1")).toBe(false);
+  });
+});
+
+describe("looksLikeDescription", () => {
+  it("takes three or more plain words", () => {
+    expect(looksLikeDescription("a stone golem")).toBe(true);
+    expect(looksLikeDescription("a warrior with a comically large sword")).toBe(
+      true,
+    );
+  });
+
+  it("leaves short queries and anything carrying a file name to names", () => {
+    expect(looksLikeDescription("space marine")).toBe(false);
+    expect(looksLikeDescription("dragon")).toBe(false);
+    expect(looksLikeDescription("orc boyz_v2 files")).toBe(false);
   });
 });
 

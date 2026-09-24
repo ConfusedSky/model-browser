@@ -165,7 +165,7 @@ describe("the similarity view’s parameters", () => {
       "softmax",
     ]);
     expect(poolButtons().map((b) => b.textContent)).toEqual([
-      "Index default",
+      "Default",
       "Average",
       "Best view",
       "Weighted",
