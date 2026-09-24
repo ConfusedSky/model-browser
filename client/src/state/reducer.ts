@@ -112,8 +112,10 @@ export interface SearchState {
 export type Action =
   /** Clears the search, the filter and the link's options in one. */
   | { type: "navigate"; path: string; prefs: Prefs }
-  /** Commit `drafts.queryText`. The corpus decides what that means. */
-  | { type: "submit" }
+  /** Commit `drafts.queryText`. The corpus decides what that means; `mode`
+   *  overrides it for this one search — a query shaped like a file name is
+   *  asked of the names whatever the switch says. */
+  | { type: "submit"; mode?: SearchMode }
   /** Run a phrase the app supplied (`landing-page` D4). One transition, mode
    *  and all, because "set the draft then submit" is two dispatches across a
    *  render. It carries no location: it runs at the library's top. */
@@ -362,7 +364,9 @@ export function reducer(state: SearchState, action: Action): SearchState {
     }
 
     case "submit":
-      return commitDraft(state);
+      return action.mode === undefined
+        ? commitDraft(state)
+        : commitDraft(patch(state, { mode: action.mode }));
 
     case "runQuery": {
       // Draft, then mode as a fetchless patch, then the ordinary commit. The

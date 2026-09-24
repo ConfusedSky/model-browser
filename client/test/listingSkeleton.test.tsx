@@ -146,7 +146,9 @@ describe("listing skeleton", () => {
     await settle();
     expect(container.textContent).toContain("omitted");
 
-    await click(tiles()[0]!); // into a never-resolving navigation
+    // Into a never-resolving navigation, through the folder — a flat view
+    // lists its models first.
+    await click(tiles().find((t) => t.dataset.entryTile === "/models/a")!);
     await pastDelay();
     expect(skeleton()).not.toBeNull();
     expect(container.textContent).not.toContain("omitted");

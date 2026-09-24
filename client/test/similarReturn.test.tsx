@@ -24,6 +24,7 @@ import {
   click,
   container,
   dir,
+  dismissButton,
   indexAvailability,
   labels,
   listDir,
@@ -32,6 +33,7 @@ import {
   mountAppAtCurrentUrl,
   openPanel,
   pressEnter,
+  resultsLabel,
   searchInput,
   settle,
   similar,
@@ -66,11 +68,6 @@ const NEIGHBOURS = {
 };
 const READY = { state: "ready", collectionRoot: "/models", covers: ["stl"] };
 
-function dismissButton(): HTMLButtonElement | undefined {
-  return Array.from(
-    container.querySelectorAll<HTMLButtonElement>("main button"),
-  ).find((b) => b.textContent?.includes("Dismiss"));
-}
 const menuItem = (id: string): HTMLButtonElement =>
   document.querySelector<HTMLButtonElement>(
     `[role="menu"] [data-command="${id}"]`,
@@ -119,12 +116,11 @@ const countInput = (): HTMLInputElement =>
   container.querySelector<HTMLInputElement>(
     'input[aria-label="Number of neighbours"]',
   )!;
-const poolButton = (name: string): HTMLButtonElement =>
-  Array.from(
-    container.querySelectorAll<HTMLButtonElement>(
-      '[aria-label="Pool neighbour views by"] button',
-    ),
-  ).find((b) => b.textContent === name)!;
+/** By the pool it sends, not the words it shows. */
+const poolButton = (pool: string): HTMLButtonElement =>
+  container.querySelector<HTMLButtonElement>(
+    `[aria-label="Pool neighbour views by"] button[data-pool="${pool}"]`,
+  )!;
 
 /** The panel starts closed for a fresh profile; open it and select its
  *  Similar tab, which is where the neighbour parameters live (6.4). It is
@@ -235,7 +231,7 @@ describe("leaving a similarity view", () => {
     expect(go).toHaveBeenCalledWith(-1);
     // The search is back — its URL, its label, and its own answer.
     expect(location.search).toBe(searchUrl);
-    expect(container.textContent).toContain('Search results for "widget"');
+    expect(resultsLabel()).toBe("1 result “widget”");
     expect(labels()).toEqual(["widget.stl"]);
     expect(searchInput().value).toBe("widget");
   });
@@ -280,9 +276,10 @@ describe("leaving a similarity view", () => {
     expect(go).toHaveBeenCalledOnce();
     expect(go).toHaveBeenCalledWith(-3);
     expect(location.search).toBe(searchUrl);
-    expect(container.textContent).toContain('Search results for "widget"');
+    expect(resultsLabel()).toBe("1 result “widget”");
     expect(labels()).toEqual(["widget.stl"]);
-    expect(dismissButton()!.textContent).not.toContain("Similar");
+    // Still leaveable: the search it returned to is a view about something.
+    expect(dismissButton()).not.toBeNull();
   });
 
   it("one opened from a link clears to the listing, because there is nothing behind it", async () => {
@@ -309,7 +306,7 @@ describe("leaving a similarity view", () => {
     expect(go).not.toHaveBeenCalled();
     expect(location.search).not.toContain("similar=");
     expect(labels()).toEqual(["Alpha"]);
-    expect(dismissButton()).toBeUndefined();
+    expect(dismissButton()).toBeNull();
   });
 
   it("erasing the search input under an in-app similarity view returns the same way", async () => {
@@ -373,7 +370,7 @@ describe("leaving a similarity view", () => {
     // The origin, not the first similarity view.
     expect(location.search).toBe(listingUrl);
     expect(labels()).toEqual(["Alpha", "widget.stl"]);
-    expect(dismissButton()).toBeUndefined();
+    expect(dismissButton()).toBeNull();
   });
 
   it("a Back onto a tuned similarity view leaves its marker — and its depth — standing", async () => {
@@ -418,7 +415,7 @@ describe("leaving a similarity view", () => {
     expect(go).toHaveBeenCalledOnce();
     expect(go).toHaveBeenCalledWith(-2);
     expect(location.search).toBe(listingUrl);
-    expect(dismissButton()).toBeUndefined();
+    expect(dismissButton()).toBeNull();
   });
 
   it("dismissing a query view is untouched by any of this", async () => {

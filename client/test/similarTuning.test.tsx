@@ -15,6 +15,7 @@ import {
   container,
   DEFAULT_REPORT,
   dir,
+  dismissButton,
   features,
   indexAvailability,
   labels,
@@ -77,8 +78,9 @@ function poolButtons(): HTMLButtonElement[] {
   );
   return group === null ? [] : Array.from(group.querySelectorAll("button"));
 }
-function poolButton(name: string): HTMLButtonElement {
-  return poolButtons().find((b) => b.textContent === name)!;
+/** By the pool it sends, not the words it shows. */
+function poolButton(pool: string): HTMLButtonElement {
+  return poolButtons().find((b) => b.dataset.pool === pool)!;
 }
 /** The panel's tabs, by their labels — the Similar one is present only while
  *  there is a similarity view for it to be about (6.4). */
@@ -135,13 +137,6 @@ async function findSimilarOn(label: string): Promise<void> {
   await settle();
 }
 
-/** The ✕ over the grid — the way out of a similarity view. */
-function dismissButton(): HTMLButtonElement | undefined {
-  return Array.from(
-    container.querySelectorAll<HTMLButtonElement>("main button"),
-  ).find((b) => b.textContent?.includes("Dismiss"));
-}
-
 beforeEach(() => {
   localStorage.clear();
   setSearchMode("name");
@@ -163,10 +158,15 @@ describe("the similarity view’s parameters", () => {
 
     expect(countInput()).not.toBeNull();
     expect(countInput()!.value).toBe(String(SIMILAR_K));
-    expect(poolButtons().map((b) => b.textContent)).toEqual([
+    expect(poolButtons().map((b) => b.dataset.pool)).toEqual([
       "mean",
       "max",
       "softmax",
+    ]);
+    expect(poolButtons().map((b) => b.textContent)).toEqual([
+      "Average",
+      "Best view",
+      "Weighted",
     ]);
     // Nothing pressed: absence is the index's own pooling, which is not any of
     // the three, so the panel says so rather than picking one.

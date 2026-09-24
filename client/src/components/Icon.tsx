@@ -20,6 +20,7 @@ const PATHS = {
   folder:
     "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   grid: "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
+  home: "M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10",
   info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16v-5M12 8h.01",
   layers: "M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5",
   maximize:

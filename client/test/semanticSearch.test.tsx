@@ -25,6 +25,7 @@ import {
   pathInput,
   pressEnter,
   putThumb,
+  resultsLabel,
   renderThumbnail,
   searchInput,
   semanticSearch,
@@ -38,6 +39,7 @@ import {
   setSearchTuning,
   TUNING_DEFAULTS,
 } from "../src/lib/searchOptions";
+import { showScoresStore } from "../src/lib/scoreScale";
 import { DEFAULT_CAMERA } from "../src/three/camera";
 import { cameraForPose, POSE_VERSION, poseKeyOf } from "../src/three/pose";
 import { RIG_VERSION, THUMB_LIGHTING } from "../src/three/renderer";
@@ -169,9 +171,7 @@ describe("meaning search", () => {
     // None of the results contain the phrase — the whole point, and the case
     // that would have been hidden if the search input still filtered.
     expect(labels()).toEqual(["hero.stl", "base.stl"]);
-    expect(container.textContent).toContain(
-      'Meaning matches for "a winged demon".',
-    );
+    expect(resultsLabel()).toBe("2 closest matches “a winged demon”");
     expect(location.search).toContain("mode=meaning");
   });
 
@@ -215,6 +215,7 @@ describe("meaning search", () => {
       covers: ["stl"],
     });
     semanticSearch.mockResolvedValue({ ...MEANING, weak: true });
+    showScoresStore.write(true); // the numbers are drawn only under this option
     await mountApp("/models", NESTED);
     await settle();
     await openSearchTab();
@@ -237,7 +238,9 @@ describe("meaning search", () => {
     // The numbers the index computed and this app used to discard. Three places
     // for the cosine because text-query values cluster near 0.1 and these two
     // hits differ in the third — at two places both would print `0.11`,
-    // asserting a tie that does not exist (D4).
+    // asserting a tie that does not exist (D4). Drawn only under "Show match
+    // scores", which this profile has turned on.
+    showScoresStore.write(true);
     indexAvailability.mockResolvedValue({
       state: "ready",
       collectionRoot: "/models",
@@ -286,7 +289,9 @@ describe("meaning search", () => {
     // The paint order itself is not observable here — happy-dom lays nothing
     // out — so this asserts the two things that are: the tile does not yield
     // its badges, and they carry a z above the overlay's. The stacking-context
-    // walk that licenses the second is recorded in `BADGE_CLASS`.
+    // walk that licenses the second is recorded in `BADGE_CLASS`. The badges
+    // exist only under "Show match scores".
+    showScoresStore.write(true);
     indexAvailability.mockResolvedValue({
       state: "ready",
       collectionRoot: "/models",
@@ -865,7 +870,7 @@ describe("meaning search", () => {
 
     const scoreBtn = Array.from(
       container.querySelectorAll<HTMLButtonElement>("aside button"),
-    ).find((b) => b.textContent?.trim().startsWith("score"))!;
+    ).find((b) => b.textContent?.trim() === "Minimum match")!;
     await click(scoreBtn);
     await settle();
     const firstSignal = semanticSearch.mock.calls.at(-1)?.[3] as AbortSignal;
@@ -991,9 +996,9 @@ describe("meaning search", () => {
     await pressEnter(searchInput());
     await settle();
 
-    const maxBtn = Array.from(
-      container.querySelectorAll<HTMLButtonElement>("aside button"),
-    ).find((b) => b.textContent?.trim() === "max")!;
+    const maxBtn = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Pool views by"] button[data-pool="max"]',
+    )!;
     await click(maxBtn);
     await settle();
 
@@ -1033,11 +1038,11 @@ describe("meaning search", () => {
     const topBtn = () =>
       Array.from(
         container.querySelectorAll<HTMLButtonElement>("aside button"),
-      ).find((b) => b.textContent?.trim() === "top")!;
+      ).find((b) => b.textContent?.trim() === "Show up to")!;
     const scoreBtn = () =>
       Array.from(
         container.querySelectorAll<HTMLButtonElement>("aside button"),
-      ).find((b) => b.textContent?.trim().startsWith("score"))!;
+      ).find((b) => b.textContent?.trim() === "Minimum match")!;
     const topField = () =>
       container.querySelector<HTMLInputElement>(
         'input[aria-label="Number of results"]',
@@ -1241,7 +1246,7 @@ describe("meaning search", () => {
     // remains still sits at its own default value.
     const topBtn = Array.from(
       container.querySelectorAll<HTMLButtonElement>("aside button"),
-    ).find((b) => b.textContent?.trim() === "top")!;
+    ).find((b) => b.textContent?.trim() === "Show up to")!;
     await click(topBtn);
     await settle();
     expect(resetLink()).toBeDefined();
@@ -1307,9 +1312,7 @@ describe("meaning search", () => {
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
     await settle();
-    expect(container.textContent).toContain(
-      `Showing ${MEANING.entries.length} of 875`,
-    );
+    expect(resultsLabel()).toBe("Top 2 of 875 matches “winged demon”");
 
     // Absent `matched` is the index not saying, which is not a zero and not a
     // number this app may compute: what arrived has already been cut.
@@ -1317,7 +1320,7 @@ describe("meaning search", () => {
     await type(searchInput(), "winged demon two");
     await pressEnter(searchInput());
     await settle();
-    expect(container.textContent).not.toContain("above the floor");
+    expect(resultsLabel()).toBe("2 closest matches “winged demon two”");
 
     // And with no count in force it stays silent even though `matched` exceeds
     // what came back: in the floor-only state the set is short because the
@@ -1333,12 +1336,12 @@ describe("meaning search", () => {
       Array.from(
         container.querySelectorAll<HTMLButtonElement>("aside button"),
       ).find((b) => b.textContent?.trim().startsWith(label))!;
-    await click(boundBtn("top"));
+    await click(boundBtn("Show up to"));
     await settle();
     expect(container.textContent).toContain(
       "The index returned fewer than asked for",
     );
-    expect(container.textContent).not.toContain("above the floor");
+    expect(resultsLabel()).toBe("2 closest matches “winged demon two”");
 
     // The other single-bound state, and the cell this test used to leave out.
     // With the count in force and no floor, `matched` is not a floor set at
@@ -1350,17 +1353,19 @@ describe("meaning search", () => {
     // a response staged afterwards is never fetched and the assertion below
     // would be checking the previous landing — true, and vacuously so.
     semanticSearch.mockResolvedValue({ ...MEANING, matched: 2165 });
-    await click(boundBtn("top"));
+    await click(boundBtn("Show up to"));
     await settle();
-    await click(boundBtn("score"));
+    await click(boundBtn("Minimum match"));
     await settle();
     // Count-only reached, asserted off the controls rather than off the last
     // request: the re-ask is issued a tick later than the state change, so
     // reading `mock.calls` here races it (it passed only while a `console.log`
     // sat in front of it, which is the tell).
-    expect(boundBtn("top").getAttribute("aria-pressed")).toBe("true");
-    expect(boundBtn("score").getAttribute("aria-pressed")).toBe("false");
-    expect(container.textContent).not.toContain("above the floor");
+    expect(boundBtn("Show up to").getAttribute("aria-pressed")).toBe("true");
+    expect(boundBtn("Minimum match").getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    expect(resultsLabel()).toBe("2 closest matches “winged demon two”");
     expect(container.textContent).not.toContain("2165");
   });
 
@@ -1446,9 +1451,7 @@ describe("meaning search", () => {
       TUNING_DEFAULTS,
       expect.any(AbortSignal),
     );
-    expect(container.textContent).toContain(
-      'Meaning matches for "a winged demon".',
-    );
+    expect(resultsLabel()).toBe("2 closest matches “a winged demon”");
     vi.useRealTimers();
   });
 

@@ -18,6 +18,13 @@ const TAB_KEY = "model-browser:panel-tab";
 
 type Tab = "chat" | "search" | "similar" | "library";
 
+/** The index's pooling names, said as what they do to a model's views. */
+const POOL_LABEL: Record<(typeof POOLS)[number], string> = {
+  mean: "Average",
+  max: "Best view",
+  softmax: "Weighted",
+};
+
 const SECTION_LABEL = "text-xs font-medium uppercase tracking-wider text-ink-3";
 const NUMBER_CLASS =
   "w-16 rounded-md border border-line bg-surface px-2 py-1 text-ink tabular-nums outline-none focus:border-line-strong disabled:opacity-40";
@@ -149,6 +156,8 @@ export default function SidePanel({
   onKinds,
   onTuning,
   onSimilarTuning,
+  showScores,
+  onShowScores,
   open,
   onClose,
 }: {
@@ -196,6 +205,9 @@ export default function SidePanel({
   /** The whole set, never a delta; called only with a finished count, since the
    *  debounce is this component's. */
   onSimilarTuning: (k: number, pool?: Tuning["pool"]) => void;
+  /** Absent where a caller offers no display options. */
+  showScores?: boolean;
+  onShowScores?: (on: boolean) => void;
   /** Mounted while closed, so the tab and the Similar/Library lifecycles
    *  below carry on across a close. */
   open: boolean;
@@ -347,32 +359,69 @@ export default function SidePanel({
   const libraryOps: readonly JobOperation[] =
     features?.thumbWrites === true ? ["generate", "reset"] : ["reset"];
 
+  /** Opened from the toolbar, the panel takes the keyboard with it: it sits
+   *  after the grid in the document, a whole grid of Tabs away. */
+  const tablistRef = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    // An opening, not a page that loads with the panel open.
+    const opened = open && !wasOpen.current;
+    wasOpen.current = open;
+    if (!opened) return;
+    tablistRef.current
+      ?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+      ?.focus();
+  }, [open]);
+
+  /** Arrows move between tabs, as a tablist's do. */
+  function onTabKey(e: React.KeyboardEvent<HTMLDivElement>): void {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (step === 0) return;
+    e.preventDefault();
+    const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length]!;
+    selectTab(next);
+    requestAnimationFrame(() =>
+      tablistRef.current
+        ?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+        ?.focus(),
+    );
+  }
+
   const segmentClass = (on: boolean): string =>
     on
       ? "flex-1 rounded-md bg-raised px-2 py-1 font-medium capitalize text-ink ring-1 ring-line-strong"
       : "flex-1 rounded-md px-2 py-1 capitalize text-ink-3 hover:text-ink-2";
   const boundClass = (on: boolean): string =>
     on
-      ? "rounded-md bg-accent-soft px-2 py-1 font-medium text-accent disabled:cursor-default"
-      : "rounded-md px-2 py-1 text-ink-3 ring-1 ring-line hover:text-ink-2";
+      ? "rounded-md bg-accent-soft px-2.5 py-1.5 text-left font-medium text-accent disabled:cursor-default"
+      : "rounded-md px-2.5 py-1.5 text-left text-ink-3 ring-1 ring-line hover:text-ink-2";
 
   if (!open) return null;
   return (
     <>
-      {/* On a phone the panel is a sheet over the grid, and a tap outside
-          it puts it away. */}
+      {/* Below a wide screen the panel floats over the grid — a sheet on a
+          phone, a drawer beside — and a press outside it puts it away. Wide,
+          it docks and the grid makes room. */}
       <div
         aria-hidden="true"
         onClick={onClose}
-        className="fixed inset-0 z-lightbox bg-black/50 sm:hidden"
+        className="fixed inset-0 z-lightbox bg-black/50 xl:hidden"
       />
       <aside
         aria-label="Side panel"
-        className="fixed inset-x-0 bottom-0 z-lightbox flex max-h-[78dvh] flex-col rounded-t-2xl border-t border-line-strong bg-canvas shadow-2xl sm:static sm:z-auto sm:h-full sm:max-h-none sm:w-80 sm:shrink-0 sm:rounded-none sm:border-t-0 sm:border-l sm:border-line sm:shadow-none"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onClose();
+          }
+        }}
+        className="fixed inset-x-0 bottom-0 z-lightbox flex max-h-[78dvh] flex-col rounded-t-2xl border-t border-line-strong bg-canvas shadow-2xl sm:inset-y-0 sm:right-0 sm:left-auto sm:max-h-none sm:w-80 sm:rounded-none sm:border-t-0 sm:border-l xl:static xl:z-auto xl:h-full xl:shrink-0 xl:border-line xl:shadow-none"
       >
         <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line pr-1.5 pl-2">
           <div
+            ref={tablistRef}
             role="tablist"
+            onKeyDown={onTabKey}
             className="flex min-w-0 flex-1 items-center gap-0.5 text-[13px]"
           >
             {tabs.map((t) => (
@@ -381,6 +430,7 @@ export default function SidePanel({
                 type="button"
                 role="tab"
                 aria-selected={tab === t}
+                tabIndex={tab === t ? 0 : -1}
                 onClick={() => selectTab(t)}
                 className={
                   tab === t
@@ -453,15 +503,14 @@ export default function SidePanel({
                   <span>
                     Phrase as written
                     <span className="block text-ink-3">
-                      {tuning.raw
-                        ? "Sent to the index verbatim"
-                        : "Wrapped in a template first"}
+                      Match your words exactly, without first framing them as a
+                      description of a model
                     </span>
                   </span>
                   <Switch on={tuning.raw} />
                 </button>
                 <div className="space-y-1.5">
-                  <p className="text-ink-3">Pool views by</p>
+                  <p className="text-ink-3">Combine each model's views by</p>
                   <div
                     className="flex rounded-lg bg-sunken p-0.5"
                     role="group"
@@ -471,11 +520,12 @@ export default function SidePanel({
                       <button
                         key={p}
                         type="button"
+                        data-pool={p}
                         aria-pressed={tuning.pool === p}
                         onClick={() => onTuning({ ...tuning, pool: p })}
                         className={segmentClass(tuning.pool === p)}
                       >
-                        {p}
+                        {POOL_LABEL[p]}
                       </button>
                     ))}
                   </div>
@@ -490,8 +540,8 @@ export default function SidePanel({
                       of independent toggles, where which one is lit is the
                       whole message. Hence the filled on-state. */}
                 <div className="space-y-1.5">
-                  <p className="text-ink-3">Limit results to</p>
-                  <div className="flex items-center gap-2">
+                  <p className="text-ink-3">Limit the results</p>
+                  <div className="grid grid-cols-[auto_4.5rem] items-center gap-x-2 gap-y-1.5">
                     <button
                       type="button"
                       aria-pressed={tuning.top !== undefined}
@@ -514,7 +564,7 @@ export default function SidePanel({
                       }
                       className={boundClass(tuning.top !== undefined)}
                     >
-                      top
+                      Show up to
                     </button>
                     <input
                       type="number"
@@ -566,7 +616,7 @@ export default function SidePanel({
                       }
                       className={boundClass(tuning.minScore !== undefined)}
                     >
-                      score ≥
+                      Minimum match
                     </button>
                     <input
                       type="number"
@@ -650,6 +700,28 @@ export default function SidePanel({
                 </div>
               </section>
             )}
+            {onShowScores !== undefined && (
+              <section className="space-y-3 border-t border-line pt-4">
+                <h2 className={SECTION_LABEL}>Display</h2>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showScores === true}
+                  aria-label="Show match scores"
+                  onClick={() => onShowScores(!showScores)}
+                  className="flex w-full items-center justify-between gap-3 text-left text-ink-2 hover:text-ink"
+                >
+                  <span>
+                    Show match scores
+                    <span className="block text-ink-3">
+                      The index's raw cosine and z on each result, beside the
+                      strength word
+                    </span>
+                  </span>
+                  <Switch on={showScores === true} />
+                </button>
+              </section>
+            )}
           </div>
         ) : /* Not only narrowing: a dismissal renders once before the effect
                  above moves off this tab. */
@@ -712,6 +784,7 @@ export default function SidePanel({
                   <button
                     key={p}
                     type="button"
+                    data-pool={p}
                     aria-pressed={similar.pool === p}
                     onClick={() => {
                       // This question carries the count in force, superseding
@@ -722,7 +795,7 @@ export default function SidePanel({
                     }}
                     className={segmentClass(similar.pool === p)}
                   >
-                    {p}
+                    {POOL_LABEL[p]}
                   </button>
                 ))}
               </div>

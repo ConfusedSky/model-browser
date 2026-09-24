@@ -17,6 +17,7 @@ import {
   SCALE_BADGE,
   SCALE_SPOKEN,
   Z_LABEL,
+  strengthOf,
   type ScoreScale,
 } from "../lib/scoreScale";
 import type { Band } from "../three/queue";
@@ -105,6 +106,8 @@ interface Props {
    *  stable in deps and populated during commit. */
   scrollRoot: RefObject<HTMLElement | null>;
   size?: TileSize;
+  /** The raw score pair on each result, rather than the strength alone. */
+  showScores?: boolean;
 }
 
 function menuAt(
@@ -139,6 +142,7 @@ function Grid({
   onBands,
   scrollRoot,
   size = "m",
+  showScores = false,
 }: Props) {
   const gridRef = useRef<HTMLDivElement>(null);
   /** Each observed tile's last record from each observer. A tile heard by one
@@ -317,7 +321,7 @@ function Grid({
     return (
       <div className="mt-20 flex flex-col items-center gap-2 text-center">
         <Icon name="folder" className="size-8 text-ink-3" strokeWidth={1.5} />
-        <p className="text-sm text-ink-2">This folder is empty.</p>
+        <p className="text-sm text-ink-2">Nothing here.</p>
       </div>
     );
   }
@@ -352,6 +356,7 @@ function Grid({
             // object so the memo sees an unchanged answer as unchanged.
             score={scoreScale === null ? undefined : scoreFor(entry.path)}
             scale={scoreScale}
+            showScores={showScores}
           />
         );
       })}
@@ -370,24 +375,30 @@ function relevanceWidth(z: number): number {
 /**
  * Where a result lives, under its name. A deep search or a flat view carries
  * the path relative to where it ran; without this line two same-named files
- * from different kits look like duplicates. The last two folders, since the
- * nearest are what tell kits apart.
+ * from different kits look like duplicates.
  */
 function ParentLine({ name }: { name: string }) {
   const slash = name.lastIndexOf("/");
   if (slash <= 0) return null;
+  const inArchive = name.includes("!/");
   const parts = name
     .slice(0, slash)
     .replace(/!(?=\/|$)/g, "")
     .split("/");
-  const shown =
-    parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : parts.join("/");
+  const last = parts[parts.length - 1]!;
+  const head = parts.slice(0, -1).join("/");
+  // The nearest folder is what tells twins apart, so it is the part kept
+  // whole and the rest gives way from its end; an archive says it is one.
   return (
     <span
       data-tile-parent
-      className="-mt-1.5 block w-full truncate px-2.5 pb-2 text-xs leading-tight text-ink-3"
+      className="-mt-1.5 flex w-full min-w-0 items-center gap-1 px-2.5 pb-2 text-xs leading-tight text-ink-3"
     >
-      {shown}
+      {inArchive && <Icon name="archive" className="size-3 text-accent/70" />}
+      <span className="flex min-w-0">
+        {head !== "" && <span className="min-w-[2ch] truncate">{head}/</span>}
+        <span className="max-w-[80%] shrink-0 truncate">{last}</span>
+      </span>
     </span>
   );
 }
@@ -437,7 +448,7 @@ const STACK_CLASS =
  * against the same root. index.css orders the five z layers.
  */
 const BADGE_CLASS =
-  "pointer-events-none absolute bottom-2 z-tile-badge rounded-full bg-canvas/85 px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-ink-2 opacity-0 ring-1 ring-line-strong backdrop-blur-sm transition-opacity group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100";
+  "pointer-events-none absolute bottom-2 z-tile-badge rounded-full bg-canvas/85 px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-ink-2 ring-1 ring-line-strong backdrop-blur-sm";
 
 /**
  * What one thumbnail looks like at any moment, for a model tile and a sheet
@@ -449,12 +460,16 @@ function ThumbView({
   thumb,
   path,
   onImageError,
+  quiet = false,
 }: {
   thumb: ThumbState | undefined;
   /** The cell's own path in a folder sheet, not the folder's, so a failed
    *  image is reported for the entry it belongs to (D3). */
   path: string;
   onImageError?: (path: string) => void;
+  /** A sheet cell: four spinners to a folder is a wall of them, so a cell
+   *  waits as a faint block and its picture fades in. */
+  quiet?: boolean;
 }) {
   // Only until the *first* picture: a later URL replaces it on arrival while
   // the browser keeps the old pixels up, so spinning over them would discard a
@@ -495,13 +510,15 @@ function ThumbView({
               : "h-full w-full object-contain"
           }
         />
-        {pending ? (
+        {pending && !quiet ? (
           <span className="absolute size-5 animate-spin rounded-full border-2 border-white/10 border-t-white/40" />
         ) : null}
       </span>
     );
   }
-  return (
+  return quiet ? (
+    <span className="size-3/5 animate-[pulse_2.4s_ease-in-out_infinite] rounded-md bg-white/[0.035]" />
+  ) : (
     <span className="size-5 animate-spin rounded-full border-2 border-white/10 border-t-white/40" />
   );
 }
@@ -549,6 +566,7 @@ function ContactSheet({
             thumb={thumbs?.[i]}
             path={entry.path}
             onImageError={onImageError}
+            quiet
           />
         </div>
       ))}
@@ -577,6 +595,7 @@ interface TileProps {
   anchor: boolean;
   score: IndexScore | undefined;
   scale: ScoreScale | null;
+  showScores: boolean;
   /** The map's own array (see `Grid`), so compared by identity. */
   preview: DirEntry[] | undefined;
   /** Rebuilt every render, so `tilePropsEqual` compares it elementwise. */
@@ -618,6 +637,7 @@ const Tile = memo(function Tile({
   anchor,
   score,
   scale,
+  showScores,
   preview,
   previewThumbs,
 }: TileProps) {
@@ -665,7 +685,7 @@ const Tile = memo(function Tile({
         const r = e.currentTarget.getBoundingClientRect();
         onEntryMenu(entry, tile, { x: r.left, y: r.bottom + 4 });
       }}
-      className="absolute top-1.5 right-1.5 z-tile-badge flex size-7 items-center justify-center rounded-md bg-canvas/80 text-ink-2 opacity-0 ring-1 ring-line-strong backdrop-blur-sm transition-opacity group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 hover:text-ink [@media(hover:none)]:opacity-100"
+      className="absolute top-1.5 right-1.5 z-tile-badge flex size-8 items-center touch:size-10 justify-center rounded-md bg-canvas/80 text-ink-2 opacity-0 ring-1 ring-line-strong backdrop-blur-sm transition-opacity group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 hover:text-ink [@media(hover:none)]:opacity-100"
     >
       <Icon name="more" className="size-4" strokeWidth={2.5} />
     </button>
@@ -756,7 +776,7 @@ const Tile = memo(function Tile({
               accessible name and every matcher still read `entry.name` (D7). */}
           <span
             data-tile-name
-            className="flex w-full min-w-0 items-center gap-1.5 px-2.5 py-2 text-[12.5px] leading-tight"
+            className="flex w-full min-w-0 items-center gap-1.5 px-2.5 py-2 text-[13px] leading-tight"
           >
             <Icon
               name={entry.kind === "dir" ? "folder" : "archive"}
@@ -780,7 +800,11 @@ const Tile = memo(function Tile({
         type="button"
         data-model-tile={entry.path}
         data-entry-tile={entry.path}
-        title={entry.name}
+        title={
+          badges === null
+            ? entry.name
+            : `${entry.name}\n${strengthOf(badges.score.z)} match`
+        }
         // An accessible name *replaces* the contents rather than joining them, so
         // the full path, the anchor and the badge numbers are only announced if
         // they are stated here (D8). The scales are spelled out for reading aloud.
@@ -791,7 +815,9 @@ const Tile = memo(function Tile({
           (anchor ? " — the model these are compared against" : "") +
           (badges === null
             ? ""
-            : ` — ${SCALE_SPOKEN[badges.scale]} ${formatCosine(badges.score.score)}, ${Z_LABEL} ${formatZ(badges.score.z)}`)
+            : showScores
+              ? ` — ${SCALE_SPOKEN[badges.scale]} ${formatCosine(badges.score.score)}, ${Z_LABEL} ${formatZ(badges.score.z)}`
+              : ` — ${strengthOf(badges.score.z).toLowerCase()} match`)
         }
         className={`${base} cursor-grab touch-none select-none active:cursor-grabbing ${markClass} ${anchorClass}`}
         onPointerDown={(e) => onModelPointerDown(e, entry, e.currentTarget)}
@@ -838,12 +864,17 @@ const Tile = memo(function Tile({
                 className="pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-r-full bg-accent/70"
                 style={{ width: `${relevanceWidth(badges.score.z)}%` }}
               />
-              <span aria-hidden className={`${BADGE_CLASS} left-1.5`}>
-                {SCALE_BADGE[badges.scale]} {formatCosine(badges.score.score)}
-              </span>
-              <span aria-hidden className={`${BADGE_CLASS} right-1.5`}>
-                {Z_LABEL} {formatZ(badges.score.z)}
-              </span>
+              {showScores && (
+                <>
+                  <span aria-hidden className={`${BADGE_CLASS} left-1.5`}>
+                    {SCALE_BADGE[badges.scale]}{" "}
+                    {formatCosine(badges.score.score)}
+                  </span>
+                  <span aria-hidden className={`${BADGE_CLASS} right-1.5`}>
+                    {Z_LABEL} {formatZ(badges.score.z)}
+                  </span>
+                </>
+              )}
             </>
           )}
           {/* Over the picture's foot, above the name: the last line is what a
@@ -860,7 +891,7 @@ const Tile = memo(function Tile({
             name (D7). */}
         <span
           data-tile-name
-          className="w-full truncate px-2.5 py-2 text-[12.5px] leading-tight"
+          className="w-full truncate px-2.5 py-2 text-[13px] leading-tight"
         >
           <TileName name={entry.displayName ?? baseName(entry.name)} />
         </span>

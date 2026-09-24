@@ -23,6 +23,7 @@ import {
   container,
   deferred,
   dir,
+  dismissButton,
   flatButton,
   listDir,
   model,
@@ -228,10 +229,7 @@ const showButton = (kind: string): HTMLButtonElement =>
   ).find((b) => b.textContent === kind)!;
 const listingRequests = (path: string): number =>
   listDir.mock.calls.filter((c) => c[0] === path).length;
-const dismiss = (): HTMLButtonElement =>
-  container.querySelector<HTMLButtonElement>(
-    'button[title^="Stop showing this"]',
-  )!;
+const dismiss = (): HTMLButtonElement => dismissButton()!;
 
 beforeEach(async () => {
   sessionStorage.removeItem(TRAIL_KEY);

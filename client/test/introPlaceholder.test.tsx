@@ -6,8 +6,7 @@
 // different: name mode would send a typed example to the wrong corpus, an index
 // that cannot answer *here* would return nothing, a draft hides the placeholder
 // anyway, and the banner is already showing the same phrases. The accessible
-// name is asserted not to move with it — `searchInput()` selects by that label,
-// so a cell that still resolves is the assertion.
+// name is asserted not to move with it: it names the mode, never the example.
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DirListing } from "../../shared/types";
@@ -183,16 +182,21 @@ describe("the cycling example", () => {
   });
 
   it("never moves the accessible name", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     alreadyDismissed();
     features.mockResolvedValue(INTRO);
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    // `searchInput()` selects by `aria-label`; resolving at all is the
-    // assertion, and the placeholder having moved is what makes it one.
+    const name = (): string | null => searchInput().getAttribute("aria-label");
     expect(placeholder()).toBe(example(0));
-    expect(searchInput().getAttribute("aria-label")).toBe(
-      "Search names and folders",
-    );
+    expect(name()).toBe("Search by meaning");
+
+    // The placeholder moving is what makes the name standing still a claim.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PLACEHOLDER_PERIOD_MS + 100);
+    });
+    expect(placeholder()).toBe(example(1));
+    expect(name()).toBe("Search by meaning");
   });
 });

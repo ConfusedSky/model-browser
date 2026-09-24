@@ -1,4 +1,5 @@
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -23,7 +24,7 @@ import { withLocalFramings } from "./api/localFramings";
 import EntryMenu from "./components/EntryMenu";
 import FindBar from "./components/FindBar";
 import Grid, { SkeletonGrid, type TileSize } from "./components/Grid";
-import Icon from "./components/Icon";
+import Icon, { type IconName } from "./components/Icon";
 import IntroBanner from "./components/IntroBanner";
 import JobChip from "./components/JobChip";
 import SidePanel, { collapseStore } from "./components/SidePanel";
@@ -61,12 +62,13 @@ import {
   applyIn,
   findTile,
   measureIn,
+  tilesIn,
   resolvePlacement,
   type PlacementRequest,
 } from "./lib/placement";
 import { pushRecent } from "./lib/recents";
 import { stored } from "./lib/stored";
-import { scaleOf } from "./lib/scoreScale";
+import { scaleOf, showScoresStore } from "./lib/scoreScale";
 import {
   applySessionSearchMode,
   folderMatchingEnabled,
@@ -178,6 +180,19 @@ const NO_SCORES: Record<string, IndexScore> = {};
 /** Shared, so **never written to**: every landing builds a new Map. */
 const NO_PREVIEWS: ReadonlyMap<string, DirEntry[]> = new Map();
 const NO_PREVIEW: DirEntry[] = [];
+
+/** Below this top z a meaning search reads as a guess. Measured against both
+ *  indexes: nonsense phrases top out at 1.7–2.4 where real ones start near
+ *  2.4 — so this catches most nonsense and a few vague phrases, never a
+ *  strong one. */
+const WEAK_TOP_Z = 2.5;
+
+/** One token with a file name's marks — a `_`, `-` or `.`, or a digit — and no
+ *  spaces: typed into meaning search it matches nothing it names. */
+function looksLikeFileName(text: string): boolean {
+  const t = text.trim();
+  return t.length >= 3 && !/\s/.test(t) && /[_\-.0-9]/.test(t);
+}
 
 const TILE_SIZES = ["s", "m", "l"] as const;
 const TILE_SIZE_NAME: Record<TileSize, string> = {
@@ -618,6 +633,10 @@ export default function App() {
   }, [viewer?.entry.path]);
   const [ao, setAoState] = useState(aoEnabled);
   const [panelOpen, setPanelOpen] = useState(() => !collapseStore.read());
+  const panelToggleRef = useRef<HTMLButtonElement>(null);
+  const [showScores, setShowScores] = useState(() => showScoresStore.read());
+  /** The query last sent to the names because it looked like a file name. */
+  const [autoNamed, setAutoNamed] = useState<string | null>(null);
   const [tileSize, setTileSize] = useState<TileSize>(() =>
     tileSizeStore.read(),
   );
@@ -1160,6 +1179,7 @@ export default function App() {
       setFindText("");
       setFindOpen(false);
       setMarked(null);
+      arrivalFocusRef.current = {};
       // So a volume mounted later needs a navigation, not a reload (R4).
       const lib = libraryRef.current;
       if (lib !== null && lib.state !== "ready") probeLibrary();
@@ -1227,6 +1247,33 @@ export default function App() {
     commit({ type: "deferredToName" });
   }
 
+  /**
+   * Where focus goes when a navigation lands, if the keyboard has lost it: the
+   * pressed tile unmounts with its listing, which drops focus to `<body>` and
+   * leaves the next Tab starting from the top of the page. Coming up, the
+   * folder just left; otherwise the first tile.
+   */
+  const arrivalFocusRef = useRef<{ child?: string } | null>(null);
+  useEffect(() => {
+    const want = arrivalFocusRef.current;
+    if (want === null || state.inflight !== null || state.result === null)
+      return;
+    arrivalFocusRef.current = null;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const main = mainRef.current;
+    if (main === null) return;
+    const el =
+      (want.child !== undefined ? findTile(main, want.child) : null) ??
+      tilesIn(main)[0];
+    el?.focus({ preventScroll: true });
+  }, [state.result, state.inflight]);
+
+  function focusFirstTile(): void {
+    const main = mainRef.current;
+    if (main !== null) tilesIn(main)[0]?.focus();
+  }
+
   function openFind(): void {
     setFindOpen(true);
     setFindFocus((n) => n + 1);
@@ -1234,8 +1281,11 @@ export default function App() {
 
   /** A closed control must never leave the grid silently narrowed. */
   function closeFind(): void {
+    const fromBar = document.activeElement?.closest("[data-find-bar]") != null;
     setFindOpen(false);
     setFindText("");
+    // The bar's input is about to unmount under the keyboard.
+    if (fromBar) requestAnimationFrame(focusFirstTile);
   }
 
   /** Decides what the *server* returns, so a committed query is re-issued (D3).
@@ -1309,7 +1359,16 @@ export default function App() {
   }
 
   function submitSearch(): void {
-    if (state.drafts.queryText.trim() === "") return;
+    const text = state.drafts.queryText.trim();
+    if (text === "") return;
+    // Asked of the names for this one search, and said so over the results,
+    // with the way back to meaning one click away.
+    if (live.mode === "meaning" && looksLikeFileName(text)) {
+      setAutoNamed(text);
+      commit({ type: "submit", mode: "name" });
+      return;
+    }
+    setAutoNamed(null);
     commit({ type: "submit" });
   }
 
@@ -1681,7 +1740,17 @@ export default function App() {
   // dep is deliberately narrower than the selector's argument: a fresh array
   // per state change would re-render every tile for an availability tick.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const kept = useMemo(() => byKind(state), [state.result]);
+  const kept = useMemo(() => {
+    const k = byKind(state);
+    const v = state.result?.forView;
+    // A flat view is asked for to see the models; the folders it also lists
+    // are a way onward, so they go after rather than burying the first model.
+    if (v === undefined || !v.flat || v.subject.kind !== "none") return k;
+    return [
+      ...k.filter((e) => e.kind === "model"),
+      ...k.filter((e) => e.kind !== "model"),
+    ];
+  }, [state.result]);
   const filteredListing = useMemo(
     () =>
       needle === ""
@@ -1700,15 +1769,22 @@ export default function App() {
   /** Models on screen still waiting for a picture — said once in the results
    *  line, rather than only as a spinner per tile. */
   const pendingThumbs = useMemo(() => {
+    const waiting = (path: string): boolean => {
+      const t = thumbs.get(path);
+      return t === undefined || (t.status === "loading" && t.url === undefined);
+    };
     let n = 0;
     for (const e of shownEntries) {
-      if (e.kind !== "model") continue;
-      const t = thumbs.get(e.path);
-      if (t === undefined || (t.status === "loading" && t.url === undefined))
-        n++;
+      if (e.kind === "model") {
+        if (waiting(e.path)) n++;
+      } else {
+        // A folder's sheet is rendered model by model too.
+        for (const cell of previews.get(e.path) ?? [])
+          if (waiting(cell.path)) n++;
+      }
     }
     return n;
-  }, [shownEntries, thumbs]);
+  }, [shownEntries, thumbs, previews]);
 
   /** What a plain listing holds — the line a search spends on its label. */
   const listingSummary = useMemo(() => {
@@ -2135,6 +2211,7 @@ export default function App() {
       model: null,
     });
     navigate(parent);
+    arrivalFocusRef.current = { child: target };
     raisePlacement({
       kind: "up",
       placement: trailWalkBack(historyIndex(), parentKey)?.placement ?? null,
@@ -2228,27 +2305,99 @@ export default function App() {
     [commit],
   );
 
+  /** The strongest z among the results. The index's own `weak` flag misses
+   *  some phrases that match nothing, and a top this low reads as a guess
+   *  whatever the flag says. */
+  let topZ = Number.NEGATIVE_INFINITY;
+  if (label.meaning)
+    for (const e of kept) {
+      const z = scoreFor(e.path)?.z;
+      if (z !== undefined && z > topZ) topZ = z;
+    }
+  const weakSet = label.weak || (Number.isFinite(topZ) && topZ < WEAK_TOP_Z);
+
+  /**
+   * The results line: the count first, so a narrow screen truncates the query
+   * rather than the number, then the query as a chip, then whatever qualifies
+   * the set. No `weak`/`capped` notes for neighbours: the index publishes
+   * neither for them, and rendering them off `false` would report a
+   * measurement that came out negative (4.7).
+   */
+  const resultsHead: {
+    count: string;
+    query: string;
+    icon: IconName;
+    notes: ReactNode[];
+  } | null =
+    labelQuery !== null
+      ? {
+          count: searchHasNoMatches
+            ? "No matches"
+            : label.meaning
+              ? // A different act from the index's ceiling, in different
+                // words (D9). Gated on *both* bounds being in force: floorless,
+                // `matched` is everything scored, and countless the short set
+                // is the cap saying so twice.
+                label.capping &&
+                label.matched !== undefined &&
+                label.matched > label.shown
+                ? `Top ${label.shown} of ${label.matched} matches`
+                : `${label.shown} closest ${label.shown === 1 ? "match" : "matches"}`
+              : `${kept.length} ${kept.length === 1 ? "result" : "results"}`,
+          query: labelQuery,
+          icon: label.meaning ? "sparkles" : "type",
+          notes: searchHasNoMatches
+            ? []
+            : [
+                weakSet && "Nothing stood out — these are the closest guesses.",
+                // Not the ranking's horizon but the index's own ceiling (D2).
+                label.capped &&
+                  "The index returned fewer than asked for — its cap.",
+                !label.meaning && autoNamed === labelQuery && (
+                  <>
+                    Searched file names — “{labelQuery}” looks like one.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setMode("meaning")}
+                      className="font-medium text-accent underline-offset-2 hover:underline"
+                    >
+                      Search by meaning instead
+                    </button>
+                  </>
+                ),
+              ].filter((n): n is Exclude<typeof n, false> => n !== false),
+        }
+      : labelModel !== null
+        ? {
+            count: searchHasNoMatches
+              ? "Nothing similar"
+              : `${label.shown} similar ${label.shown === 1 ? "model" : "models"}`,
+            query: baseName(labelModel),
+            icon: "box",
+            notes: searchHasNoMatches ? [] : ["From across the collection."],
+          }
+        : null;
+
   /** Always present, so the grid starts at the same height in every state, the
    *  skeleton included. Opposite ends, so a long query cannot push the caveat
    *  off screen. */
-  const noticeBar = (
-    labelText: string,
-    caveat: string,
-    stale = false,
-    quiet = false,
-  ) => (
+  const noticeBar = (summary: string, caveat: string, stale = false) => (
     <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pt-3 pb-1 text-[13px]">
-      <div className="flex min-w-0 items-center gap-2">
-        {labelText !== "" && (
-          <p
-            className={
-              quiet
-                ? "min-w-0 truncate text-xs text-ink-3"
-                : "min-w-0 truncate font-medium text-ink"
-            }
-          >
-            {labelText}
-          </p>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {resultsHead !== null ? (
+          <>
+            <p className="shrink-0 font-semibold text-ink">
+              {resultsHead.count}
+            </p>
+            <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface py-1 pr-2.5 pl-2 text-xs text-ink-2 ring-1 ring-line">
+              <Icon name={resultsHead.icon} className="size-3 text-ink-3" />
+              <span className="truncate">“{resultsHead.query}”</span>
+            </span>
+          </>
+        ) : (
+          summary !== "" && (
+            <p className="min-w-0 truncate text-xs text-ink-3">{summary}</p>
+          )
         )}
         {/* The ONLY way out of a committed view on screen (D9), and the same
             transition emptying the input delegates to. Rendered for a model as
@@ -2261,11 +2410,11 @@ export default function App() {
             // One sentence for both destinations: where it lands is the entry's
             // provenance, and reading `history.state` during a render would
             // read it one render stale.
-            title="Stop showing this and go back to browsing"
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line-strong px-3 text-xs text-ink-2 hover:border-ink-3 hover:text-ink"
+            title="Leave these results"
+            aria-label="Dismiss"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-surface hover:text-ink touch:size-11"
           >
-            <Icon name="x" className="size-3" strokeWidth={2.25} />
-            Dismiss
+            <Icon name="x" className="size-3.5" strokeWidth={2.25} />
           </button>
         )}
         {/* The whole of §5.2's affordance: not a panel, an overlay or a
@@ -2288,38 +2437,16 @@ export default function App() {
         )}
         {caveat !== "" && <p className="text-xs text-warn">{caveat}</p>}
       </div>
+      {resultsHead !== null && resultsHead.notes.length > 0 && (
+        <div className="flex basis-full flex-wrap gap-x-4 text-xs text-ink-3">
+          {resultsHead.notes.map((n, i) => (
+            <p key={i}>{n}</p>
+          ))}
+        </div>
+      )}
     </div>
   );
 
-  // No `weak`/`capped` clauses here: the index publishes neither for
-  // neighbours, and rendering them off `false` would report a measurement that
-  // came out negative (4.7).
-  const similarLabel =
-    labelModel !== null && !searchHasNoMatches
-      ? `Models similar to "${baseName(labelModel)}", from across the collection.`
-      : "";
-  const resultsLabel =
-    labelQuery !== null && !searchHasNoMatches
-      ? `${label.meaning ? "Meaning matches" : "Search results"} for "${labelQuery}".${
-          // The set is weak, not the results (D10 — no per-result numbers).
-          label.weak ? " Nothing stood out — these are the closest." : ""
-        }${
-          // Not the ranking's horizon but the index's own ceiling (D2).
-          label.capped
-            ? " The index returned fewer than asked for — its cap."
-            : ""
-        }${
-          // A different act from the ceiling above, in different words (D9).
-          // Gated on *both* bounds being in force rather than on the numbers
-          // differing: floorless, `matched` is everything scored, and countless
-          // the short set is the cap saying so twice.
-          label.capping &&
-          label.matched !== undefined &&
-          label.matched > label.shown
-            ? ` Showing ${label.shown} of ${label.matched} above the floor.`
-            : ""
-        }`
-      : similarLabel;
   // Over `kept`: the kind option is part of the view's identity, the live
   // filter is not.
   const shownModels = kept.filter((e) => e.kind === "model").length;
@@ -2353,37 +2480,43 @@ export default function App() {
         cover — it ran out of budget before finishing. Try searching from a
         deeper folder.
       </p>
-    ) : scope !== null ? (
+    ) : scope !== null && scope.status === "unindexed" ? (
       // Three outcomes, and only "nothing indexed" is fixed by indexing (4.1).
+      <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
+        Nothing here has been indexed yet — meaning search covers{" "}
+        {scope.covers.join(", ")} files outside archives.
+      </p>
+    ) : (
       <div className="mx-auto mt-20 flex max-w-md flex-col items-center gap-4 px-6 text-center">
+        <Icon name="search" className="size-8 text-ink-3" strokeWidth={1.5} />
         <p className="text-sm leading-relaxed text-ink-2">
-          {scope.status === "unindexed"
-            ? `Nothing here has been indexed yet — meaning search covers ${scope.covers.join(", ")} files outside archives.`
-            : `Nothing matched "${labelQuery}".${
-                scope.status === "partial"
-                  ? ` ${scope.indexed} of ${scope.scanned} models here are indexed.`
-                  : ""
-              }`}
+          Nothing matched “{labelQuery}”
+          {state.view.path !== "/" && <> in {baseName(state.view.path)}</>}.
+          {scope !== null &&
+            scope.status === "partial" &&
+            ` ${scope.indexed} of ${scope.scanned} models here are indexed.`}
         </p>
-        {/* A meaning search covers this folder and below, so the likeliest
-            repair for "nothing" is the same phrase from the top. */}
-        {label.subject.kind === "query" &&
+        {/* A search covers this folder and below, so the likeliest repair for
+            "nothing" is the same query from the top. */}
+        {labelQuery !== null &&
           state.view.path !== "/" &&
-          meaningRunnableAt(state.index, "/") && (
+          (!label.meaning || meaningRunnableAt(state.index, "/")) && (
             <button
               type="button"
-              onClick={() => runQuery(labelQuery ?? "")}
-              className="flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-semibold text-accent-ink hover:bg-accent-hover"
+              onClick={() =>
+                commit({
+                  type: "runQuery",
+                  text: labelQuery,
+                  mode: label.meaning ? "meaning" : "name",
+                })
+              }
+              className="flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-semibold text-accent-ink hover:bg-accent-hover touch:h-11"
             >
               <Icon name="search" className="size-3.5" strokeWidth={2.25} />
               Search the whole library
             </button>
           )}
       </div>
-    ) : (
-      <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
-        Nothing matched "{labelQuery}".
-      </p>
     )
   ) : kindHidesAll ? (
     <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
@@ -2500,6 +2633,11 @@ export default function App() {
               onChange={(e) => handleQueryTextChange(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") submitSearch();
+                // Down from the box is down into the results.
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  focusFirstTile();
+                }
               }}
               placeholder={
                 placeholderExample !== null
@@ -2507,8 +2645,14 @@ export default function App() {
                   : searchPlaceholder
               }
               // Never the placeholder: the accessible name must not change under
-              // a screen reader while the visible hint cycles (D6).
-              aria-label="Search names and folders"
+              // a screen reader while the visible hint cycles (D6). It follows
+              // the mode, which only the user changes.
+              aria-label={
+                meaningInForce
+                  ? "Search by meaning"
+                  : "Search file and folder names"
+              }
+              data-search-input
               spellCheck={false}
               className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-sm text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden"
             />
@@ -2532,8 +2676,8 @@ export default function App() {
                     aria-label={m === "name" ? "Name" : "Meaning"}
                     className={
                       live.mode === m
-                        ? "flex items-center gap-1 rounded bg-raised px-1.5 py-1 font-medium capitalize text-ink shadow-sm ring-1 ring-line-strong sm:px-2"
-                        : "flex items-center gap-1 rounded px-1.5 py-1 capitalize text-ink-3 hover:text-ink-2 sm:px-2"
+                        ? "flex h-7 items-center gap-1 rounded bg-raised px-2 font-medium capitalize text-ink shadow-sm ring-1 ring-line-strong touch:h-9 touch:px-3"
+                        : "flex h-7 items-center gap-1 rounded px-2 capitalize text-ink-3 hover:text-ink-2 touch:h-9 touch:px-3"
                     }
                   >
                     <Icon
@@ -2549,7 +2693,11 @@ export default function App() {
               type="button"
               onClick={submitSearch}
               disabled={state.drafts.queryText.trim() === ""}
-              title="Search this folder and everything below it by name — files and folders"
+              title={
+                meaningInForce
+                  ? "Search this folder and everything below it by what the models look like"
+                  : "Search this folder and everything below it by name — files and folders"
+              }
               aria-label="Search"
               className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-white/5 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
             >
@@ -2589,7 +2737,7 @@ export default function App() {
             disabled={target === "/"}
             aria-label="Parent directory"
             title="Up a folder (Alt+↑)"
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-surface hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-surface hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent touch:size-11"
           >
             <Icon name="cornerUp" />
           </button>
@@ -2603,8 +2751,8 @@ export default function App() {
               title="Narrow these by name (Ctrl-F)"
               className={
                 findOpen
-                  ? "flex h-8 items-center gap-1.5 rounded-md bg-surface px-2.5 text-[13px] text-ink"
-                  : "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 bg-surface px-2.5 text-[13px] text-ink"
+                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
               }
             >
               <Icon name="filter" className="size-3.5" />
@@ -2618,8 +2766,8 @@ export default function App() {
               title="Show every model under this folder in one grid"
               className={
                 live.flat
-                  ? "flex h-8 items-center gap-1.5 rounded-md bg-accent-soft px-2.5 text-[13px] font-medium text-accent"
-                  : "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 bg-accent-soft px-2.5 text-[13px] font-medium text-accent"
+                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
               }
             >
               <Icon name="layers" className="size-3.5" />
@@ -2644,8 +2792,8 @@ export default function App() {
                   }}
                   className={
                     tileSize === size
-                      ? "flex size-7 items-center justify-center rounded bg-surface text-ink"
-                      : "flex size-7 items-center justify-center rounded text-ink-3 hover:text-ink-2"
+                      ? "flex size-8 items-center justify-center rounded-md bg-surface text-ink"
+                      : "flex size-8 items-center justify-center rounded-md text-ink-3 hover:text-ink-2"
                   }
                 >
                   <Icon
@@ -2665,30 +2813,36 @@ export default function App() {
             <button
               type="button"
               aria-pressed={ao}
-              title="Ambient occlusion — turn off to speed up orbiting on weaker GPUs; thumbnails follow this setting and are cached under each"
+              title="Ambient occlusion: soft shading in creases. Turn it off if turning a model feels slow."
               onClick={() => {
                 setAoEnabled(!ao);
                 setAoState(!ao);
               }}
-              className={
-                ao
-                  ? "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink hover:bg-surface"
-                  : "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink-3 hover:bg-surface hover:text-ink-2"
-              }
+              className="flex h-8 items-center gap-2 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink touch:h-11"
             >
+              <span className="hidden md:inline">Occlusion</span>
+              <span className="md:hidden">AO</span>
               <span
                 aria-hidden="true"
                 className={
                   ao
-                    ? "size-3 rounded-full bg-[radial-gradient(circle_at_35%_35%,#fff,#777_55%,#222)]"
-                    : "size-3 rounded-full bg-ink-3/60"
+                    ? "flex h-4 w-7 items-center justify-end rounded-full bg-accent p-0.5"
+                    : "flex h-4 w-7 items-center justify-start rounded-full bg-white/15 p-0.5"
                 }
-              />
-              <span className="hidden md:inline">Occlusion</span>
+              >
+                <span
+                  className={
+                    ao
+                      ? "size-3 rounded-full bg-accent-ink"
+                      : "size-3 rounded-full bg-ink-2"
+                  }
+                />
+              </span>
             </button>
             {/* The panel's own dot, carried out to where it is opened from:
                 it answers "why are my results strange?" while closed (D5). */}
             <button
+              ref={panelToggleRef}
               type="button"
               data-panel-toggle
               aria-expanded={panelOpen}
@@ -2700,8 +2854,8 @@ export default function App() {
               }}
               className={
                 panelOpen
-                  ? "relative flex h-8 items-center gap-1.5 rounded-md bg-surface px-2.5 text-[13px] text-ink"
-                  : "relative flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+                  ? "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 bg-surface px-2.5 text-[13px] text-ink"
+                  : "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
               }
             >
               <Icon name="sliders" className="size-3.5" />
@@ -2717,7 +2871,7 @@ export default function App() {
         </div>
         {headerMessage !== null && (
           <p
-            role="status"
+            role={headerMessage.tone === "error" ? "alert" : "status"}
             data-header-message={headerMessage.tone}
             className={
               headerMessage.tone === "error"
@@ -2816,9 +2970,7 @@ export default function App() {
                   )}
                 </p>
               )}
-              {resultsLabel === "" && !dismissable
-                ? noticeBar(listingSummary, omittedNotice, refreshing, true)
-                : noticeBar(resultsLabel, omittedNotice, refreshing)}
+              {noticeBar(listingSummary, omittedNotice, refreshing)}
               {/* An anchor is something to show, so it stays above its own
                   "nothing similar". */}
               {emptyNotice === null || anchor !== undefined ? (
@@ -2840,6 +2992,7 @@ export default function App() {
                   onBands={reportBands}
                   scrollRoot={mainRef}
                   size={tileSize}
+                  showScores={showScores}
                 />
               ) : null}
               {emptyNotice}
@@ -2854,10 +3007,16 @@ export default function App() {
           similar={liveSimilar}
           library={libraryJobs}
           onSimilarTuning={setSimilarTuning}
+          showScores={showScores}
+          onShowScores={(on) => {
+            setShowScores(on);
+            showScoresStore.write(on);
+          }}
           open={panelOpen}
           onClose={() => {
             setPanelOpen(false);
             collapseStore.write(true);
+            panelToggleRef.current?.focus();
           }}
           path={target}
           folderMatching={live.folderMatching}
@@ -2914,6 +3073,7 @@ export default function App() {
           // Through `scoreFor`, so the panel reports what the tile did (D7).
           score={scoreFor(viewer.entry.path)}
           scoreScale={scoreScale}
+          showScores={showScores}
           ao={ao}
           api={api}
           lru={lru}

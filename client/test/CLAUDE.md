@@ -24,6 +24,13 @@
 - The side panel starts closed for a fresh profile and renders nothing until opened, so an
   absence assertion about its contents passes vacuously on a closed panel. Open it with the
   harness's `openPanel()` (the toolbar's `button[data-panel-toggle]`) before asserting either way
+- Match scores (the k/sim and z numbers) are drawn only under the "Show match scores"
+  preference, off by default, so an assertion that a number is *absent* passes vacuously
+  unless it is on. Seed `showScoresStore.write(true)` (lib/scoreScale.ts) before the mount,
+  or call the harness's `showMatchScores()` after it
+- Read the results line through the harness's `resultsLabel()` (`2 results “found”`, null
+  over a plain listing) rather than a sentence in `container.textContent`: when the copy
+  changes, a `not.toContain` on the old sentence keeps passing and asserts nothing
 - Preference modules (`aoToggle.ts`, `lib/searchOptions.ts`) hold state in a
   module closure: `localStorage.clear()` does not reset them and tests inherit each other's
   settings. Reset via their setters in `beforeEach`, or re-import after `vi.resetModules()`

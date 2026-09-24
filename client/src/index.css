@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/** A coarse pointer: controls grow to a finger's size under `touch:`. */
+@custom-variant touch (@media (pointer: coarse));
+
 /**
  * The design tokens. Roles, not hues: a component asks for the surface it sits
  * on or the ink it writes in, so the palette can move without a sweep.

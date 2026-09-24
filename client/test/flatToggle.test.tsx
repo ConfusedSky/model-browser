@@ -90,8 +90,8 @@ describe("flat toggle", () => {
 
     expect(flatButton().getAttribute("aria-pressed")).toBe("true");
     // Tile labels show only the file name; the relative path survives on the tile
-    // itself, as the tooltip and the accessible name.
-    expect(labels()).toEqual(["a", "deep.stl"]);
+    // itself, as the tooltip and the accessible name. Models lead a flat view.
+    expect(labels()).toEqual(["deep.stl", "a"]);
     const tile = container.querySelector("main button[data-model-tile]")!;
     expect(tile.getAttribute("title")).toBe("a/deep.stl");
     // The accessible name may carry a thumbnail-state suffix; the path is the point.

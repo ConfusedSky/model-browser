@@ -16,7 +16,7 @@ import Icon from "./Icon";
 /** Never glued to a `${`: Tailwind's scanner reads source text, so a computed
  *  candidate never reaches the stylesheet. */
 const CHIP_CLASS =
-  "rounded-full border border-line-strong bg-surface px-3 py-1 text-[13px] text-ink-2 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-ink";
+  "rounded-full border border-line-strong bg-surface px-3 py-1 text-[13px] text-ink-2 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-ink touch:py-2.5";
 
 /** An invitation to describe something is an offer nothing can take up once
  *  the chips are withheld. */
@@ -48,11 +48,12 @@ export default function IntroBanner({
       >
         <Icon name="sparkles" />
       </span>
-      {/* On a phone only the first few chips are drawn: the strip must not
-          bury the grid it introduces. */}
+      {/* Only the first few chips are drawn — three on a phone, six wider: the
+          strip must not bury the grid it introduces, and the rest stay one
+          "Surprise me" away. */}
       <div
         data-intro-flow
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-2 [&>button:nth-of-type(n+5)]:hidden sm:[&>button:nth-of-type(n+5)]:inline-flex"
+        className="flex min-w-0 flex-1 flex-wrap items-center gap-2 [&>button:nth-of-type(n+4)]:hidden sm:[&>button:nth-of-type(n+4)]:inline-flex sm:[&>button:nth-of-type(n+7)]:hidden"
       >
         <span className="basis-full text-sm font-medium text-ink">
           {meaningRunnable ? SENTENCE_WITH_SEARCH : SENTENCE_PLAIN}

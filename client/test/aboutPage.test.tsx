@@ -9,11 +9,12 @@
 // Driven against the component with plain react-dom rather than through App,
 // because the page is not a view of the app at all — it has its own Vite entry
 // and its own root, and there is no App state that reaches it. The only input
-// it takes is an `ApiClient`.
+// it takes is an `ApiClient`, read for the credits and for the deployment's
+// posture.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { CreditedKit } from "../../shared/types";
+import type { CreditedKit, FeatureReport } from "../../shared/types";
 import type { ApiClient } from "../src/api/client";
 import AboutPage from "../src/components/AboutPage";
 (
@@ -101,10 +102,33 @@ const HOSTILE: CreditedKit = {
   },
 };
 
-/** An API client that answers `credits()` and nothing else — the only method
- *  this page calls. */
-function fakeApi(credits: () => Promise<CreditedKit[]>): ApiClient {
-  return { credits } as unknown as ApiClient;
+/** `deploy/demo/config.json`'s posture: every capability off, the
+ *  introduction on. */
+const DEMO: FeatureReport = {
+  thumbWrites: false,
+  appLaunch: false,
+  chatTab: false,
+  hostDetails: false,
+  maintenance: false,
+  intro: true,
+};
+
+/** An owner's own machine that has turned the introduction on. */
+const OWNER: FeatureReport = {
+  ...DEMO,
+  thumbWrites: true,
+  appLaunch: true,
+  hostDetails: true,
+  maintenance: true,
+};
+
+/** An API client that answers `credits()` and `features()` and nothing else —
+ *  the only methods this page calls. */
+function fakeApi(
+  credits: () => Promise<CreditedKit[]>,
+  features: () => Promise<FeatureReport> = () => Promise.resolve(DEMO),
+): ApiClient {
+  return { credits, features } as unknown as ApiClient;
 }
 
 let host: HTMLDivElement;
@@ -123,6 +147,16 @@ const lines = (): HTMLElement[] =>
 /** A credit field's span inside one line, as ViewerLayer addresses its rows. */
 const field = (li: HTMLElement, name: string): HTMLElement | null =>
   li.querySelector<HTMLElement>(`[data-credit="${name}"]`);
+/** The line a kit is listed under, found by name: the list is sorted, so a
+ *  position says nothing about which kit it is. */
+const lineNamed = (name: string): HTMLElement => {
+  const li = lines().find((l) => field(l, "name")?.textContent === name);
+  if (li === undefined) throw new Error(`no credit line named ${name}`);
+  return li;
+};
+/** Rendered text with JSX's source wrapping collapsed. */
+const textOf = (el: Element | null | undefined): string =>
+  (el?.textContent ?? "").replace(/\s+/g, " ");
 
 beforeEach(() => {
   host = document.createElement("div");
@@ -239,6 +273,100 @@ describe("the page as a document", () => {
       " ",
     );
     expect(privacy).toContain("browser’s own storage");
+  });
+
+  it("indexes every section at the top", async () => {
+    // A long document: the index is how a reader gets past the first screen.
+    await mount(fakeApi(() => Promise.resolve([])));
+    const index = host.querySelector('nav[aria-label="On this page"]');
+    expect(index).not.toBeNull();
+    const targets = Array.from(index!.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect([...targets].sort()).toEqual(
+      SECTIONS.map(([id]) => `#${id}`).sort(),
+    );
+    expect(
+      index!.compareDocumentPosition(host.querySelector("section")!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("keeps the how-to to five lines, naming the find binding and the browser's menu", async () => {
+    // `visitor-intro`: at most five lines, Ctrl+F named as the one binding that
+    // replaces the browser's own, and Shift+right-click reaching the browser's
+    // menu.
+    await mount(fakeApi(() => Promise.resolve([])));
+    const howTo = host.querySelector("#how-to");
+    expect(howTo?.querySelectorAll("li").length).toBeLessThanOrEqual(5);
+    const text = textOf(howTo);
+    expect(text).toMatch(/Ctrl\s*\+\s*F.*the one binding that replaces/);
+    expect(text).toContain(
+      "Shift+right-click goes past them to the browser’s own menu",
+    );
+    // The chrome it describes: the Occlusion control moved into the toolbar,
+    // and the copy once sent readers to the bottom left for it.
+    expect(text).toContain("Occlusion");
+    expect(text).not.toMatch(/bottom left/i);
+  });
+});
+
+describe("the deployment's posture", () => {
+  const title = (): string => host.querySelector("h1")?.textContent ?? "";
+  const differences = (): HTMLElement[] =>
+    Array.from(host.querySelectorAll("#differences li"));
+
+  it("reads as the public demo where every capability is off", async () => {
+    await mount(fakeApi(() => Promise.resolve([])));
+    expect(title()).toBe("About this demo");
+    expect(textOf(host.querySelector("#what"))).toContain("A public demo");
+    expect(differences()).toHaveLength(5);
+  });
+
+  it("drops the demo's claims on an owner's machine", async () => {
+    // Found on an owner's library with the introduction on: "About this demo"
+    // over their own folders, and a list of actions withheld that were not.
+    await mount(
+      fakeApi(
+        () => Promise.resolve([]),
+        () => Promise.resolve(OWNER),
+      ),
+    );
+    expect(title()).toBe("About Model Browser");
+    const what = textOf(host.querySelector("#what"));
+    expect(what).not.toContain("public demo of");
+    expect(what).not.toContain("ahead of time");
+    expect(differences()).toHaveLength(0);
+    expect(textOf(host.querySelector("#differences"))).toContain("Nothing");
+    // Framings are written where thumbnails are, so "kept nowhere" is false.
+    expect(textOf(host.querySelector("#privacy"))).not.toContain(
+      "kept nowhere",
+    );
+  });
+
+  it("lists only what the deployment withholds", async () => {
+    // One item per capability declared off, not a demo/owner switch.
+    await mount(
+      fakeApi(
+        () => Promise.resolve([]),
+        () => Promise.resolve({ ...OWNER, appLaunch: false }),
+      ),
+    );
+    expect(differences().map((li) => textOf(li))).toEqual([
+      expect.stringContaining("Opening a model in a slicer"),
+    ]);
+  });
+
+  it("keeps the demo's copy while the report is unknown or failed", async () => {
+    // Unknown withholds, as it does for every gated surface in the app.
+    await mount(
+      fakeApi(
+        () => Promise.resolve([]),
+        () => Promise.reject(new Error("offline")),
+      ),
+    );
+    expect(title()).toBe("About this demo");
+    expect(differences()).toHaveLength(5);
   });
 });
 
@@ -371,6 +499,24 @@ describe("a fragment in the URL", () => {
     }
   });
 
+  it("scrolls to a letter of the credits once the list has drawn it", async () => {
+    // `#credits-p` names nothing until the credits arrive, so the mount pass
+    // finds no target; the settled pass is what lands the reader on it.
+    const watch = watchScrolls(900);
+    window.history.replaceState(null, "", "/about.html#credits-p");
+    const { api, resolve } = deferredApi();
+    try {
+      await mount(api);
+      expect(watch.ids).toEqual([]);
+      await act(async () => {
+        resolve(KITS);
+      });
+      expect(watch.ids).toEqual(["credits-p"]);
+    } finally {
+      watch.restore();
+    }
+  });
+
   it("scrolls nowhere without one", async () => {
     const watch = watchScrolls();
     try {
@@ -386,16 +532,11 @@ describe("the credits list", () => {
   it("draws one line per kit, with the lightbox’s links", async () => {
     await mount(fakeApi(() => Promise.resolve(KITS)));
     expect(lines()).toHaveLength(3);
-    const [first, second, third] = lines() as [
-      HTMLElement,
-      HTMLElement,
-      HTMLElement,
-    ];
-
-    // The display name where one is stored…
-    expect(first.textContent).toContain("Player Character Pack 03");
-    // …and the kit's own folder name where none is.
-    expect(second.textContent).toContain("Zombie_Collection_2847691");
+    // The display name where one is stored, and the kit's own folder name
+    // where none is — `lineNamed` throws if either is not drawn.
+    const first = lineNamed("Player Character Pack 03");
+    const second = lineNamed("Zombie_Collection_2847691");
+    const third = lineNamed("Tomb");
 
     const author = field(first, "author")?.querySelector("a");
     expect(author?.getAttribute("href")).toBe(
@@ -434,16 +575,60 @@ describe("the credits list", () => {
 
   it("draws the modification phrase only where the store holds one", async () => {
     await mount(fakeApi(() => Promise.resolve(KITS)));
-    const [first, second, third] = lines() as [
-      HTMLElement,
-      HTMLElement,
-      HTMLElement,
-    ];
-    expect(field(first, "modified")?.textContent).toContain(
-      "re-exported as STL and decimated for display",
+    expect(
+      field(lineNamed("Player Character Pack 03"), "modified")?.textContent,
+    ).toContain("re-exported as STL and decimated for display");
+    expect(
+      field(lineNamed("Zombie_Collection_2847691"), "modified"),
+    ).toBeNull();
+    expect(field(lineNamed("Tomb"), "modified")).toBeNull();
+  });
+
+  it("sorts the kits by name and indexes them by first letter", async () => {
+    // 444 kits on the demo: without an index the list is a scroll to the
+    // bottom of a very long page.
+    const odd: CreditedKit = {
+      path: "/1_Treasure_Token_2615634",
+      name: '1" Treasure Token',
+      credits: { author: "someone" },
+    };
+    await mount(fakeApi(() => Promise.resolve([...KITS, odd])));
+    expect(lines().map((l) => field(l, "name")?.textContent)).toEqual([
+      '1" Treasure Token',
+      "Player Character Pack 03",
+      "Tomb",
+      "Zombie_Collection_2847691",
+    ]);
+    // Only letters something is filed under, each leading to its group, and
+    // the group holding the kits the letter names.
+    const hrefsIn = (scope: string): (string | null)[][] =>
+      Array.from(
+        host.querySelectorAll<HTMLAnchorElement>(
+          `${scope} nav[aria-label="Credits by first letter"] a`,
+        ),
+      ).map((a) => [a.textContent, a.getAttribute("href")]);
+    expect(hrefsIn("#credits")).toEqual([
+      ["#", "#credits-other"],
+      ["P", "#credits-p"],
+      ["T", "#credits-t"],
+      ["Z", "#credits-z"],
+    ]);
+    // The page index carries the same letters for the wide layout, where it
+    // stays in view and the bar over the list is not drawn.
+    expect(hrefsIn('nav[aria-label="On this page"]')).toEqual(
+      hrefsIn("#credits"),
     );
-    expect(field(second, "modified")).toBeNull();
-    expect(field(third, "modified")).toBeNull();
+    const jumps = Array.from(
+      host.querySelectorAll<HTMLAnchorElement>(
+        '#credits nav[aria-label="Credits by first letter"] a',
+      ),
+    );
+    for (const a of jumps) {
+      const group = host.querySelector(a.getAttribute("href")!);
+      expect(group).not.toBeNull();
+      expect(group!.querySelectorAll("li").length).toBeGreaterThan(0);
+    }
+    expect(textOf(host.querySelector("#credits"))).toContain("4 kits, by name");
   });
 
   it("draws a URL it will not follow as text, never as a link", async () => {

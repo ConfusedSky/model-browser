@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../api/client";
 import { getRecents } from "../lib/recents";
+import Icon from "./Icon";
 
 interface Props {
   path: string;
@@ -64,6 +65,10 @@ export default function PathBar({ path, api, onNavigate }: Props) {
   }
 
   const crumbs = crumbsOf(path);
+  /** Deep paths keep the top, the parent and the current folder; the middle
+   *  folds into one "…" that opens the path for typing. */
+  const shown: ({ label: string; path: string } | null)[] =
+    crumbs.length > 4 ? [crumbs[0]!, null, ...crumbs.slice(-2)] : crumbs;
   return (
     <div className="relative min-w-0 flex-1">
       <input
@@ -111,29 +116,62 @@ export default function PathBar({ path, api, onNavigate }: Props) {
           className="pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1 text-[13px]"
         >
           <ol className="flex min-w-0 items-center">
-            {crumbs.map((c, i) => {
-              const last = i === crumbs.length - 1;
+            {shown.map((c, i) => {
+              const last = i === shown.length - 1;
               return (
-                <li key={c.path} className="flex min-w-0 items-center">
+                <li
+                  key={c === null ? "gap" : c.path}
+                  // The two nearest keep their names whole; anything further
+                  // out gives way first.
+                  className={
+                    last || i === shown.length - 2
+                      ? "flex min-w-0 shrink items-center"
+                      : "flex min-w-0 shrink-[4] items-center"
+                  }
+                >
                   {i > 0 && (
                     <span aria-hidden="true" className="px-0.5 text-ink-3">
                       /
                     </span>
                   )}
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    aria-current={last ? "location" : undefined}
-                    onClick={() => onNavigate(c.path)}
-                    title={c.path}
-                    className={
-                      last
-                        ? "pointer-events-auto min-w-0 truncate rounded px-1.5 py-0.5 font-medium text-ink hover:bg-raised"
-                        : "pointer-events-auto max-w-48 shrink truncate rounded px-1.5 py-0.5 text-ink-2 hover:bg-raised hover:text-ink"
-                    }
-                  >
-                    {c.label}
-                  </button>
+                  {c === null ? (
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      title="Type a path"
+                      onClick={() => inputRef.current?.focus()}
+                      className="pointer-events-auto rounded px-1.5 py-1 text-ink-3 hover:bg-raised hover:text-ink"
+                    >
+                      …
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-current={last ? "location" : undefined}
+                      aria-label={c.path === "/" ? "Library" : undefined}
+                      onClick={() => onNavigate(c.path)}
+                      title={c.path}
+                      className={
+                        last
+                          ? "pointer-events-auto flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 font-medium text-ink hover:bg-raised touch:py-2.5"
+                          : "pointer-events-auto flex min-w-0 items-center gap-1.5 rounded px-1.5 py-1 text-ink-2 hover:bg-raised hover:text-ink touch:py-2.5"
+                      }
+                    >
+                      {c.path === "/" && (
+                        <Icon name="home" className="size-3.5" />
+                      )}
+                      <span
+                        className={
+                          c.path === "/"
+                            ? "hidden truncate sm:inline"
+                            : "truncate"
+                        }
+                      >
+                        {c.label}
+                      </span>
+                    </button>
+                  )}
                 </li>
               );
             })}

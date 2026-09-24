@@ -330,15 +330,34 @@ export function labels(): string[] {
 export function skeleton(): Element | null {
   return container.querySelector(".animate-pulse");
 }
+/**
+ * The results line as read — its count, then the query or model its chip names
+ * — e.g. `2 results “found”`; null where it names nothing, as over a plain
+ * listing. Found by the chip's shape, a lone curly-quoted span, since the line
+ * carries no attribute of its own.
+ */
+export function resultsLabel(): string | null {
+  const chip = Array.from(container.querySelectorAll("main span")).find(
+    (s) => s.childElementCount === 0 && /^“.*”$/s.test(s.textContent ?? ""),
+  );
+  if (chip === undefined) return null;
+  const count = chip.parentElement?.previousElementSibling?.textContent ?? "";
+  return `${count} ${chip.textContent}`;
+}
+/** The one control that leaves a committed view (D9) — in `main`, because the
+ *  job chip's close button shares its accessible name. */
+export function dismissButton(): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    'main button[aria-label="Dismiss"]',
+  );
+}
 export function pathInput(): HTMLInputElement {
   return container.querySelector<HTMLInputElement>(
     'input[placeholder="Type a directory path…"]',
   )!;
 }
 export function searchInput(): HTMLInputElement {
-  return container.querySelector<HTMLInputElement>(
-    'input[aria-label="Search names and folders"]',
-  )!;
+  return container.querySelector<HTMLInputElement>("input[data-search-input]")!;
 }
 /** Open the side panel from the toolbar, as a user does — it starts closed for
  *  a fresh profile. A no-op when it is already open. */
@@ -347,6 +366,22 @@ export async function openPanel(): Promise<void> {
     "button[data-panel-toggle]",
   )!;
   if (toggle.getAttribute("aria-expanded") !== "true") await click(toggle);
+}
+/** Turn "Show match scores" on as a user does — the switch on the Options
+ *  panel's search tab — then put the panel away again. */
+export async function showMatchScores(): Promise<void> {
+  await openPanel();
+  const tab = Array.from(
+    container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]'),
+  ).find((b) => b.textContent?.trim().toLowerCase().startsWith("search"));
+  if (tab !== undefined) await click(tab);
+  const toggle = container.querySelector<HTMLButtonElement>(
+    'button[role="switch"][aria-label="Show match scores"]',
+  )!;
+  if (toggle.getAttribute("aria-checked") !== "true") await click(toggle);
+  await click(
+    container.querySelector<HTMLButtonElement>("button[data-panel-toggle]")!,
+  );
 }
 /** The summoned find control's input — absent until it is opened. */
 export function findInput(): HTMLInputElement | null {

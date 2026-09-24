@@ -7,10 +7,6 @@ import {
   AXIS_GROUP_CLASS,
   AXIS_LETTERS,
   FLIP_TITLE,
-  OPEN_IN_CAPTION,
-  OPEN_IN_CAPTION_CLASS,
-  OPEN_IN_GROUP_CLASS,
-  OPEN_IN_PILL_CLASS,
   axisLetter,
   axisPillClass,
   axisWithLetter,
@@ -57,7 +53,7 @@ const EDGE = 6;
  *  it rather than carrying a copy. A string and not a component, since the two
  *  surfaces differ in what they hand their `onClick`. */
 export const MENU_ITEM_CLASS =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-white/[0.06] focus:bg-white/[0.06] focus:outline-none";
+  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-white/[0.06] focus:bg-white/[0.08] focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/80 touch:py-3";
 
 /** Each command's glyph, drawn wherever the command is — menu and panel. */
 export const COMMAND_ICON: Record<CommandId, IconName> = {
@@ -108,38 +104,30 @@ export default function EntryMenu({
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
 
-  // Pill rows first, in DOM order — what `focused` indexes and what the focus
-  // effect reads back out of the DOM. The open-in row is as long as the
-  // registry says, which is why the seam below is computed.
+  // Rows first — the commands, with the launch rows after the first — then the
+  // axis group, in DOM order: what `focused` indexes and what the focus effect
+  // reads back out of the DOM.
   const axisCount = axis === null ? 0 : AXIS_LETTERS.length + 1;
   const openInCount = openIn === null ? 0 : openIn.apps.length;
-  const pillCount = axisCount + openInCount;
-  const count = pillCount + commands.length;
+  const rowCount = commands.length + openInCount;
+  const count = rowCount + axisCount;
   const currentAxisRow =
     axis === null
       ? 0
       : Math.max(0, AXIS_LETTERS.indexOf(axisLetter(axis.current)));
 
-  // On the first *command*: the commands are what the menu is for, the groups
-  // are properties of the model shown alongside them.
-  const [focused, setFocused] = useState(pillCount);
+  // On the first command: it is what a keyboard raise most often wants.
+  const [focused, setFocused] = useState(0);
 
   /**
-   * One arrow step. **A group is entered where a choice sensibly starts** — the
-   * axis group at the letter in force, the open-in group at the registry's
-   * default. The rules catch crossings only, which is why each tests where the
-   * step came *from* as well as where it lands.
+   * One arrow step. **The axis group is entered at the letter in force**,
+   * whichever side the step comes from; within it and among the rows, steps
+   * are plain.
    */
   function step(from: number, delta: number): number {
     const next = (from + delta + count) % count;
-    if (from >= axisCount && next < axisCount) return currentAxisRow;
-    if (
-      (from < axisCount || from >= pillCount) &&
-      next >= axisCount &&
-      next < pillCount
-    ) {
-      return axisCount;
-    }
+    const inAxis = (i: number): boolean => i >= rowCount;
+    if (!inAxis(from) && inAxis(next)) return rowCount + currentAxisRow;
     return next;
   }
 
@@ -149,7 +137,7 @@ export default function EntryMenu({
   useLayoutEffect(() => {
     const el = ref.current;
     if (el === null) return;
-    setFocused(pillCount);
+    setFocused(0);
     const r = el.getBoundingClientRect();
     setPos(
       clampToViewport(
@@ -161,7 +149,7 @@ export default function EntryMenu({
         window.innerHeight,
       ),
     );
-  }, [x, y, commands.length, axisCount, openInCount, pillCount]);
+  }, [x, y, commands.length, axisCount, openInCount]);
 
   // The menu owns the keyboard the moment it is raised, which is what makes
   // its Escape the one that fires.
@@ -197,6 +185,12 @@ export default function EntryMenu({
     };
   }, [onClose]);
 
+  /** Everyday commands first, maintenance after the divider. */
+  const ordered = [
+    ...commands.filter((c) => !MAINTENANCE_COMMANDS.has(c.id)),
+    ...commands.filter((c) => MAINTENANCE_COMMANDS.has(c.id)),
+  ];
+
   return (
     <div
       ref={ref}
@@ -224,17 +218,57 @@ export default function EntryMenu({
         }
       }}
     >
+      {ordered.map((c, i) => (
+        <Fragment key={c.id}>
+          {i > 0 &&
+            MAINTENANCE_COMMANDS.has(c.id) &&
+            !MAINTENANCE_COMMANDS.has(ordered[i - 1]!.id) && (
+              <div role="separator" className="mx-1 my-1 h-px bg-line" />
+            )}
+          <button
+            type="button"
+            role="menuitem"
+            data-command={c.id}
+            // Click, not pointerdown, which the dismissal above listens for.
+            onClick={() => onChoose(c)}
+            className={MENU_ITEM_CLASS}
+          >
+            <Icon name={COMMAND_ICON[c.id]} className="size-3.5 text-ink-3" />
+            {c.label}
+          </button>
+          {/* The launches follow the command that opens the model here.
+              `menuitem`, not `menuitemradio`: choosing one launches it rather
+              than marking the model as being that thing. No `data-command`
+              either — a surface reading the command rows must not find these. */}
+          {i === 0 &&
+            openIn !== null &&
+            openIn.apps.map((app) => (
+              <button
+                key={app.id}
+                type="button"
+                role="menuitem"
+                data-app-id={app.id}
+                onClick={() => openIn.onChoose(app.id)}
+                className={MENU_ITEM_CLASS}
+              >
+                <Icon name="externalLink" className="size-3.5 text-ink-3" />
+                <span className="min-w-0 truncate">Open in {app.name}</span>
+              </button>
+            ))}
+        </Fragment>
+      ))}
+      {axis !== null && (
+        <div role="separator" className="mx-1 my-1 h-px bg-line" />
+      )}
+      {/* Last: it re-frames the thumbnail, which makes it a tending action
+          rather than a way to use the model. */}
       {axis !== null && (
         // The caption is a `<span>`, so it stays out of the button index
         // `focused` walks. Split roles because the halves are different
         // questions, which costs the keyboard model nothing: `step` counts
         // buttons and never reads a role.
-        <div
-          role="group"
-          aria-label="Orbit axis"
-          className={`mb-1 ${AXIS_GROUP_CLASS}`}
-        >
-          <span className={AXIS_CAPTION_CLASS}>axis</span>
+        <div role="group" aria-label="Orbit axis" className={AXIS_GROUP_CLASS}>
+          <span className={AXIS_CAPTION_CLASS}>up axis</span>
           {AXIS_LETTERS.map((letter) => {
             const active = axisLetter(axis.current) === letter;
             return (
@@ -268,51 +302,6 @@ export default function EntryMenu({
           </button>
         </div>
       )}
-      {openIn !== null && (
-        // `menuitem`, not `menuitemradio`: choosing one launches it rather
-        // than marking the model as being that thing. No `data-command`
-        // either — a surface reading the command rows must not find these.
-        <div
-          role="group"
-          aria-label="Open in"
-          className={`mb-1 ${OPEN_IN_GROUP_CLASS}`}
-        >
-          <span className={OPEN_IN_CAPTION_CLASS}>{OPEN_IN_CAPTION}</span>
-          {openIn.apps.map((app) => (
-            <button
-              key={app.id}
-              type="button"
-              role="menuitem"
-              data-app-id={app.id}
-              title={app.name}
-              onClick={() => openIn.onChoose(app.id)}
-              className={`${OPEN_IN_PILL_CLASS} ${FOCUS_RING}`}
-            >
-              {app.name}
-            </button>
-          ))}
-        </div>
-      )}
-      {commands.map((c, i) => (
-        <Fragment key={c.id}>
-          {i > 0 &&
-            MAINTENANCE_COMMANDS.has(c.id) &&
-            !MAINTENANCE_COMMANDS.has(commands[i - 1]!.id) && (
-              <div role="separator" className="mx-1 my-1 h-px bg-line" />
-            )}
-          <button
-            type="button"
-            role="menuitem"
-            data-command={c.id}
-            // Click, not pointerdown, which the dismissal above listens for.
-            onClick={() => onChoose(c)}
-            className={MENU_ITEM_CLASS}
-          >
-            <Icon name={COMMAND_ICON[c.id]} className="size-3.5 text-ink-3" />
-            {c.label}
-          </button>
-        </Fragment>
-      ))}
     </div>
   );
 }

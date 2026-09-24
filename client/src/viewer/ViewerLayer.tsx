@@ -33,7 +33,12 @@ import {
 } from "../lib/entryActions";
 import { formatBytes, formatCosine, formatDate, formatZ } from "../lib/format";
 import { expandLibraryPath } from "../lib/libraryPath";
-import { SCALE_BADGE, Z_LABEL, type ScoreScale } from "../lib/scoreScale";
+import {
+  SCALE_BADGE,
+  Z_LABEL,
+  strengthOf,
+  type ScoreScale,
+} from "../lib/scoreScale";
 import { GestureTracker, nativeMenuRequested } from "../lib/gesture";
 import type { MeshLru } from "../three/lru";
 import { DEFAULT_CAMERA, defaultAxisFor } from "../three/camera";
@@ -43,6 +48,12 @@ import { getRenderer } from "../three/renderer";
 import { liveRenderSize } from "./renderSize";
 import { ViewerSession } from "./session";
 import Icon from "../components/Icon";
+import { baseName } from "../../../shared/names";
+
+/** Read once: a device does not change what its pointer is mid-session. */
+const COARSE_POINTER =
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(pointer: coarse)").matches === true;
 
 /** The panel's launch buttons: the default application is the one filled
  *  button in the panel, so what "open" means is never a question. */
@@ -69,6 +80,8 @@ interface Props {
   /** The same derivation the tile reads, so the two surfaces cannot report one
    *  number under different names (D7). */
   scoreScale: ScoreScale | null;
+  /** The raw pair beside the strength word. */
+  showScores?: boolean;
   /** A prop, not a store read, so toggling repaints the live view. */
   ao: boolean;
   api: ApiClient;
@@ -135,6 +148,7 @@ export default function ViewerLayer({
   pose,
   score,
   scoreScale,
+  showScores = false,
   ao,
   api,
   lru,
@@ -165,6 +179,7 @@ export default function ViewerLayer({
   /** Shown instead of dismissing. */
   const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showHint, setShowHint] = useState(true);
   const [copyError, setCopyError] = useState<string | null>(null);
   /** `null` for every way of having nothing to show — no store, no key, a
    *  failed read — because the panel draws them identically (D4). */
@@ -688,6 +703,12 @@ export default function ViewerLayer({
     void onPersist(s);
   }
 
+  /** Everyday commands first, maintenance after the divider. */
+  const orderedPanel = [
+    ...panelCommands.filter((c) => !MAINTENANCE_COMMANDS.has(c.id)),
+    ...panelCommands.filter((c) => MAINTENANCE_COMMANDS.has(c.id)),
+  ];
+
   const spinner = (
     <span className="absolute left-1/2 top-1/2 size-7 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-2 border-white/10 border-t-white/50" />
   );
@@ -729,10 +750,10 @@ export default function ViewerLayer({
   return (
     <div
       className="fixed inset-0 z-lightbox flex items-center justify-center bg-black/75 backdrop-blur-sm sm:p-4"
-      onContextMenu={raiseEntryMenu}
       onPointerDown={(e) => {
-        // Primary only: a secondary press on the backdrop raises the menu, and
-        // must not close the view out from under it.
+        // Primary only: the panel beside the model already carries every
+        // command, so the lightbox raises no menu of its own, and a secondary
+        // press must not close the view either.
         if (e.button === 0 && e.target === e.currentTarget) onCloseIntent();
       }}
     >
@@ -754,7 +775,10 @@ export default function ViewerLayer({
             <div
               ref={canvasHostRef}
               className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
-              onPointerDown={startGesture}
+              onPointerDown={(e) => {
+                setShowHint(false);
+                startGesture(e);
+              }}
               onWheel={(e) => {
                 sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9);
                 renderNow();
@@ -825,12 +849,16 @@ export default function ViewerLayer({
               <path d="M9 6l6 6-6 6" />
             </svg>
           </button>
-          {session !== null && (
+          {/* On a pill, so the model cannot draw over it; gone once the model
+              has been turned, since by then it has done its job. */}
+          {session !== null && showHint && (
             <p
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-xs text-ink-3"
+              className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-canvas/75 px-3 py-1 text-xs whitespace-nowrap text-ink-2 ring-1 ring-line backdrop-blur-sm sm:top-3 sm:bottom-auto"
             >
-              Drag to turn · Scroll to zoom · ← → to step
+              {COARSE_POINTER
+                ? "Drag to turn the model"
+                : "Drag to turn · scroll to zoom · ← → for the next model"}
             </p>
           )}
           {session !== null && (
@@ -840,7 +868,7 @@ export default function ViewerLayer({
               className={`absolute left-3 top-3 ${AXIS_GROUP_CLASS}`}
               aria-label="Orbit axis"
             >
-              <span className={AXIS_CAPTION_CLASS}>axis</span>
+              <span className={AXIS_CAPTION_CLASS}>up axis</span>
               {AXIS_LETTERS.map((letter) => {
                 const active = axisLetter(sessionAxis) === letter;
                 return (
@@ -872,9 +900,21 @@ export default function ViewerLayer({
         </div>
         <div className="flex max-h-[42dvh] w-full min-w-0 shrink-0 flex-col gap-5 overflow-y-auto border-t border-line p-5 sm:max-h-none sm:w-80 sm:border-t-0 sm:border-l">
           {/* pr-9 clears the dialog-anchored close button */}
-          <p className="pr-9 text-[15px] leading-snug font-semibold [overflow-wrap:anywhere] text-ink">
-            {viewer.entry.name}
-          </p>
+          {/* The file's own name; a result carries its path relative to the
+              search, whose folders go on the line under it. */}
+          <div className="pr-9">
+            <p className="text-base leading-snug font-semibold [overflow-wrap:anywhere] text-ink">
+              {baseName(viewer.entry.name)}
+            </p>
+            {viewer.entry.name.includes("/") && (
+              <p className="mt-0.5 truncate text-xs text-ink-3">
+                in{" "}
+                {viewer.entry.name
+                  .slice(0, viewer.entry.name.lastIndexOf("/"))
+                  .replace(/!$/, "")}
+              </p>
+            )}
+          </div>
           {openIn !== null && openIn.apps.length > 0 && (
             // The panel's primary action: the default application leads as the
             // one filled button, the rest follow as plain ones (L10). Plain
@@ -922,7 +962,7 @@ export default function ViewerLayer({
             </div>
             {/* The filesystem path (library R2), through the one expansion the
                 copy button beside it also uses. */}
-            <p className="font-mono text-[11.5px] leading-relaxed break-all text-ink-2 select-text">
+            <p className="font-mono text-xs leading-relaxed break-all text-ink-2 select-text">
               {expandLibraryPath(libraryTop, viewer.entry.path)}
             </p>
             {copyError !== null && (
@@ -956,6 +996,12 @@ export default function ViewerLayer({
                 describes before it offers, which appending quietly breaks. Same
                 labels as the tile's corners, from one derivation (D7). */}
             {score !== undefined && scoreScale !== null && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-ink-3">match</dt>
+                <dd className="text-ink-2">{strengthOf(score.z)}</dd>
+              </div>
+            )}
+            {score !== undefined && scoreScale !== null && showScores && (
               <>
                 <div className="flex justify-between gap-2">
                   <dt className="text-ink-3">{SCALE_BADGE[scoreScale]}</dt>
@@ -1073,11 +1119,11 @@ export default function ViewerLayer({
               aria-label="Model actions"
               role="group"
             >
-              {panelCommands.map((c, i) => (
+              {orderedPanel.map((c, i) => (
                 <Fragment key={c.id}>
                   {i > 0 &&
                     MAINTENANCE_COMMANDS.has(c.id) &&
-                    !MAINTENANCE_COMMANDS.has(panelCommands[i - 1]!.id) && (
+                    !MAINTENANCE_COMMANDS.has(orderedPanel[i - 1]!.id) && (
                       <div
                         role="separator"
                         className="mx-1 my-0.5 h-px bg-line"

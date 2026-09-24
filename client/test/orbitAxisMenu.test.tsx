@@ -230,7 +230,7 @@ describe("the group is offered on model tiles and nowhere else", () => {
     expect(flipped()).toBe(false);
   });
 
-  it("draws the picker’s four buttons above the commands, not six pills", async () => {
+  it("draws the picker’s four buttons after the commands, not six pills", async () => {
     // User feedback 2026-08-22, second look at 6.8: the row is the *lightbox
     // picker's* row — `axis X Y Z | flip` — not six pills spelling out what the
     // picker states as a letter and a sign.
@@ -239,19 +239,22 @@ describe("the group is offered on model tiles and nowhere else", () => {
     await settle();
 
     await secondaryPress(tile("widget.stl"));
-    // DOM order, which is also the order the arrow keys walk: three letters,
-    // `flip`, then every command.
+    // DOM order, which is also the order the arrow keys walk: every command,
+    // then three letters and `flip` — last, since re-framing tends the
+    // thumbnail rather than using the model.
     const roles = Array.from(
       menu()!.querySelectorAll<HTMLElement>("button"),
     ).map((b) => b.getAttribute("role"));
-    expect(roles.slice(0, 4)).toEqual([
+    expect(roles.slice(-4)).toEqual([
       "menuitemradio",
       "menuitemradio",
       "menuitemradio",
       "menuitemcheckbox",
     ]);
-    expect(roles.slice(4)).toEqual(Array(roles.length - 4).fill("menuitem"));
-    expect(roles.length).toBeGreaterThan(4); // there are commands under it
+    expect(roles.slice(0, -4)).toEqual(
+      Array(roles.length - 4).fill("menuitem"),
+    );
+    expect(roles.length).toBeGreaterThan(4); // there are commands above it
     // The divider is between them, and is not a button.
     // Matched on the whole attribute: a class like `mx-0.5` breaks a `.`-joined
     // selector.
@@ -306,9 +309,7 @@ describe("reaching the group from the keyboard", () => {
     await secondaryPress(tile("widget.stl"));
     const commands = items().length;
     expect(commands).toBeGreaterThan(0);
-    // The menu opens on its first *command*, which is what a menu is for. Since
-    // 6.8 that is no longer the menu's first button — the pill row is above it —
-    // so this names the role rather than taking the first `button` it finds.
+    // The menu opens on its first *command*, which is what a menu is for.
     expect(document.activeElement).toBe(
       menu()!.querySelector('[role="menuitem"]'),
     );
@@ -334,11 +335,10 @@ describe("reaching the group from the keyboard", () => {
     expect(menu()).toBeNull();
   });
 
-  it("enters the group from above too, at the same letter", async () => {
-    // The crossing 6.8 created: the group sits above the commands, so one press
-    // Up off the first command walks into it — and it lands where entering the
-    // group always lands, not on the button that happens to be nearest, which
-    // since the second look is `flip`.
+  it("enters the group from the other side too, at the same letter", async () => {
+    // The group sits below the commands, so one press Up off the first command
+    // wraps into it — and it lands where entering the group always lands, not
+    // on the button that happens to be nearest, which is `flip`.
     stored("-z");
     await mountApp("/models", NESTED);
     await settle();

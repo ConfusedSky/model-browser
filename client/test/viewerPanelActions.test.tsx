@@ -54,6 +54,7 @@ import {
   renderThumbnail,
   semanticPosesFor,
   settle,
+  showMatchScores,
   similar,
   tiles,
   tinyStl,
@@ -166,8 +167,9 @@ const closeButton = (): HTMLButtonElement =>
   document.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!;
 const marked = (): HTMLElement | null =>
   container.querySelector<HTMLElement>(".animate-reveal-mark");
+/** By the title's first line: a scored tile adds its strength under the name. */
 const tile = (name: string): HTMLElement =>
-  tiles().find((t) => t.getAttribute("title") === name)!;
+  tiles().find((t) => t.getAttribute("title")?.split("\n")[0] === name)!;
 
 /** Writes to the cache for one path — the shape a PUT's body has. */
 interface Body {
@@ -279,10 +281,10 @@ describe("the info panel offers the entry actions", () => {
     await openLightbox("Alpha/found.stl");
     expect(dialog()).not.toBeNull();
 
-    // *Reset framing* is here and not in this surface's menu: only this press
-    // carries the live-session semantics that make it honest. *Re-render* is in
-    // neither — the closing persist is the re-render. *Copy path* is not
-    // duplicated: the panel already has it, beside the path it copies.
+    // *Reset framing* is here because this press carries the live-session
+    // semantics that make it honest on an open view. *Re-render* is not — the
+    // closing persist is the re-render. *Copy path* is not duplicated: the
+    // panel already has it, beside the path it copies.
     expect(actions()).toEqual(["reveal", "findSimilar", "resetFraming"]);
     expect(
       document.querySelector('button[aria-label="Copy path"]'),
@@ -339,7 +341,7 @@ describe("the info panel offers the entry actions", () => {
     expect(copy.className).not.toBe(MENU_ITEM_CLASS);
   });
 
-  it("offers the launch actions, exactly as the same surface’s menu does", async () => {
+  it("offers the launch actions, exactly as the same model’s menu does", async () => {
     // INVERTED 2026-08-25, and the semantics are the point: this test used to
     // pin that the panel *withholds* the launch actions (the L10 exclusion as
     // first written), and the user reversed that decision judging 4.3 on the
@@ -347,7 +349,8 @@ describe("the info panel offers the entry actions", () => {
     // is the one to print, and the panel is the surface they read while
     // deciding. So what was pinned as a scope is now pinned as an offer: the
     // application row above the strip, *Open with…* in it, on the panel and the
-    // menu alike.
+    // menu alike. The lightbox raises no menu of its own, so the menu the panel
+    // has to agree with is the one on the model's tile.
     await unmountApp();
     apps.mockResolvedValue({
       chooser: true,
@@ -365,43 +368,8 @@ describe("the info panel offers the entry actions", () => {
     await mountApp("/models", NESTED);
     listDir.mockResolvedValue(NESTED);
 
-    await openLightbox("Alpha/found.stl");
-    // The strip gains *Open with…* and nothing else — `open` stays excluded
-    // (the model is already open), so the kind-aware label never shows here.
-    expect(actions()).toEqual([
-      "reveal",
-      "findSimilar",
-      "resetFraming",
-      "openWith",
-    ]);
-    // The row, right under the model's name and above the strip: ids and names,
-    // default first. The default is the panel's primary action, so it says
-    // what it does and is drawn apart from the rest rather than as one pill
-    // among equals.
-    expect(appButtons().map((b) => b.dataset.appId)).toEqual([
-      "f3d.desktop",
-      "lycheeslicer.desktop",
-    ]);
-    expect(appButtons().map((b) => b.textContent)).toEqual([
-      "Open in F3D",
-      "LycheeSlicer",
-    ]);
-    expect(appButtons()[0]!.className).not.toBe(appButtons()[1]!.className);
-    expect(openInRow()!.previousElementSibling?.textContent).toBe(
-      "Alpha/found.stl",
-    );
-    expect(openInRow()!.compareDocumentPosition(actionRow()!) & 4).toBe(4);
-    // The panel is not a menu: its applications are plain buttons in a
-    // labelled group, with `data-app-id` and no `data-command`, exactly as the
-    // menu's.
-    expect(openInRow()!.querySelector('[role="menuitem"]')).toBeNull();
-    expect(appButtons().every((p) => p.dataset.command === undefined)).toBe(
-      true,
-    );
-
-    // The menu on that same lightbox offers the same choices.
     await act(async () => {
-      dialog()!.dispatchEvent(
+      tile("Alpha/found.stl").dispatchEvent(
         new PointerEvent("pointerdown", {
           bubbles: true,
           button: 2,
@@ -410,7 +378,7 @@ describe("the info panel offers the entry actions", () => {
           clientY: 30,
         }),
       );
-      dialog()!.dispatchEvent(
+      tile("Alpha/found.stl").dispatchEvent(
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
@@ -420,12 +388,51 @@ describe("the info panel offers the entry actions", () => {
       );
     });
     const raised = document.querySelector<HTMLElement>('[role="menu"]')!;
-    expect(
-      Array.from(raised.querySelectorAll("[data-app-id]")).map(
-        (b) => b.textContent,
-      ),
-    ).toEqual(["F3D", "LycheeSlicer"]);
+    const menuApps = Array.from(
+      raised.querySelectorAll<HTMLElement>("[data-app-id]"),
+    ).map((b) => b.dataset.appId);
     expect(raised.querySelector('[data-command="openWith"]')).not.toBeNull();
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+
+    await openLightbox("Alpha/found.stl");
+    // The strip gains *Open with…* and nothing else — `open` stays excluded
+    // (the model is already open), so the kind-aware label never shows here.
+    // Everyday first, maintenance after, in the menu's order.
+    expect(actions()).toEqual([
+      "reveal",
+      "findSimilar",
+      "openWith",
+      "resetFraming",
+    ]);
+    // The row, right under the model's name and above the strip: ids and names,
+    // default first. The default is the panel's primary action, so it says
+    // what it does and is drawn apart from the rest rather than as one pill
+    // among equals.
+    expect(appButtons().map((b) => b.dataset.appId)).toEqual([
+      "f3d.desktop",
+      "lycheeslicer.desktop",
+    ]);
+    expect(appButtons().map((b) => b.dataset.appId)).toEqual(menuApps);
+    expect(appButtons().map((b) => b.textContent)).toEqual([
+      "Open in F3D",
+      "LycheeSlicer",
+    ]);
+    expect(appButtons()[0]!.className).not.toBe(appButtons()[1]!.className);
+    expect(openInRow()!.previousElementSibling?.textContent).toMatch(
+      /^found\.stl/,
+    );
+    expect(openInRow()!.compareDocumentPosition(actionRow()!) & 4).toBe(4);
+    // The panel is not a menu: its applications are plain buttons in a
+    // labelled group, with `data-app-id` and no `data-command`, exactly as the
+    // menu's rows.
+    expect(openInRow()!.querySelector('[role="menuitem"]')).toBeNull();
+    expect(appButtons().every((p) => p.dataset.command === undefined)).toBe(
+      true,
+    );
   });
 
   it("withholds find similar when the index is not answering", async () => {
@@ -592,7 +599,9 @@ describe("a panel action that changes the view", () => {
     // D7: the panel says what the tile said, from the same derivation, so one
     // number cannot appear under two names across the two surfaces. Reached by
     // opening a neighbour from a similarity view, which is the only way a
-    // lightbox has a scored entry to describe.
+    // lightbox has a scored entry to describe. The numbers are shown only under
+    // "Show match scores"; the strength word always is.
+    await showMatchScores();
     similar.mockResolvedValue(NEIGHBOURS);
     await openLightbox("Alpha/found.stl");
     await click(action("findSimilar"));
@@ -606,6 +615,7 @@ describe("a panel action that changes the view", () => {
     expect(meta.textContent).toContain("0.912");
     expect(meta.textContent).toContain("4.03");
     expect(meta.textContent).not.toContain("k 0.912");
+    expect(meta.textContent).toContain("Strong"); // z 4.03, as the tile says
     // Among the metadata and before the actions: the panel describes the model
     // first. The action row still follows everything in the `<dl>`.
     const row = actionRow()!;
@@ -616,7 +626,9 @@ describe("a panel action that changes the view", () => {
     // Two surfaces, one guard. `Grid` withholds a badge from the anchor; a
     // panel without the same test would report the numbers the tile beneath it
     // refused, which is exactly what D7 says cannot happen — and the anchor
-    // requirement is not written per surface.
+    // requirement is not written per surface. Under "Show match scores", or
+    // there would be no numbers to withhold.
+    await showMatchScores();
     similar.mockResolvedValue(ANCHORED);
     await openLightbox("Alpha/found.stl");
     await click(action("findSimilar"));
@@ -630,13 +642,15 @@ describe("a panel action that changes the view", () => {
     expect(meta.textContent).not.toContain("1.000");
     expect(meta.textContent).not.toContain("9.99");
     expect(meta.textContent).not.toMatch(/\bsim\b/);
+    expect(meta.textContent).not.toContain("match");
     // Still a description of the model, just without a score it never had.
     expect(meta.textContent).toContain("format");
   });
 
   it("shows no such rows for a model opened from an ordinary listing", async () => {
     // Nothing scored this one, so there is no number to report and no row held
-    // in reserve for one.
+    // in reserve for one — even with the numbers asked for.
+    await showMatchScores();
     await openLightbox("Alpha/found.stl");
 
     const meta = document.querySelector("dl")!;
@@ -644,6 +658,7 @@ describe("a panel action that changes the view", () => {
     expect(meta.textContent).not.toMatch(/\bsim\b/);
     expect(meta.textContent).not.toMatch(/\bk\b/);
     expect(meta.textContent).not.toMatch(/\bz\b/);
+    expect(meta.textContent).not.toContain("match");
   });
 
   it("find similar lands the similarity view and leaves the same way", async () => {
@@ -660,7 +675,9 @@ describe("a panel action that changes the view", () => {
     expect(window.location.search).toContain(
       "similar=%2Fmodels%2FAlpha%2Ffound.stl",
     );
-    expect(tiles().map((t) => t.getAttribute("title"))).toContain("near.stl");
+    expect(
+      tiles().map((t) => t.getAttribute("title")?.split("\n")[0]),
+    ).toContain("near.stl");
     expect(
       writesFor(FOUND).filter((b) => b.camera !== undefined).length,
     ).toBeGreaterThan(0);

@@ -447,10 +447,10 @@ export const AXIS_CAPTION_CLASS = "px-1.5 text-ink-3";
 export const AXIS_DIVIDER_CLASS = "mx-0.5 h-4 w-px bg-line-strong";
 /** The spindle in force is the *filled* pill. */
 export const axisPillClass = (active: boolean): string =>
-  `rounded-md px-2.5 py-1.5 ${active ? "bg-accent font-medium text-accent-ink" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
+  `rounded-md px-2.5 py-1.5 touch:py-2.5 ${active ? "bg-accent font-medium text-accent-ink" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
 /** Neutral rather than the accent: a state, not a pick. */
 export const flipPillClass = (active: boolean): string =>
-  `rounded-md px-2.5 py-1.5 ${active ? "bg-white/15 font-medium text-ink ring-1 ring-line-strong" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
+  `rounded-md px-2.5 py-1.5 touch:py-2.5 ${active ? "bg-white/15 font-medium text-ink ring-1 ring-line-strong" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
 export const FLIP_TITLE = "Negate the spindle axis (+axis ↔ −axis)";
 
 /** Model-only — a container tile is a glyph with no spindle — and withheld on
@@ -518,16 +518,6 @@ export function setOrbitAxis(
  * `EntryMenu` is one flat index over buttons, and a submenu would want open
  * state, a clamp, focus handoff and a second Escape level.
  */
-
-/** Wraps, unlike the axis row: the registry chooses how long a name is, and a
- *  wrapped `rounded-full` reads as a blob. */
-export const OPEN_IN_GROUP_CLASS =
-  "flex flex-wrap items-center gap-0.5 rounded-lg bg-sunken p-0.5 text-xs ring-1 ring-line";
-/** `nowrap`: "open in" broken across two lines reads as two captions. */
-export const OPEN_IN_CAPTION_CLASS = `${AXIS_CAPTION_CLASS} whitespace-nowrap`;
-/** One class for every pill: which application leads is said by **order**. */
-export const OPEN_IN_PILL_CLASS = `${axisPillClass(false)} max-w-full truncate`;
-export const OPEN_IN_CAPTION = "open in";
 
 /** The format detector *is* the mime table (L6): one prefix, not a second map
  *  to drift. */
