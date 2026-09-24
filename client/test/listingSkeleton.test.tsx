@@ -6,6 +6,8 @@ import {
   click,
   container,
   dir,
+  flatButton,
+  labels,
   listDir,
   model,
   mountApp,
@@ -65,7 +67,7 @@ describe("listing skeleton", () => {
     expect(skeleton()).toBeNull();
     // Container tiles are labeled by their own name now that a deep search can
     // return one named by a relative path; the full name stays in the title.
-    expect(tiles().map((b) => b.textContent)).toEqual(["b"]);
+    expect(labels()).toEqual(["b"]);
   });
 
   it("a newer navigation while pending wins and clears the skeleton", async () => {
@@ -81,13 +83,11 @@ describe("listing skeleton", () => {
 
     // The header stays live: toggling flat issues a newer request that takes
     // over the in-flight flag, and its fast response clears the skeleton.
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+    await click(flatButton());
     await settle();
 
     expect(skeleton()).toBeNull();
-    expect(tiles().map((b) => b.textContent)).toEqual(["a"]);
+    expect(labels()).toEqual(["a"]);
   });
 
   it("a superseded request landing neither dismisses nor re-triggers the skeleton", async () => {
@@ -107,9 +107,7 @@ describe("listing skeleton", () => {
 
     // Newest request is now the never-resolving flat toggle; then the
     // abandoned navigation finally lands.
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+    await click(flatButton());
     landA();
     await settle();
 
@@ -130,9 +128,7 @@ describe("listing skeleton", () => {
 
     await click(tiles()[0]!);
     await pastDelay();
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+    await click(flatButton());
     failA(new Error("stale boom"));
     await settle();
 
@@ -146,9 +142,7 @@ describe("listing skeleton", () => {
       return Promise.resolve(opts?.flat === true ? FLAT : NESTED);
     });
 
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+    await click(flatButton());
     await settle();
     expect(container.textContent).toContain("omitted");
 
@@ -177,6 +171,6 @@ describe("listing skeleton", () => {
 
     expect(skeleton()).toBeNull();
     expect(container.textContent).toContain("walk failed");
-    expect(tiles().map((b) => b.textContent)).toEqual(["a"]); // prior grid restored
+    expect(labels()).toEqual(["a"]); // prior grid restored
   });
 });

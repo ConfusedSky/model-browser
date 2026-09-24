@@ -30,6 +30,7 @@ import {
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  openPanel,
   pressEnter,
   searchInput,
   settle,
@@ -102,8 +103,8 @@ async function secondaryPress(el: HTMLElement): Promise<void> {
  *  the only one that mints an entry of its own. */
 async function findSimilarOn(label: string): Promise<void> {
   const tile = Array.from(
-    container.querySelectorAll<HTMLElement>("main .grid button"),
-  ).find((b) => b.lastElementChild?.textContent === label)!;
+    container.querySelectorAll<HTMLElement>("main .grid [data-entry-tile]"),
+  ).find((b) => b.querySelector("[data-tile-name]")?.textContent === label)!;
   await secondaryPress(tile);
   await settle();
   await click(menuItem("findSimilar"));
@@ -125,15 +126,12 @@ const poolButton = (name: string): HTMLButtonElement =>
     ),
   ).find((b) => b.textContent === name)!;
 
-/** The panel starts collapsed for a fresh profile; open it and select its
+/** The panel starts closed for a fresh profile; open it and select its
  *  Similar tab, which is where the neighbour parameters live (6.4). It is
  *  offered only under a similarity view, which is the only state these
  *  callers open it from. */
-async function openPanel(): Promise<void> {
-  const expand = container.querySelector<HTMLButtonElement>(
-    'aside button[aria-label="Expand side panel"]',
-  );
-  if (expand !== null) await click(expand);
+async function openSimilarTab(): Promise<void> {
+  await openPanel();
   const tab = Array.from(
     container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]'),
   ).find((b) => b.textContent?.startsWith("similar"));
@@ -263,7 +261,7 @@ describe("leaving a similarity view", () => {
 
     await findSimilarOn("widget.stl");
     expect(history.state).toMatchObject({ similar: true, depth: 1 });
-    await openPanel();
+    await openSimilarTab();
 
     await tuneCount("40");
     expect(location.search).toContain("k=40");
@@ -393,7 +391,7 @@ describe("leaving a similarity view", () => {
     const { go, back } = fakeHistory();
 
     await findSimilarOn("widget.stl");
-    await openPanel();
+    await openSimilarTab();
     await click(poolButton("max"));
     await settle();
     const tunedUrl = location.search;

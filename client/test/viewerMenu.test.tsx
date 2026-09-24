@@ -95,7 +95,8 @@ const panelNote = (): string | null =>
   dialog()?.querySelector('p[role="status"]')?.textContent ?? null;
 /** The path bar's transient line — the surface the lightbox covers. */
 const headerNote = (): string | null =>
-  container.querySelector("header p.text-zinc-400")?.textContent ?? null;
+  container.querySelector('header [data-header-message="ok"]')?.textContent ??
+  null;
 /** Every item a model tile offers when the index is answering — the whole of
  *  D6's table, which is also what the orbit overlay offers since 6.8. */
 const WHOLE_TABLE = [
@@ -389,7 +390,7 @@ describe("the menu on a viewer surface", () => {
     // *Copy path* is the one command on this surface that owes the user a word
     // — entry-actions requires a brief confirmation — and it was the one that
     // could not give one: the host's routing sat on `report` alone, so the
-    // "copied" line went to the path bar under a 70% scrim, in the far corner,
+    // "copied" line went to the path bar under the scrim, in the far corner,
     // behind the dialog being looked at. Success is not silent here, so the
     // absence read as a copy that did not happen.
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -410,9 +411,9 @@ describe("the menu on a viewer surface", () => {
       // In the confirming tone, not the failure one — a success painted red
       // would be the other half of this bug.
       expect(
-        dialog()!.querySelector('p[role="status"].text-zinc-400'),
+        dialog()!.querySelector('p[role="status"].text-ink-2'),
       ).not.toBeNull();
-      expect(dialog()!.querySelector("p.text-red-400")).toBeNull();
+      expect(dialog()!.querySelector("p.text-danger")).toBeNull();
       // And it did not also go to the covered bar: one sentence, one surface.
       expect(headerNote()).toBeNull();
     } finally {

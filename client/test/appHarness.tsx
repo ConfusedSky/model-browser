@@ -301,7 +301,9 @@ export const pressEnter = (el: HTMLElement): Promise<void> =>
   });
 
 export function flatButton(): HTMLButtonElement {
-  return container.querySelector<HTMLButtonElement>("button[aria-pressed]")!;
+  return container.querySelector<HTMLButtonElement>(
+    "button[data-flat-toggle]",
+  )!;
 }
 export function upButton(): HTMLButtonElement {
   return container.querySelector<HTMLButtonElement>(
@@ -309,16 +311,21 @@ export function upButton(): HTMLButtonElement {
   )!;
 }
 export function tiles(): HTMLButtonElement[] {
-  // The grid's buttons, not every button under `main` — the results header now
-  // carries a control of its own, and a selector that cannot tell a tile from
-  // an affordance beside it reports the affordance as an entry.
+  // The entries, not every button in the grid — each tile has an actions
+  // button beside it, and the results header carries controls too; a selector
+  // that cannot tell a tile from an affordance reports the affordance as an
+  // entry.
   return Array.from(
-    container.querySelectorAll<HTMLButtonElement>("main .grid button"),
+    container.querySelectorAll<HTMLButtonElement>(
+      "main .grid [data-entry-tile]",
+    ),
   );
 }
-/** Each tile's label is the last child of its button. */
+/** Each tile's drawn name. */
 export function labels(): string[] {
-  return tiles().map((b) => b.lastElementChild?.textContent ?? "");
+  return tiles().map(
+    (b) => b.querySelector("[data-tile-name]")?.textContent ?? "",
+  );
 }
 export function skeleton(): Element | null {
   return container.querySelector(".animate-pulse");
@@ -332,6 +339,14 @@ export function searchInput(): HTMLInputElement {
   return container.querySelector<HTMLInputElement>(
     'input[aria-label="Search names and folders"]',
   )!;
+}
+/** Open the side panel from the toolbar, as a user does — it starts closed for
+ *  a fresh profile. A no-op when it is already open. */
+export async function openPanel(): Promise<void> {
+  const toggle = container.querySelector<HTMLButtonElement>(
+    "button[data-panel-toggle]",
+  )!;
+  if (toggle.getAttribute("aria-expanded") !== "true") await click(toggle);
 }
 /** The summoned find control's input — absent until it is opened. */
 export function findInput(): HTMLInputElement | null {
@@ -348,9 +363,8 @@ export async function openFind(): Promise<void> {
   });
 }
 /**
- * The corner occlusion pill. Selected by its title, not by `aria-pressed`:
- * `flatButton()` claims the first `[aria-pressed]` in the container, and this
- * one carries the attribute too.
+ * The toolbar's occlusion toggle. Selected by its title, not by `aria-pressed`:
+ * Flat and Narrow carry the attribute too.
  */
 export function aoPill(): HTMLButtonElement {
   return container.querySelector<HTMLButtonElement>(

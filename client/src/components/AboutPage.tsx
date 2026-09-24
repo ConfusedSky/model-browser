@@ -25,7 +25,7 @@ function Section({
 }): ReactNode {
   return (
     <section id={id} className="mt-8">
-      <h2 className="mb-2 text-lg font-semibold text-zinc-100">{title}</h2>
+      <h2 className="mb-2 text-lg font-semibold text-ink">{title}</h2>
       {children}
     </section>
   );
@@ -84,19 +84,19 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
   return (
     // The app's root grounds itself on its own top-level element; this document
     // has none, so without a ground of its own it draws light text on white.
-    <main className="min-h-screen bg-zinc-950 text-zinc-200">
-      <div className="mx-auto max-w-3xl p-6">
+    <main className="min-h-screen bg-canvas text-[15px] leading-relaxed text-ink/85">
+      <div className="mx-auto max-w-2xl px-6 py-10">
         {/* The way back, and the repository opposite it. */}
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <a href="/" className="text-sm text-sky-400 hover:underline">
+          <a href="/" className="text-sm text-accent hover:underline">
             ← Back to the models
           </a>
-          <span className="text-sm text-zinc-400">
+          <span className="text-sm text-ink-3">
             Source:{" "}
             <Out href={SOURCE_URL}>github.com/ConfusedSky/model-browser</Out>
           </span>
         </div>
-        <h1 className="mt-4 text-2xl font-semibold text-zinc-100">
+        <h1 className="mt-8 text-3xl font-semibold tracking-tight text-ink">
           About this demo
         </h1>
 
@@ -138,7 +138,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               </Out>
             </li>
             <li>
-              <a href="#credits" className="text-sky-400 hover:underline">
+              <a href="#credits" className="text-accent hover:underline">
                 Credits for every kit in the corpus
               </a>
             </li>
@@ -238,7 +238,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
           </p>
           <ul className="list-disc space-y-2 pl-5">
             <li>
-              <span className="font-semibold text-zinc-100">
+              <span className="font-semibold text-ink">
                 Nothing clears the floor.
               </span>{" "}
               A meaning search keeps only hits above a score floor, so a query
@@ -247,7 +247,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               search declining to guess, not an empty folder.
             </li>
             <li>
-              <span className="font-semibold text-zinc-100">
+              <span className="font-semibold text-ink">
                 A concept the corpus barely holds.
               </span>{" "}
               Ask for <em>a submarine</em> and the first screen is a treasure
@@ -261,7 +261,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               it unmarked.
             </li>
             <li>
-              <span className="font-semibold text-zinc-100">
+              <span className="font-semibold text-ink">
                 Neighbouring concepts blur.
               </span>{" "}
               Ask for <em>a vampire</em> and the list opens with robed
@@ -273,7 +273,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
               caped — and the search cannot pull them apart.
             </li>
             <li>
-              <span className="font-semibold text-zinc-100">
+              <span className="font-semibold text-ink">
                 Part of a query counts as a match.
               </span>{" "}
               Ask for <em>an elf carrying an orb</em> and the first five are an
@@ -348,7 +348,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
             carries its version — and the page the file came from, with a line
             saying what was done to this copy where the file served is not the
             author&rsquo;s own. The same credits for the whole corpus are{" "}
-            <a href="#credits" className="text-sky-400 hover:underline">
+            <a href="#credits" className="text-accent hover:underline">
               listed at the bottom of this page
             </a>
             .
@@ -381,7 +381,7 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
             <li>
               A kit&rsquo;s own tile is named from the corpus&rsquo;s metadata
               rather than from its folder, so the folder{" "}
-              <span className="break-words text-zinc-400">
+              <span className="break-words text-ink-3">
                 1_Treasure_Token_for_DD_or_Other_RPG_2615634
               </span>{" "}
               reads as “1&quot; Treasure Token for D&amp;D or Other RPG”. The
@@ -550,7 +550,7 @@ function CreditLine({ kit }: { kit: CreditedKit }): ReactNode {
   const sourceHref = safeHref(credits.sourceUrl);
   return (
     <li>
-      <span className="font-semibold text-zinc-100">
+      <span className="font-semibold text-ink">
         {kit.name ?? lastSegment(kit.path)}
       </span>
       {credits.author !== undefined && (
@@ -613,7 +613,7 @@ function CreditLine({ kit }: { kit: CreditedKit }): ReactNode {
         </span>
       )}
       {credits.modified !== undefined && (
-        <span data-credit="modified" className="text-zinc-400">
+        <span data-credit="modified" className="text-ink-3">
           {" · this copy: "}
           {credits.modified}
         </span>

@@ -22,6 +22,7 @@ import {
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  openPanel,
   pressEnter,
   searchInput,
   settle,
@@ -99,19 +100,12 @@ function selectedTab(): string | undefined {
     tabButtons().findIndex((b) => b.getAttribute("aria-selected") === "true")
   ];
 }
-/** The panel starts collapsed for a fresh profile. */
-async function expandPanel(): Promise<void> {
-  const expand = container.querySelector<HTMLButtonElement>(
-    'aside button[aria-label="Expand side panel"]',
-  );
-  if (expand !== null) await click(expand);
-}
 /** Open the panel and stand on the Similar tab, which is where the similarity
  *  parameters live (6.4) — the search tab keeps none of them. Selecting it by
  *  hand rather than leaning on the auto-select: these cases are about the
  *  parameters, and the tab lifecycle has its own cases below. */
 async function openSimilarTab(): Promise<void> {
-  await expandPanel();
+  await openPanel();
   const tab = tabButton("similar");
   if (tab !== undefined) await click(tab);
 }
@@ -122,8 +116,8 @@ async function openSimilarTab(): Promise<void> {
  *  the view is on screen.) */
 async function findSimilarOn(label: string): Promise<void> {
   const tile = Array.from(
-    container.querySelectorAll<HTMLElement>("main .grid button"),
-  ).find((b) => b.lastElementChild?.textContent === label)!;
+    container.querySelectorAll<HTMLElement>("main .grid [data-entry-tile]"),
+  ).find((b) => b.querySelector("[data-tile-name]")?.textContent === label)!;
   const at = { bubbles: true, clientX: 9, clientY: 9 };
   await act(async () => {
     tile.dispatchEvent(
@@ -184,9 +178,12 @@ describe("the similarity view’s parameters", () => {
     );
     // Named by base name, like the results label: the full vpath is in the URL,
     // which is where an identity belongs.
-    expect(container.textContent).toContain("Similar to “hero.stl”");
-    // The tab is the heading, so the block carries none of its own — a
-    // "Neighbours" line here would be the title said twice.
+    const subject = Array.from(container.querySelectorAll("aside h2")).find(
+      (h) => h.textContent === "Similar to",
+    );
+    expect(subject?.closest("section")?.textContent).toContain("“hero.stl”");
+    // The subject is the block's heading — a "Neighbours" line here would be
+    // the tab's title said twice.
     expect(container.textContent).not.toContain("Neighbours");
 
     // Leave the view and the tab goes with it — the parameters belong to the
@@ -326,7 +323,7 @@ describe("the Similar tab itself (6.4)", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountApp("/models", NESTED);
     await settle();
-    await expandPanel();
+    await openPanel();
     // `library` is the app's maintenance surface, present because the harness's
     // default report declares maintenance offered (`bulk-thumbnail-jobs` D6,
     // moved onto that field by `public-deployment` 3.8a). `chat` is absent for
@@ -354,7 +351,7 @@ describe("the Similar tab itself (6.4)", () => {
     features.mockResolvedValue({ ...DEFAULT_REPORT, chatTab: true });
     await mountAppAtCurrentUrl(LINK, NESTED);
     await settle();
-    await expandPanel();
+    await openPanel();
     // Library sits LAST, after Similar: the three tabs before it describe the
     // view on screen and this one does not (D6). The order is asserted here
     // rather than left to the strip's construction, so the rule has an owner.
@@ -375,7 +372,7 @@ describe("the Similar tab itself (6.4)", () => {
     features.mockResolvedValue({ ...DEFAULT_REPORT, chatTab: true });
     await mountApp("/models", NESTED);
     await settle();
-    await expandPanel();
+    await openPanel();
     await click(tabButton("search")!);
     await findSimilarOn("widget.stl");
     expect(selectedTab()).toBe("similar");
@@ -389,7 +386,7 @@ describe("the Similar tab itself (6.4)", () => {
     features.mockResolvedValue({ ...DEFAULT_REPORT, chatTab: true });
     await mountApp("/models", NESTED);
     await settle();
-    await expandPanel();
+    await openPanel();
     await click(tabButton("chat")!);
     await findSimilarOn("widget.stl");
     expect(selectedTab()).toBe("chat");
@@ -427,7 +424,7 @@ describe("the Similar tab itself (6.4)", () => {
     similar.mockResolvedValue(NEIGHBOURS);
     await mountAppAtCurrentUrl(LINK, NESTED);
     await settle();
-    await expandPanel();
+    await openPanel();
     await click(tabButton("search")!);
     expect(localStorage.getItem(TAB_KEY)).toBe("search");
 

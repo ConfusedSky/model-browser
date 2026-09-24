@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import Icon, { type IconName } from "./Icon";
 import type { AppRef, OrbitAxis } from "../../../shared/types";
 import {
   AXIS_CAPTION_CLASS,
@@ -16,6 +17,8 @@ import {
   flipPillClass,
   isAxisNegated,
   negatedAxis,
+  MAINTENANCE_COMMANDS,
+  type CommandId,
   type EntryCommand,
 } from "../lib/entryActions";
 
@@ -54,11 +57,24 @@ const EDGE = 6;
  *  it rather than carrying a copy. A string and not a component, since the two
  *  surfaces differ in what they hand their `onClick`. */
 export const MENU_ITEM_CLASS =
-  "block w-full px-3 py-1.5 text-left hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none";
+  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-white/[0.06] focus:bg-white/[0.06] focus:outline-none";
+
+/** Each command's glyph, drawn wherever the command is — menu and panel. */
+export const COMMAND_ICON: Record<CommandId, IconName> = {
+  open: "maximize",
+  reveal: "folder",
+  copyPath: "copy",
+  findSimilar: "sparkles",
+  generateBeneath: "grid",
+  resetBeneath: "rotate",
+  reRenderThumbnail: "refresh",
+  resetFraming: "rotate",
+  openWith: "externalLink",
+};
 
 /** The arrow keys move focus here, so it has to be visible doing so — which
  *  the lightbox picker, where the pointer leaves it, does not need. */
-const FOCUS_RING = "focus:outline-none focus:ring-1 focus:ring-sky-500";
+const FOCUS_RING = "focus:outline-none focus:ring-1 focus:ring-accent";
 
 /**
  * Keep the whole menu on screen (R2). Clamped rather than flipped: flipping
@@ -191,7 +207,7 @@ export default function EntryMenu({
       // application names, and an uncapped menu grows past a narrow window
       // rather than wrapping inside it. `EDGE` twice over, so the cap agrees
       // with where `clampToViewport` will put it.
-      className="fixed z-menu min-w-44 max-w-[calc(100vw-12px)] rounded-lg border border-zinc-700 bg-zinc-900 py-1 text-sm text-zinc-200 shadow-xl"
+      className="fixed z-menu min-w-52 max-w-[calc(100vw-12px)] rounded-xl border border-line-strong bg-raised p-1 text-[13px] text-ink shadow-2xl shadow-black/60"
       onKeyDown={(e) => {
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -216,7 +232,7 @@ export default function EntryMenu({
         <div
           role="group"
           aria-label="Orbit axis"
-          className={`mx-2 mb-1 ${AXIS_GROUP_CLASS}`}
+          className={`mb-1 ${AXIS_GROUP_CLASS}`}
         >
           <span className={AXIS_CAPTION_CLASS}>axis</span>
           {AXIS_LETTERS.map((letter) => {
@@ -259,7 +275,7 @@ export default function EntryMenu({
         <div
           role="group"
           aria-label="Open in"
-          className={`mx-2 mb-1 ${OPEN_IN_GROUP_CLASS}`}
+          className={`mb-1 ${OPEN_IN_GROUP_CLASS}`}
         >
           <span className={OPEN_IN_CAPTION_CLASS}>{OPEN_IN_CAPTION}</span>
           {openIn.apps.map((app) => (
@@ -277,18 +293,25 @@ export default function EntryMenu({
           ))}
         </div>
       )}
-      {commands.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          role="menuitem"
-          data-command={c.id}
-          // Click, not pointerdown, which the dismissal above listens for.
-          onClick={() => onChoose(c)}
-          className={MENU_ITEM_CLASS}
-        >
-          {c.label}
-        </button>
+      {commands.map((c, i) => (
+        <Fragment key={c.id}>
+          {i > 0 &&
+            MAINTENANCE_COMMANDS.has(c.id) &&
+            !MAINTENANCE_COMMANDS.has(commands[i - 1]!.id) && (
+              <div role="separator" className="mx-1 my-1 h-px bg-line" />
+            )}
+          <button
+            type="button"
+            role="menuitem"
+            data-command={c.id}
+            // Click, not pointerdown, which the dismissal above listens for.
+            onClick={() => onChoose(c)}
+            className={MENU_ITEM_CLASS}
+          >
+            <Icon name={COMMAND_ICON[c.id]} className="size-3.5 text-ink-3" />
+            {c.label}
+          </button>
+        </Fragment>
       ))}
     </div>
   );

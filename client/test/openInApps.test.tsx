@@ -155,7 +155,8 @@ const escape = (): Promise<void> =>
   });
 /** The path bar's transient line, where every entry action reports a failure. */
 const pathError = (): string | null =>
-  container.querySelector("header p.text-red-400")?.textContent ?? null;
+  container.querySelector('header [data-header-message="error"]')
+    ?.textContent ?? null;
 const focusedEl = (): HTMLElement => document.activeElement as HTMLElement;
 
 beforeEach(() => {
@@ -448,7 +449,7 @@ describe("when the registry is read", () => {
 });
 
 describe("the open command is labelled for the entry", () => {
-  it("says Open lightbox on a model, Open folder on a directory, Open archive on a zip", async () => {
+  it("says View model on a model, Open folder on a directory, Open archive on a zip", async () => {
     // The 4.3 naming decision, read off the rendered menu: the label the user
     // sees is the resolved one, per kind — not the table's fallback string.
     apps.mockResolvedValue(REPORT);
@@ -458,7 +459,7 @@ describe("the open command is labelled for the entry", () => {
       menu()!.querySelector<HTMLButtonElement>('[data-command="open"]')!;
 
     await secondaryPress(tile("widget.stl"));
-    expect(openRow().textContent).toBe("Open lightbox");
+    expect(openRow().textContent).toBe("View model");
     await escape();
     await secondaryPress(tile("Alpha"));
     expect(openRow().textContent).toBe("Open folder");

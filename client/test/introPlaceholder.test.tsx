@@ -42,7 +42,12 @@ const FOLDER: DirListing = {
 };
 const INTRO = { ...DEFAULT_REPORT, intro: true };
 const READY = { state: "ready" as const, collectionRoot: "/", covers: ["stl"] };
-const ORDINARY = "Search names and folders…";
+/** The ordinary text at the library top. It says what a search will match, so
+ *  which one a cell sees follows the mode in force there. */
+const ORDINARY_NAME = "Search file and folder names…";
+const ORDINARY_MEANING = "Describe what you are looking for…";
+/** A cycling phrase, as the input offers it. */
+const example = (i: number): string => `Try “${EXAMPLE_QUERIES[i]}”`;
 
 const placeholder = (): string => searchInput().placeholder;
 
@@ -70,12 +75,12 @@ describe("the cycling example", () => {
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
 
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PLACEHOLDER_PERIOD_MS + 100);
     });
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[1]);
-    expect(placeholder()).not.toBe(ORDINARY);
+    expect(placeholder()).toBe(example(1));
+    expect(placeholder()).not.toBe(ORDINARY_MEANING);
   });
 
   it("reaches a deep link too — the folder is inside what the index covers", async () => {
@@ -88,7 +93,7 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/?path=%2FKit", FOLDER);
     await settle();
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
   });
 
   it("shows the ordinary text in name mode", async () => {
@@ -100,7 +105,7 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_NAME);
   });
 
   it("shows the ordinary text where the index cannot answer here", async () => {
@@ -116,7 +121,7 @@ describe("the cycling example", () => {
     });
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
   });
 
   it("stops the interval on inactivity rather than merely ignoring its ticks", async () => {
@@ -132,16 +137,16 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
 
     await type(searchInput(), "dra");
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2 * PLACEHOLDER_PERIOD_MS + 100);
     });
 
     await type(searchInput(), "");
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
   });
 
   it("stops for a draft, as for any input holding text", async () => {
@@ -150,10 +155,10 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
 
     await type(searchInput(), "dra");
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
   });
 
   it("stays out of the way while the banner is drawn", async () => {
@@ -163,7 +168,7 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
   });
 
   it("shows the ordinary text on a server with no configuration", async () => {
@@ -174,7 +179,7 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
   });
 
   it("never moves the accessible name", async () => {
@@ -185,7 +190,7 @@ describe("the cycling example", () => {
     await settle();
     // `searchInput()` selects by `aria-label`; resolving at all is the
     // assertion, and the placeholder having moved is what makes it one.
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
     expect(searchInput().getAttribute("aria-label")).toBe(
       "Search names and folders",
     );

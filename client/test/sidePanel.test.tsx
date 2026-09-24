@@ -71,11 +71,14 @@ type Options = {
   path?: string;
 };
 
-/** Render (or re-render, keeping the mounted component's state) the panel. */
+/** Render (or re-render, keeping the mounted component's state) the panel,
+ *  open: these cells are about what an open panel says. */
 async function show(opts: Options = {}): Promise<void> {
   await act(async () => {
     root.render(
       <SidePanel
+        open
+        onClose={() => {}}
         query={null}
         similar={null}
         library={opts.library ?? null}
@@ -89,7 +92,6 @@ async function show(opts: Options = {}): Promise<void> {
         features={opts.features === undefined ? DEFAULTS : opts.features}
         onFolderMatching={() => {}}
         onKinds={() => {}}
-        onMode={() => {}}
         onTuning={() => {}}
         onSimilarTuning={() => {}}
       />,

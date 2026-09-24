@@ -38,7 +38,7 @@ const AT_ROOT: DirListing = {
 
 /** The header's one transient line — the slot the library states render into. */
 const headerLine = (): string | null =>
-  container.querySelector("header p")?.textContent ?? null;
+  container.querySelector("header [data-header-message]")?.textContent ?? null;
 const grid = (): Element | null => container.querySelector("main .grid");
 const skeleton = (): Element | null =>
   container.querySelector(".animate-pulse");

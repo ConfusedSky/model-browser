@@ -26,7 +26,6 @@ import { HttpError } from "../src/api/client";
 import {
   CHOOSER_FAILED,
   LAUNCH_FAILED,
-  OPEN_IN_PILL_CLASS,
   RESET_FAILED,
   resetFramingLive,
   type ActionHost,
@@ -140,19 +139,21 @@ const actionRow = (): HTMLElement | null =>
  *  (same accessible name) can never answer for it. */
 const openInRow = (): HTMLElement | null =>
   dialog()?.querySelector<HTMLElement>('[aria-label="Open in"]') ?? null;
-const panelPills = (): HTMLButtonElement[] =>
+const appButtons = (): HTMLButtonElement[] =>
   Array.from(
     openInRow()?.querySelectorAll<HTMLButtonElement>("[data-app-id]") ?? [],
   );
 /** The path bar's transient line, where a failure raised from a *tile* lands. */
 const pathError = (): string | null =>
-  container.querySelector("header p.text-red-400")?.textContent ?? null;
-/** The panel's own failure lines. `copyError` shares the class, so these read
- *  the text rather than counting nodes. */
+  container.querySelector('header [data-header-message="error"]')
+    ?.textContent ?? null;
+/** The panel's own failure lines, told apart from its confirmations by the
+ *  error tone. `copyError` shares it, so these read the text rather than
+ *  counting nodes. */
 const panelErrors = (): string[] =>
-  Array.from(dialog()?.querySelectorAll("p.text-red-400") ?? []).map(
-    (p) => p.textContent ?? "",
-  );
+  Array.from(
+    dialog()?.querySelectorAll('p[role="status"].text-danger') ?? [],
+  ).map((p) => p.textContent ?? "");
 const actions = (): string[] =>
   Array.from(
     actionRow()?.querySelectorAll<HTMLButtonElement>("button") ?? [],
@@ -329,12 +330,12 @@ describe("the info panel offers the entry actions", () => {
     // One style source, imported rather than copied — `EntryMenu` owns it.
     expect(action("reveal").className).toBe(MENU_ITEM_CLASS);
     expect(action("resetFraming").className).toBe(MENU_ITEM_CLASS);
-    // And the copy affordance is exactly as it was: the pill on the path line,
-    // which is part of that line rather than one of these.
+    // And the copy affordance stays on the path line, part of that line rather
+    // than one of these.
     const copy = document.querySelector<HTMLButtonElement>(
       'button[aria-label="Copy path"]',
     )!;
-    expect(copy.className).toContain("rounded-full");
+    expect(row.contains(copy)).toBe(false);
     expect(copy.className).not.toBe(MENU_ITEM_CLASS);
   });
 
@@ -345,8 +346,8 @@ describe("the info panel offers the entry actions", () => {
     // live app — the expanded viewer is exactly where someone decides a model
     // is the one to print, and the panel is the surface they read while
     // deciding. So what was pinned as a scope is now pinned as an offer: the
-    // pill row above the strip, *Open with…* in it, on the panel and the menu
-    // alike.
+    // application row above the strip, *Open with…* in it, on the panel and the
+    // menu alike.
     await unmountApp();
     apps.mockResolvedValue({
       chooser: true,
@@ -373,22 +374,28 @@ describe("the info panel offers the entry actions", () => {
       "resetFraming",
       "openWith",
     ]);
-    // The pill row, above the strip: ids and names, default first, wearing the
-    // exported pill class so the panel's row and the menu's cannot drift.
-    expect(panelPills().map((b) => b.dataset.appId)).toEqual([
+    // The row, right under the model's name and above the strip: ids and names,
+    // default first. The default is the panel's primary action, so it says
+    // what it does and is drawn apart from the rest rather than as one pill
+    // among equals.
+    expect(appButtons().map((b) => b.dataset.appId)).toEqual([
       "f3d.desktop",
       "lycheeslicer.desktop",
     ]);
-    expect(panelPills().map((b) => b.textContent)).toEqual([
-      "F3D",
+    expect(appButtons().map((b) => b.textContent)).toEqual([
+      "Open in F3D",
       "LycheeSlicer",
     ]);
-    expect(panelPills()[0]!.className).toContain(OPEN_IN_PILL_CLASS);
+    expect(appButtons()[0]!.className).not.toBe(appButtons()[1]!.className);
+    expect(openInRow()!.previousElementSibling?.textContent).toBe(
+      "Alpha/found.stl",
+    );
     expect(openInRow()!.compareDocumentPosition(actionRow()!) & 4).toBe(4);
-    // The panel is not a menu: its pills are plain buttons in a labelled
-    // group, with `data-app-id` and no `data-command`, exactly as the menu's.
+    // The panel is not a menu: its applications are plain buttons in a
+    // labelled group, with `data-app-id` and no `data-command`, exactly as the
+    // menu's.
     expect(openInRow()!.querySelector('[role="menuitem"]')).toBeNull();
-    expect(panelPills().every((p) => p.dataset.command === undefined)).toBe(
+    expect(appButtons().every((p) => p.dataset.command === undefined)).toBe(
       true,
     );
 
@@ -446,26 +453,26 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     listDir.mockResolvedValue(NESTED);
   }
 
-  it("renders the pill row for a model whose type has applications, default first", async () => {
+  it("renders the application row for a model whose type has applications, default first", async () => {
     await remountWithApps(REPORT);
     await openLightbox("Alpha/found.stl");
 
     // Ids launch and names render — and the order is the assertion: the
     // default leads, the associations follow in the registry's order.
-    expect(panelPills().map((b) => b.dataset.appId)).toEqual([
+    expect(appButtons().map((b) => b.dataset.appId)).toEqual([
       F3D.id,
       LYCHEE.id,
       PHOTON.id,
     ]);
-    expect(panelPills().map((b) => b.textContent)).toEqual([
-      "F3D",
+    expect(appButtons().map((b) => b.textContent)).toEqual([
+      `Open in ${F3D.name}`,
       "LycheeSlicer",
       "Photon Workshop",
     ]);
   });
 
   it("renders no row when the type maps to no applications, keeping Open with…", async () => {
-    // Absent rather than present and inert — a caption with no pills is an
+    // Absent rather than present and inert — a row with no applications is an
     // affordance that does nothing. *Open with…* does not go with it: it
     // follows the chooser flag alone, exactly as the spec pairs them.
     await remountWithApps({ chooser: true, types: {} });
@@ -475,12 +482,12 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     expect(actions()).toContain("openWith");
   });
 
-  it("withholds Open with… when no chooser is configured, keeping the pill row", async () => {
+  it("withholds Open with… when no chooser is configured, keeping the application row", async () => {
     await remountWithApps({ ...REPORT, chooser: false });
     await openLightbox("Alpha/found.stl");
 
     expect(actions()).toEqual(["reveal", "findSimilar", "resetFraming"]);
-    expect(panelPills().map((b) => b.dataset.appId)).toEqual([
+    expect(appButtons().map((b) => b.dataset.appId)).toEqual([
       F3D.id,
       LYCHEE.id,
       PHOTON.id,
@@ -491,7 +498,7 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     await remountWithApps(REPORT);
     await openLightbox("Alpha/found.stl");
 
-    await click(panelPills()[1]!); // LycheeSlicer
+    await click(appButtons()[1]!); // LycheeSlicer
     await settle();
 
     expect(openApp).toHaveBeenCalledTimes(1);
@@ -503,8 +510,8 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
 
   it("reports a failed launch with the sentence for a named application, in the panel", async () => {
     // *In the panel*, not under the path bar: the lightbox is `fixed inset-0
-    // z-lightbox` over that bar behind a 70% scrim, so a sentence sent there is
-    // dimmed, parked in the far corner away from the pill just pressed, and
+    // z-lightbox` over that bar behind a scrim, so a sentence sent there is
+    // dimmed, parked in the far corner away from the button just pressed, and
     // gone in 2.5s. Success is silent, so this is the only feedback the press
     // gives. The sentence is still the shared one — only where it lands is
     // per-surface.
@@ -512,7 +519,7 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     await openLightbox("Alpha/found.stl");
 
     openApp.mockRejectedValueOnce(new Error("gtk-launch exited 1"));
-    await click(panelPills()[0]!);
+    await click(appButtons()[0]!);
     await settle();
 
     expect(panelErrors()).toContain(LAUNCH_FAILED);
@@ -526,7 +533,7 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     await openLightbox("Alpha/found.stl");
 
     openApp.mockRejectedValueOnce(new Error("gtk-launch exited 1"));
-    await click(panelPills()[0]!);
+    await click(appButtons()[0]!);
     await settle();
     expect(panelErrors()).toContain(LAUNCH_FAILED);
 

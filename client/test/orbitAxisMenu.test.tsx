@@ -253,8 +253,10 @@ describe("the group is offered on model tiles and nowhere else", () => {
     expect(roles.slice(4)).toEqual(Array(roles.length - 4).fill("menuitem"));
     expect(roles.length).toBeGreaterThan(4); // there are commands under it
     // The divider is between them, and is not a button.
+    // Matched on the whole attribute: a class like `mx-0.5` breaks a `.`-joined
+    // selector.
     expect(
-      menu()!.querySelector(`.${AXIS_DIVIDER_CLASS.split(" ").join(".")}`),
+      menu()!.querySelector(`span[class="${AXIS_DIVIDER_CLASS}"]`),
     ).not.toBeNull();
 
     // Not merely "pill-shaped": the *same strings* the lightbox row draws with,
@@ -262,7 +264,7 @@ describe("the group is offered on model tiles and nowhere else", () => {
     // resemble each other. `entryActions` is where that copy lives.
     expect(axisItem("x").className).toContain(axisPillClass(true));
     expect(axisItem("z").className).toContain(axisPillClass(false));
-    expect(flip()!.className).toContain(flipPillClass(true)); // amber, being negated
+    expect(flip()!.className).toContain(flipPillClass(true)); // pressed, being negated
     expect(axisItem("x").className).not.toContain("w-full");
   });
 

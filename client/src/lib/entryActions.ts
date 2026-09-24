@@ -441,16 +441,16 @@ export function negatedAxis(current: OrbitAxis): OrbitAxis {
 }
 
 export const AXIS_GROUP_CLASS =
-  "flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs";
+  "flex items-center gap-0.5 rounded-lg bg-sunken p-0.5 text-xs ring-1 ring-line";
 /** A `<span>`, so it stays out of any button index. */
-export const AXIS_CAPTION_CLASS = "px-1.5 text-zinc-500";
-export const AXIS_DIVIDER_CLASS = "h-4 w-px bg-zinc-700";
+export const AXIS_CAPTION_CLASS = "px-1.5 text-ink-3";
+export const AXIS_DIVIDER_CLASS = "mx-0.5 h-4 w-px bg-line-strong";
 /** The spindle in force is the *filled* pill. */
 export const axisPillClass = (active: boolean): string =>
-  `rounded-full px-2.5 py-1 ${active ? "bg-sky-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`;
-/** Amber rather than sky: a state, not a pick. */
+  `rounded-md px-2.5 py-1.5 ${active ? "bg-accent font-medium text-accent-ink" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
+/** Neutral rather than the accent: a state, not a pick. */
 export const flipPillClass = (active: boolean): string =>
-  `rounded-full px-2.5 py-1 ${active ? "bg-amber-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`;
+  `rounded-md px-2.5 py-1.5 ${active ? "bg-white/15 font-medium text-ink ring-1 ring-line-strong" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
 export const FLIP_TITLE = "Negate the spindle axis (+axis ↔ −axis)";
 
 /** Model-only — a container tile is a glyph with no spindle — and withheld on
@@ -522,12 +522,9 @@ export function setOrbitAxis(
 /** Wraps, unlike the axis row: the registry chooses how long a name is, and a
  *  wrapped `rounded-full` reads as a blob. */
 export const OPEN_IN_GROUP_CLASS =
-  "flex flex-wrap items-center gap-1 rounded-2xl bg-zinc-800/80 p-1 text-xs";
+  "flex flex-wrap items-center gap-0.5 rounded-lg bg-sunken p-0.5 text-xs ring-1 ring-line";
 /** `nowrap`: "open in" broken across two lines reads as two captions. */
 export const OPEN_IN_CAPTION_CLASS = `${AXIS_CAPTION_CLASS} whitespace-nowrap`;
-/** `w-full` takes the whole line where the row wraps, so the caption reads as a
- *  heading. */
-export const OPEN_IN_PANEL_CAPTION_CLASS = `${OPEN_IN_CAPTION_CLASS} w-full`;
 /** One class for every pill: which application leads is said by **order**. */
 export const OPEN_IN_PILL_CLASS = `${axisPillClass(false)} max-w-full truncate`;
 export const OPEN_IN_CAPTION = "open in";
@@ -591,6 +588,16 @@ export interface EntryCommand {
     | null;
 }
 
+/** The commands that tend the library's thumbnails rather than use a model:
+ *  drawn after a divider, so an everyday action is never the neighbour of a
+ *  destructive one. */
+export const MAINTENANCE_COMMANDS: ReadonlySet<CommandId> = new Set([
+  "generateBeneath",
+  "resetBeneath",
+  "reRenderThumbnail",
+  "resetFraming",
+]);
+
 /**
  * The commands, and D6's per-kind table with them — in one place rather than
  * at each call site:
@@ -598,8 +605,8 @@ export interface EntryCommand {
  * ```
  * model tile                   dir tile                       zip tile
  * ──────────                   ────────                       ────────
- * Open lightbox                Open folder                    Open archive
- * Reveal in app                Reveal in app                  Reveal in app
+ * View model                   Open folder                    Open archive
+ * Show in folder               Show in folder                 Show in folder
  * Copy path                    Copy path                      Copy path
  * Find similar                 —                              —
  * —                            Generate thumbnails beneath    Generate thumbnails beneath
@@ -624,7 +631,7 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     // Beside `open in <X>` and *Open with…*, a bare "Open" is one too many.
     labelFor: (entry) =>
       entry.kind === "model"
-        ? "Open lightbox"
+        ? "View model"
         : entry.kind === "dir"
           ? "Open folder"
           : "Open archive",
@@ -633,7 +640,7 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   },
   {
     id: "reveal",
-    label: "Reveal in app",
+    label: "Show in folder",
     applies: () => true,
     run: (entry, host) => {
       // The mark after the navigate, never before: `navigate` clears it on

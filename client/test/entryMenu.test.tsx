@@ -15,6 +15,7 @@ import {
   mountApp,
   openFind,
   findInput,
+  flatButton,
   pathInput,
   pressEnter,
   searchInput,
@@ -127,10 +128,12 @@ const tile = (name: string): HTMLButtonElement =>
 const marked = (): HTMLElement | null =>
   container.querySelector<HTMLElement>(".animate-reveal-mark");
 const pathError = (): string | null =>
-  container.querySelector("header p.text-red-400")?.textContent ?? null;
+  container.querySelector('header [data-header-message="error"]')
+    ?.textContent ?? null;
 /** The same line in its other tone — what a command reports having done. */
 const pathNotice = (): string | null =>
-  container.querySelector("header p.text-zinc-400")?.textContent ?? null;
+  container.querySelector('header [data-header-message="ok"]')?.textContent ??
+  null;
 
 beforeEach(async () => {
   await mountApp("/models", NESTED);
@@ -143,7 +146,8 @@ afterEach(async () => {
 // entry-actions, the requirement's one exception (native-context-menu-bypass):
 // a shifted secondary press is the browser's — not prevented, not raised.
 describe("the shifted secondary press", () => {
-  const overlay = (): Element | null => container.querySelector(".cursor-grab");
+  const overlay = (): Element | null =>
+    container.querySelector(".z-orbit-overlay");
   const lightbox = (): Element | null =>
     document.querySelector('[role="dialog"]');
 
@@ -258,7 +262,7 @@ describe("raising the menu", () => {
     const suspend = vi.spyOn(RenderQueue.prototype, "suspend");
     await secondaryPress(tile("widget.stl"));
     expect(menu()).not.toBeNull();
-    expect(container.querySelector(".cursor-grab")).toBeNull(); // no orbit overlay
+    expect(container.querySelector(".z-orbit-overlay")).toBeNull(); // no orbit overlay
     expect(document.querySelector('[role="dialog"]')).toBeNull(); // no lightbox
     // It is not a viewer, so the shared renderer is never taken from the
     // thumbnail queue for it (2.4).
@@ -521,12 +525,8 @@ describe("reveal", () => {
 
   it("leaves the flat toggle alone", async () => {
     const flat = (): boolean =>
-      container
-        .querySelector("button[aria-pressed]")!
-        .getAttribute("aria-pressed") === "true";
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+      flatButton().getAttribute("aria-pressed") === "true";
+    await click(flatButton());
     await settle();
     expect(flat()).toBe(true);
 

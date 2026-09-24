@@ -333,7 +333,7 @@ describe("D6's per-kind table", () => {
       commandsFor(entry, { index: READY, apps: null, features: null }).find(
         (c) => c.id === "open",
       )!.label;
-    expect(label(model("/m/a.stl"))).toBe("Open lightbox");
+    expect(label(model("/m/a.stl"))).toBe("View model");
     expect(label(dir("/m/d"))).toBe("Open folder");
     expect(label(zip("/m/z.zip"))).toBe("Open archive");
     // Every other command's label is one string for every entry.

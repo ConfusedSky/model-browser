@@ -266,7 +266,9 @@ describe("the panel credits the model’s source", () => {
     expect(dialog()).not.toBeNull();
     expect(actionRow()).not.toBeNull();
     expect(document.querySelector('[role="alert"]')).toBeNull();
-    expect(container.querySelector("header p.text-red-400")).toBeNull();
+    expect(
+      container.querySelector('header [data-header-message="error"]'),
+    ).toBeNull();
   });
 
   it("drops an answer for a subject the viewer has left", async () => {

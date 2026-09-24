@@ -69,7 +69,9 @@ describe("flat toggle", () => {
     // and the next navigation must not silently ask for a flat listing
     listDir.mockClear();
     await click(
-      container.querySelector<HTMLButtonElement>("main .grid button")!,
+      container.querySelector<HTMLButtonElement>(
+        "main .grid [data-entry-tile]",
+      )!,
     );
     expect(listDir).toHaveBeenCalledWith(
       "/models/a",

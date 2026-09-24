@@ -48,8 +48,10 @@ export default defineConfig({
     // the browser's `Host` rather than rewriting it.
     host: process.env.VITE_HOST,
     allowedHosts: process.env.VITE_ALLOWED_HOSTS?.split(",") ?? [],
+    // A second API on another port (another posture, another checkout) is
+    // reached by pointing a second Vite at it: VITE_API_TARGET=http://127.0.0.1:3188
     proxy: {
-      "/api": "http://127.0.0.1:3177",
+      "/api": process.env.VITE_API_TARGET ?? "http://127.0.0.1:3177",
     },
   },
 });

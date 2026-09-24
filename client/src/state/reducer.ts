@@ -412,8 +412,14 @@ export function reducer(state: SearchState, action: Action): SearchState {
       return askCommitted(state, view, "user");
     }
 
-    case "clearSubject":
-      return leaveSubject(state);
+    case "clearSubject": {
+      // Back to browsing means the box stops showing a search that is no
+      // longer on screen.
+      const left = leaveSubject(state);
+      return left === state
+        ? state
+        : { ...left, drafts: { ...left.drafts, queryText: "" } };
+    }
 
     case "toggleFlat": {
       // Deep results are flat-shaped regardless of the toggle, so pressing it

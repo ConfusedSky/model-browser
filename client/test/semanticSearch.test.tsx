@@ -21,6 +21,7 @@ import {
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  openPanel,
   pathInput,
   pressEnter,
   putThumb,
@@ -97,13 +98,20 @@ const POSE: IndexPose = {
 
 function modeButton(name: string): HTMLButtonElement | undefined {
   return Array.from(
-    container.querySelectorAll<HTMLButtonElement>("aside button"),
+    container.querySelectorAll<HTMLButtonElement>(
+      '[role="group"][aria-label="Search by"] button',
+    ),
   ).find((b) => b.textContent?.trim().toLowerCase() === name);
 }
 function searchTab(): HTMLButtonElement {
   return Array.from(
     container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]'),
   ).find((b) => b.textContent?.toLowerCase().startsWith("search"))!;
+}
+/** The panel starts closed for a fresh profile, so open it before the tab. */
+async function openSearchTab(): Promise<void> {
+  await openPanel();
+  await click(searchTab());
 }
 
 beforeEach(() => {
@@ -124,7 +132,7 @@ afterEach(() => unmountApp());
 describe("meaning search", () => {
   it("is not offered at all when the index is not running", async () => {
     await mountApp("/models", NESTED);
-    await click(searchTab());
+    await openSearchTab();
     expect(modeButton("meaning")).toBeUndefined();
   });
 
@@ -137,7 +145,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
 
     await type(searchInput(), "a winged demon");
@@ -176,7 +184,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     // After mount: the harness points listDir at the initial listing, so a
     // no-match name search has to be configured once that is out of the way.
     listDir.mockImplementation(() =>
@@ -209,7 +217,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue({ ...MEANING, weak: true });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "zzz");
     await pressEnter(searchInput());
@@ -238,7 +246,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -258,7 +266,7 @@ describe("meaning search", () => {
 
     // Leaving the search returns to a listing nobody scored: no badge, and
     // nothing held in reserve for one.
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("name")!);
     await mountApp("/models", NESTED);
     await settle();
@@ -287,14 +295,16 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
     await settle();
 
+    // The relevance bar is aria-hidden too, and is not one of the numbers.
+    const BADGE = "span[aria-hidden]:not([data-relevance-bar])";
     const [hero] = tiles();
-    expect(hero!.querySelectorAll("span[aria-hidden]").length).toBe(2);
+    expect(hero!.querySelectorAll(BADGE).length).toBe(2);
 
     // Promote it to an orbit overlay: pointerdown on the tile is what mounts it.
     await act(async () => {
@@ -313,7 +323,7 @@ describe("meaning search", () => {
     expect(overlay).not.toBeNull();
     // Still drawn by the tile — one pair, the same element, never moved or
     // re-created by the press.
-    const badges = hero!.querySelectorAll("span[aria-hidden]");
+    const badges = hero!.querySelectorAll(BADGE);
     expect(badges.length).toBe(2);
     for (const badge of badges)
       expect(badge.className).toContain("z-tile-badge");
@@ -335,7 +345,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "dragon");
     await pressEnter(searchInput());
@@ -356,7 +366,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     const before = history.length;
 
@@ -387,7 +397,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("name")!);
 
     await type(searchInput(), "widget");
@@ -431,7 +441,7 @@ describe("meaning search", () => {
       NESTED,
     );
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain("not running");
@@ -458,7 +468,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain("does not cover this folder");
@@ -480,7 +490,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain("It covers /kits.");
@@ -498,7 +508,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain(
@@ -523,7 +533,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models/kit.zip!/parts", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain(
@@ -542,7 +552,7 @@ describe("meaning search", () => {
       NESTED,
     );
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain("starting up");
@@ -569,7 +579,7 @@ describe("meaning search", () => {
     getThumb.mockResolvedValue({ status: "miss" });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -605,7 +615,7 @@ describe("meaning search", () => {
     indexAvailability.mockResolvedValue({ state: "warming", elapsed: 2 });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     expect(modeButton("meaning")).toBeUndefined();
 
     indexAvailability.mockResolvedValue({
@@ -629,7 +639,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     // Ready, but this directory is not one the index covers: offering the mode
     // here promises an answer the server will refuse with a 400.
     expect(modeButton("meaning")).toBeUndefined();
@@ -642,7 +652,7 @@ describe("meaning search", () => {
     });
     await mountApp("/library/kit.zip!/parts", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     expect(modeButton("meaning")).toBeUndefined();
   });
 
@@ -673,7 +683,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -712,7 +722,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -750,7 +760,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -806,7 +816,7 @@ describe("meaning search", () => {
     );
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -847,7 +857,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -907,7 +917,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -975,7 +985,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1014,7 +1024,7 @@ describe("meaning search", () => {
     setSearchTuning({ ...TUNING_DEFAULTS, top: 42 });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1093,11 +1103,11 @@ describe("meaning search", () => {
     // focus ring left on the just-clicked button read as the selection. The
     // in-force button must carry the on-state and never the dimming, whether
     // or not it is inert.
-    expect(topBtn().className).toContain("bg-zinc-800");
-    expect(topBtn().className).toContain("text-zinc-100");
-    expect(topBtn().className).not.toContain("opacity-60");
-    expect(scoreBtn().className).not.toContain("bg-zinc-800");
-    expect(scoreBtn().className).toContain("text-zinc-500");
+    expect(topBtn().classList.contains("bg-accent-soft")).toBe(true);
+    expect(topBtn().classList.contains("text-accent")).toBe(true);
+    expect(topBtn().className).not.toContain("opacity");
+    expect(scoreBtn().classList.contains("bg-accent-soft")).toBe(false);
+    expect(scoreBtn().classList.contains("text-ink-3")).toBe(true);
   });
 
   it("a typed bound reaches the URL, once, when the typing stops", async () => {
@@ -1119,7 +1129,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1164,7 +1174,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1213,7 +1223,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1257,7 +1267,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1292,7 +1302,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue({ ...MEANING, matched: 875 });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());

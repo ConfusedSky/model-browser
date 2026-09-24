@@ -217,7 +217,9 @@ describe("file name search", () => {
     );
 
     await click(
-      container.querySelector<HTMLButtonElement>("main .grid button")!,
+      container.querySelector<HTMLButtonElement>(
+        "main .grid [data-entry-tile]",
+      )!,
     ); // navigate into Alpha — left pending
     await type(searchInput(), "found");
     await pressEnter(searchInput());
@@ -579,7 +581,9 @@ describe("file name search", () => {
     await openFind();
     await type(findInput()!, "ravo");
     await click(
-      container.querySelector<HTMLButtonElement>("main .grid button")!,
+      container.querySelector<HTMLButtonElement>(
+        "main .grid [data-entry-tile]",
+      )!,
     );
     await settle();
 

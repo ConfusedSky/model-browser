@@ -49,9 +49,7 @@ export default function JobChip({
     <div
       role="status"
       aria-live="polite"
-      // Above the occlusion pill, which owns the corner itself: the two would
-      // otherwise overlap exactly.
-      className="fixed bottom-14 left-3 z-20 flex max-w-sm items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 text-xs text-zinc-200"
+      className="fixed bottom-4 left-4 z-20 flex max-w-sm items-center gap-2 rounded-xl border border-line-strong bg-raised/95 px-3 py-2 text-xs text-ink shadow-2xl shadow-black/50 backdrop-blur"
     >
       <p className="min-w-0 flex-1">
         {sentence(state)}
@@ -76,7 +74,7 @@ export default function JobChip({
         type="button"
         aria-label="Dismiss"
         onClick={onDismiss}
-        className="shrink-0 rounded px-1 text-zinc-500 hover:text-zinc-200"
+        className="shrink-0 rounded px-1 text-ink-3 hover:text-ink"
       >
         ×
       </button>
@@ -85,7 +83,7 @@ export default function JobChip({
 }
 
 const ACTION_CLASS =
-  "shrink-0 rounded-lg border border-zinc-700 px-2 py-1 text-zinc-300 hover:border-zinc-500";
+  "shrink-0 rounded-md border border-line-strong px-2 py-1 text-ink-2 hover:bg-white/5 hover:text-ink";
 
 /** One helper for every phase, so the library and a folder are never described
  *  two ways: App labels the whole-library scope `'the library'` (D8), and

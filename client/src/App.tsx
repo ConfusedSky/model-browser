@@ -22,10 +22,11 @@ import { HttpApiClient, HttpError, type ApiClient } from "./api/client";
 import { withLocalFramings } from "./api/localFramings";
 import EntryMenu from "./components/EntryMenu";
 import FindBar from "./components/FindBar";
-import Grid from "./components/Grid";
+import Grid, { SkeletonGrid, type TileSize } from "./components/Grid";
+import Icon from "./components/Icon";
 import IntroBanner from "./components/IntroBanner";
 import JobChip from "./components/JobChip";
-import SidePanel from "./components/SidePanel";
+import SidePanel, { collapseStore } from "./components/SidePanel";
 import PathBar from "./components/PathBar";
 import { useCyclingPlaceholder } from "./hooks/useCyclingPlaceholder";
 import { SKELETON_DELAY_MS, useDelayedFlag } from "./hooks/useDelayedFlag";
@@ -64,6 +65,7 @@ import {
   type PlacementRequest,
 } from "./lib/placement";
 import { pushRecent } from "./lib/recents";
+import { stored } from "./lib/stored";
 import { scaleOf } from "./lib/scoreScale";
 import {
   applySessionSearchMode,
@@ -176,6 +178,18 @@ const NO_SCORES: Record<string, IndexScore> = {};
 /** Shared, so **never written to**: every landing builds a new Map. */
 const NO_PREVIEWS: ReadonlyMap<string, DirEntry[]> = new Map();
 const NO_PREVIEW: DirEntry[] = [];
+
+const TILE_SIZES = ["s", "m", "l"] as const;
+const TILE_SIZE_NAME: Record<TileSize, string> = {
+  s: "Small",
+  m: "Medium",
+  l: "Large",
+};
+const tileSizeStore = stored<TileSize>(
+  "model-browser:tile-size",
+  (raw) => (raw === "s" || raw === "l" ? raw : "m"),
+  (v) => v,
+);
 
 /** Keyed on the listing's identity, so it is scanned once per landing. */
 const carriedPreviews = new WeakMap<DirEntry[], Map<string, DirEntry[]>>();
@@ -603,6 +617,10 @@ export default function App() {
     setViewerNote(null);
   }, [viewer?.entry.path]);
   const [ao, setAoState] = useState(aoEnabled);
+  const [panelOpen, setPanelOpen] = useState(() => !collapseStore.read());
+  const [tileSize, setTileSize] = useState<TileSize>(() =>
+    tileSizeStore.read(),
+  );
   const trackerRef = useRef(new GestureTracker());
 
   // `history.state` cannot live in a reducer, so whether a model open writes a
@@ -1434,6 +1452,21 @@ export default function App() {
         goUpRef.current();
         return;
       }
+      // `/` jumps to the search box, as it does on most sites that have one.
+      if (
+        e.key === "/" &&
+        !typing &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        viewerRef.current === null &&
+        !menuOpenRef.current
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
       if (e.key !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey) return;
       if (typing && el.closest("[data-find-bar]") === null) return;
       if (viewerRef.current !== null) return;
@@ -1664,6 +1697,31 @@ export default function App() {
       anchor === undefined ? filteredListing : [anchor, ...filteredListing],
     [anchor, filteredListing],
   );
+  /** Models on screen still waiting for a picture — said once in the results
+   *  line, rather than only as a spinner per tile. */
+  const pendingThumbs = useMemo(() => {
+    let n = 0;
+    for (const e of shownEntries) {
+      if (e.kind !== "model") continue;
+      const t = thumbs.get(e.path);
+      if (t === undefined || (t.status === "loading" && t.url === undefined))
+        n++;
+    }
+    return n;
+  }, [shownEntries, thumbs]);
+
+  /** What a plain listing holds — the line a search spends on its label. */
+  const listingSummary = useMemo(() => {
+    const n = { folder: 0, archive: 0, model: 0 };
+    for (const e of kept)
+      n[
+        e.kind === "model" ? "model" : e.kind === "zip" ? "archive" : "folder"
+      ]++;
+    return (Object.keys(n) as (keyof typeof n)[])
+      .filter((k) => n[k] > 0)
+      .map((k) => `${n[k]} ${k}${n[k] === 1 ? "" : "s"}`)
+      .join(" · ");
+  }, [kept]);
   /** Off `shownEntries`, so stepping honours a find filter and skips folders
    *  (lightbox-sibling-stepping D1). */
   const modelSiblings = useMemo(
@@ -2176,24 +2234,22 @@ export default function App() {
   const noticeBar = (
     labelText: string,
     caveat: string,
-    narrow = false,
     stale = false,
+    quiet = false,
   ) => (
-    <div className="flex h-8 shrink-0 items-baseline justify-between gap-4 px-4 pt-3 text-xs">
-      <div className="flex min-w-0 items-baseline gap-2">
-        {/* The find control is otherwise Ctrl-F-or-nothing, which is invisible
-            to anyone who does not try it. */}
-        {narrow && !findOpen && (
-          <button
-            type="button"
-            onClick={openFind}
-            title="Narrow these by name (Ctrl-F)"
-            className="shrink-0 rounded px-1.5 text-zinc-500 hover:text-zinc-200"
+    <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pt-3 pb-1 text-[13px]">
+      <div className="flex min-w-0 items-center gap-2">
+        {labelText !== "" && (
+          <p
+            className={
+              quiet
+                ? "min-w-0 truncate text-xs text-ink-3"
+                : "min-w-0 truncate font-medium text-ink"
+            }
           >
-            ⌕ Narrow
-          </button>
+            {labelText}
+          </p>
         )}
-        <p className="min-w-0 truncate text-zinc-400">{labelText}</p>
         {/* The ONLY way out of a committed view on screen (D9), and the same
             transition emptying the input delegates to. Rendered for a model as
             for a phrase — which is the whole reason a similarity view is
@@ -2206,20 +2262,32 @@ export default function App() {
             // provenance, and reading `history.state` during a render would
             // read it one render stale.
             title="Stop showing this and go back to browsing"
-            className="shrink-0 rounded px-1.5 text-zinc-500 hover:text-zinc-200"
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line-strong px-3 text-xs text-ink-2 hover:border-ink-3 hover:text-ink"
           >
-            ✕ Dismiss
+            <Icon name="x" className="size-3" strokeWidth={2.25} />
+            Dismiss
           </button>
         )}
         {/* The whole of §5.2's affordance: not a panel, an overlay or a
             spinner, but the same weight as the caveat opposite. */}
         {stale && (
-          <p aria-live="polite" className="shrink-0 text-zinc-500">
+          <p aria-live="polite" className="shrink-0 text-xs text-ink-3">
             Refreshing…
           </p>
         )}
       </div>
-      <p className="shrink-0 text-amber-400">{caveat}</p>
+      <div className="flex shrink-0 items-center gap-4">
+        {pendingThumbs > 0 && (
+          <p className="flex items-center gap-2 text-xs text-ink-3">
+            <span
+              aria-hidden="true"
+              className="size-3 animate-[spin_1s_linear_infinite] rounded-full border-[1.5px] border-white/10 border-t-white/50"
+            />
+            Rendering {pendingThumbs} thumbnail{pendingThumbs === 1 ? "" : "s"}…
+          </p>
+        )}
+        {caveat !== "" && <p className="text-xs text-warn">{caveat}</p>}
+      </div>
     </div>
   );
 
@@ -2273,42 +2341,58 @@ export default function App() {
   // grid: a similarity anchor is still drawn above it.
   const emptyNotice = searchHasNoMatches ? (
     labelModel !== null ? (
-      <p className="mt-16 text-center text-sm text-zinc-600">
+      <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
         Nothing in the collection is similar to "{baseName(labelModel)}" — the
         index holds no neighbours for it.
       </p>
     ) : // A truncated search never finished, so "no match" would be false: the
     // walk ran out before covering the tree (D5).
     truncated ? (
-      <p className="mt-16 text-center text-sm text-zinc-600">
+      <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
         Nothing matched "{labelQuery}" in the part of the tree the search could
         cover — it ran out of budget before finishing. Try searching from a
         deeper folder.
       </p>
     ) : scope !== null ? (
       // Three outcomes, and only "nothing indexed" is fixed by indexing (4.1).
-      <p className="mt-16 text-center text-sm text-zinc-600">
-        {scope.status === "unindexed"
-          ? `Nothing here has been indexed yet — meaning search covers ${scope.covers.join(", ")} files outside archives.`
-          : `Nothing matched "${labelQuery}".${
-              scope.status === "partial"
-                ? ` ${scope.indexed} of ${scope.scanned} models here are indexed.`
-                : ""
-            }`}
-      </p>
+      <div className="mx-auto mt-20 flex max-w-md flex-col items-center gap-4 px-6 text-center">
+        <p className="text-sm leading-relaxed text-ink-2">
+          {scope.status === "unindexed"
+            ? `Nothing here has been indexed yet — meaning search covers ${scope.covers.join(", ")} files outside archives.`
+            : `Nothing matched "${labelQuery}".${
+                scope.status === "partial"
+                  ? ` ${scope.indexed} of ${scope.scanned} models here are indexed.`
+                  : ""
+              }`}
+        </p>
+        {/* A meaning search covers this folder and below, so the likeliest
+            repair for "nothing" is the same phrase from the top. */}
+        {label.subject.kind === "query" &&
+          state.view.path !== "/" &&
+          meaningRunnableAt(state.index, "/") && (
+            <button
+              type="button"
+              onClick={() => runQuery(labelQuery ?? "")}
+              className="flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-semibold text-accent-ink hover:bg-accent-hover"
+            >
+              <Icon name="search" className="size-3.5" strokeWidth={2.25} />
+              Search the whole library
+            </button>
+          )}
+      </div>
     ) : (
-      <p className="mt-16 text-center text-sm text-zinc-600">
+      <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
         Nothing matched "{labelQuery}".
       </p>
     )
   ) : kindHidesAll ? (
-    <p className="mt-16 text-center text-sm text-zinc-600">
+    <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
       {counted === "folders"
         ? "No folders matched — the results are models only."
         : "No models matched — the results are folders only."}
     </p>
   ) : filterHidesAll ? (
-    <p className="mt-16 text-center text-sm text-zinc-600">
+    <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
       The filter is hiding everything below.
     </p>
   ) : null;
@@ -2326,6 +2410,23 @@ export default function App() {
       : error !== null
         ? { text: error, tone: "error" }
         : null);
+
+  /** Meaning is offered where it can run, and shown wherever it is in force:
+   *  a link can put the app in meaning mode on a machine with no index, and a
+   *  mode you cannot see or leave is a trap. */
+  const showMode =
+    meaningRunnableAt(state.index, target) || live.mode === "meaning";
+  /** Says what a search will match and where it starts, since it covers
+   *  this folder and below. */
+  const meaningInForce = showMode && live.mode === "meaning";
+  const searchPlaceholder =
+    target === "/"
+      ? meaningInForce
+        ? "Describe what you are looking for…"
+        : "Search file and folder names…"
+      : meaningInForce
+        ? `Describe a model in ${baseName(target)}…`
+        : `Search names in ${baseName(target)}…`;
 
   /** `=== true` and nothing looser: unknown, failed and off all withhold, as
    *  every gated offer is withheld (`landing-page` D3). */
@@ -2361,84 +2462,268 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
+    <div className="flex h-dvh flex-col bg-canvas text-ink">
       {/* A block around the row, so the transient line can grow the header
           without pushing the controls out of line with the path input.
           `z-chrome` is for the suggestion list, which hangs over a grid whose
           score badges outrank its own `z-20`. */}
-      <header className="relative z-chrome border-b border-zinc-800 p-3">
-        <div className="flex items-center gap-2">
+      <header className="relative z-chrome border-b border-line bg-canvas">
+        {/* Global row: where you are in the app, and what you can ask of the
+            whole library. */}
+        <div className="flex h-14 items-center gap-3 px-3 sm:px-4">
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            title="Library top"
+            className="flex shrink-0 items-center gap-2 rounded-md py-1 pr-1.5 pl-1 text-ink hover:bg-surface"
+          >
+            <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-ink">
+              <Icon name="box" className="size-4" strokeWidth={2} />
+            </span>
+            <span className="hidden text-sm font-semibold tracking-tight md:inline">
+              Model Browser
+            </span>
+          </button>
+          <div
+            role="search"
+            className="mx-auto flex h-10 min-w-0 max-w-2xl flex-1 items-center rounded-lg border border-line bg-surface pr-1 transition-colors focus-within:border-accent/60 focus-within:bg-raised"
+          >
+            <Icon
+              name={live.mode === "meaning" && showMode ? "sparkles" : "search"}
+              className="ml-3 hidden size-4 text-ink-3 sm:block"
+            />
+            <input
+              ref={searchInputRef}
+              type="search"
+              enterKeyHint="search"
+              value={state.drafts.queryText}
+              onChange={(e) => handleQueryTextChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitSearch();
+              }}
+              placeholder={
+                placeholderExample !== null
+                  ? `Try “${placeholderExample}”`
+                  : searchPlaceholder
+              }
+              // Never the placeholder: the accessible name must not change under
+              // a screen reader while the visible hint cycles (D6).
+              aria-label="Search names and folders"
+              spellCheck={false}
+              className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-sm text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden"
+            />
+            {showMode && (
+              <div
+                role="group"
+                aria-label="Search by"
+                className="mr-1 flex shrink-0 rounded-md bg-sunken p-0.5 text-xs"
+              >
+                {(["name", "meaning"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    aria-pressed={live.mode === m}
+                    onClick={() => setMode(m)}
+                    title={
+                      m === "name"
+                        ? "Match file and folder names"
+                        : "Match what the models look like"
+                    }
+                    aria-label={m === "name" ? "Name" : "Meaning"}
+                    className={
+                      live.mode === m
+                        ? "flex items-center gap-1 rounded bg-raised px-1.5 py-1 font-medium capitalize text-ink shadow-sm ring-1 ring-line-strong sm:px-2"
+                        : "flex items-center gap-1 rounded px-1.5 py-1 capitalize text-ink-3 hover:text-ink-2 sm:px-2"
+                    }
+                  >
+                    <Icon
+                      name={m === "name" ? "type" : "sparkles"}
+                      className="size-3.5 sm:hidden"
+                    />
+                    <span className="hidden sm:inline">{m}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={submitSearch}
+              disabled={state.drafts.queryText.trim() === ""}
+              title="Search this folder and everything below it by name — files and folders"
+              aria-label="Search"
+              className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-white/5 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <Icon name="arrowLeft" className="size-4 rotate-180" />
+            </button>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {introOffered && introSearchable && (
+              <button
+                type="button"
+                onClick={() => runQuery(pickExample(EXAMPLE_QUERIES))}
+                title="Run an example search"
+                className="hidden h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink sm:flex"
+              >
+                <Icon name="dice" />
+                <span className="hidden lg:inline">Surprise me</span>
+              </button>
+            )}
+            {/* What the banner offered, after it is gone: the header never
+                scrolls (`landing-page` D3). */}
+            {introOffered && (
+              <a
+                href={ABOUT_URL}
+                className="flex h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink"
+              >
+                <Icon name="info" />
+                <span className="hidden lg:inline">About</span>
+              </a>
+            )}
+          </div>
+        </div>
+        {/* Local row: this folder, and how to look at it. */}
+        <div className="flex h-11 items-center gap-1 border-t border-line px-2 sm:px-3">
           <button
             type="button"
             onClick={goUp}
             disabled={target === "/"}
             aria-label="Parent directory"
-            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+            title="Up a folder (Alt+↑)"
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-surface hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
           >
-            ↑
+            <Icon name="cornerUp" />
           </button>
           <PathBar path={target} api={api} onNavigate={navigate} />
-          <input
-            ref={searchInputRef}
-            value={state.drafts.queryText}
-            onChange={(e) => handleQueryTextChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submitSearch();
-            }}
-            placeholder={placeholderExample ?? "Search names and folders…"}
-            // Never the placeholder: the accessible name must not change under
-            // a screen reader while the visible hint cycles (D6).
-            aria-label="Search names and folders"
-            spellCheck={false}
-            className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
-          />
-          <button
-            type="button"
-            onClick={submitSearch}
-            disabled={state.drafts.queryText.trim() === ""}
-            title="Search this folder and everything below it by name — files and folders"
-            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
-          >
-            Search
-          </button>
-          <button
-            type="button"
-            onClick={toggleFlat}
-            aria-pressed={live.flat}
-            title="Show every model under this folder in one grid"
-            className={`rounded-lg border px-3 py-2 text-sm ${
-              live.flat
-                ? "border-sky-500 text-sky-400 hover:border-sky-400"
-                : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
-            }`}
-          >
-            Flat
-          </button>
-          {/* What the banner offered, after it is gone: the header never
-              scrolls (`landing-page` D3). */}
-          {introOffered && (
-            <a
-              href={ABOUT_URL}
-              className="ml-auto rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500"
-            >
-              About
-            </a>
-          )}
-          {introOffered && introSearchable && (
+          <div className="flex shrink-0 items-center gap-1 pl-1">
             <button
               type="button"
-              onClick={() => runQuery(pickExample(EXAMPLE_QUERIES))}
-              className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500"
+              onClick={findOpen ? closeFind : openFind}
+              aria-pressed={findOpen}
+              data-narrow-toggle
+              title="Narrow these by name (Ctrl-F)"
+              className={
+                findOpen
+                  ? "flex h-8 items-center gap-1.5 rounded-md bg-surface px-2.5 text-[13px] text-ink"
+                  : "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+              }
             >
-              Surprise me
+              <Icon name="filter" className="size-3.5" />
+              <span className="hidden sm:inline">Narrow</span>
             </button>
-          )}
+            <button
+              type="button"
+              onClick={toggleFlat}
+              aria-pressed={live.flat}
+              data-flat-toggle
+              title="Show every model under this folder in one grid"
+              className={
+                live.flat
+                  ? "flex h-8 items-center gap-1.5 rounded-md bg-accent-soft px-2.5 text-[13px] font-medium text-accent"
+                  : "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+              }
+            >
+              <Icon name="layers" className="size-3.5" />
+              <span className="hidden sm:inline">Flat</span>
+            </button>
+            <span aria-hidden="true" className="mx-1 h-5 w-px bg-line" />
+            <div
+              role="group"
+              aria-label="Tile size"
+              className="hidden items-center rounded-md p-0.5 sm:flex"
+            >
+              {TILE_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  data-tile-size={size}
+                  aria-label={`${TILE_SIZE_NAME[size]} tiles`}
+                  title={`${TILE_SIZE_NAME[size]} tiles`}
+                  onClick={() => {
+                    setTileSize(size);
+                    tileSizeStore.write(size);
+                  }}
+                  className={
+                    tileSize === size
+                      ? "flex size-7 items-center justify-center rounded bg-surface text-ink"
+                      : "flex size-7 items-center justify-center rounded text-ink-3 hover:text-ink-2"
+                  }
+                >
+                  <Icon
+                    name="grid"
+                    className={
+                      size === "s"
+                        ? "size-2.5"
+                        : size === "m"
+                          ? "size-3.5"
+                          : "size-4.5"
+                    }
+                    strokeWidth={size === "s" ? 2.5 : 1.75}
+                  />
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              aria-pressed={ao}
+              title="Ambient occlusion — turn off to speed up orbiting on weaker GPUs; thumbnails follow this setting and are cached under each"
+              onClick={() => {
+                setAoEnabled(!ao);
+                setAoState(!ao);
+              }}
+              className={
+                ao
+                  ? "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink hover:bg-surface"
+                  : "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink-3 hover:bg-surface hover:text-ink-2"
+              }
+            >
+              <span
+                aria-hidden="true"
+                className={
+                  ao
+                    ? "size-3 rounded-full bg-[radial-gradient(circle_at_35%_35%,#fff,#777_55%,#222)]"
+                    : "size-3 rounded-full bg-ink-3/60"
+                }
+              />
+              <span className="hidden md:inline">Occlusion</span>
+            </button>
+            {/* The panel's own dot, carried out to where it is opened from:
+                it answers "why are my results strange?" while closed (D5). */}
+            <button
+              type="button"
+              data-panel-toggle
+              aria-expanded={panelOpen}
+              aria-label="Options"
+              title="Search options and library tools"
+              onClick={() => {
+                setPanelOpen(!panelOpen);
+                collapseStore.write(panelOpen);
+              }}
+              className={
+                panelOpen
+                  ? "relative flex h-8 items-center gap-1.5 rounded-md bg-surface px-2.5 text-[13px] text-ink"
+                  : "relative flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+              }
+            >
+              <Icon name="sliders" className="size-3.5" />
+              <span className="hidden lg:inline">Options</span>
+              {(!live.folderMatching || live.kinds !== "both") && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-1 right-1 size-1.5 rounded-full bg-accent"
+                />
+              )}
+            </button>
+          </div>
         </div>
         {headerMessage !== null && (
           <p
-            className={`mt-1 text-xs ${
-              headerMessage.tone === "error" ? "text-red-400" : "text-zinc-400"
-            }`}
+            role="status"
+            data-header-message={headerMessage.tone}
+            className={
+              headerMessage.tone === "error"
+                ? "border-t border-line bg-danger/10 px-4 py-1.5 text-xs text-danger"
+                : "border-t border-line bg-surface px-4 py-1.5 text-xs text-ink-2"
+            }
           >
             {headerMessage.text}
           </p>
@@ -2482,17 +2767,7 @@ export default function App() {
                 />
               )}
               {noticeBar("", "")}
-              <div
-                aria-hidden="true"
-                className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 p-4"
-              >
-                {Array.from({ length: 12 }, (_, i) => (
-                  <div
-                    key={i}
-                    className="aspect-square animate-pulse rounded-xl border border-zinc-800 bg-zinc-900"
-                  />
-                ))}
-              </div>
+              <SkeletonGrid size={tileSize} />
             </>
           ) : (
             <>
@@ -2506,7 +2781,7 @@ export default function App() {
                 />
               )}
               {deferredSubject.kind !== "none" && (
-                <p className="px-4 pt-1 text-xs text-amber-400">
+                <p className="mx-4 mt-3 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-xs text-warn">
                   {deferredSubject.kind === "query" ? (
                     <>
                       This view is a meaning search for &ldquo;
@@ -2534,19 +2809,16 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => runDeferredByName()}
-                      className="underline hover:text-amber-300"
+                      className="font-medium underline underline-offset-2 hover:text-ink"
                     >
                       Search names instead
                     </button>
                   )}
                 </p>
               )}
-              {noticeBar(
-                resultsLabel,
-                omittedNotice,
-                entries.length > 0,
-                refreshing,
-              )}
+              {resultsLabel === "" && !dismissable
+                ? noticeBar(listingSummary, omittedNotice, refreshing, true)
+                : noticeBar(resultsLabel, omittedNotice, refreshing)}
               {/* An anchor is something to show, so it stays above its own
                   "nothing similar". */}
               {emptyNotice === null || anchor !== undefined ? (
@@ -2567,6 +2839,7 @@ export default function App() {
                   onPeek={requestPeek}
                   onBands={reportBands}
                   scrollRoot={mainRef}
+                  size={tileSize}
                 />
               ) : null}
               {emptyNotice}
@@ -2581,6 +2854,11 @@ export default function App() {
           similar={liveSimilar}
           library={libraryJobs}
           onSimilarTuning={setSimilarTuning}
+          open={panelOpen}
+          onClose={() => {
+            setPanelOpen(false);
+            collapseStore.write(true);
+          }}
           path={target}
           folderMatching={live.folderMatching}
           kinds={live.kinds}
@@ -2592,7 +2870,6 @@ export default function App() {
           features={features}
           onFolderMatching={setFolderMatching}
           onKinds={setKinds}
-          onMode={setMode}
         />
       </div>
       {/* Outside the body row, so it outlives every listing navigated through
@@ -2606,22 +2883,6 @@ export default function App() {
           viewOpen={viewer !== null}
         />
       )}
-      <div className="fixed bottom-3 left-3 z-50 flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/90 p-1 text-xs">
-        <button
-          type="button"
-          aria-pressed={ao}
-          title="Ambient occlusion — turn off to speed up orbiting on weaker GPUs; thumbnails follow this setting and are cached under each"
-          onClick={() => {
-            setAoEnabled(!ao);
-            setAoState(!ao);
-          }}
-          className={`rounded-full px-2.5 py-1 ${
-            ao ? "bg-sky-700 text-white" : "text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          ssao
-        </button>
-      </div>
       {/* Which items an entry offers, and which a surface declines, both live
           in `entryActions`, never here (D6). */}
       {menu !== null && menuCommands.length > 0 && (

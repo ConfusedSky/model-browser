@@ -1,6 +1,30 @@
 @import "tailwindcss";
 
 /**
+ * The design tokens. Roles, not hues: a component asks for the surface it sits
+ * on or the ink it writes in, so the palette can move without a sweep.
+ * `accent` is the one colour that means "yours / active / go"; warnings and
+ * errors keep their own hues so the accent never reads as an alarm.
+ */
+@theme {
+  --color-canvas: #0b0b0d;
+  --color-surface: #131316;
+  --color-raised: #1b1b20;
+  --color-sunken: #0f0f12;
+  --color-line: rgb(255 255 255 / 0.07);
+  --color-line-strong: rgb(255 255 255 / 0.14);
+  --color-ink: #ededf0;
+  --color-ink-2: #a8a8b3;
+  --color-ink-3: #8a8a95;
+  --color-accent: #f2b544;
+  --color-accent-hover: #f7c86b;
+  --color-accent-ink: #1c1405;
+  --color-accent-soft: rgb(242 181 68 / 0.14);
+  --color-warn: #f0a35e;
+  --color-danger: #f87171;
+}
+
+/**
  * The document's own ground, for both of the build's entries (`landing-page`
  * D2: the app and the About page are two documents, and this stylesheet is the
  * one thing they share — `main.tsx` and `about.tsx` each import it).
@@ -16,14 +40,25 @@
  * flash on 5173 is the dev server and not this rule failing.
  *
  * `color-scheme` is what recolours the scrollbars and anything else the UA
- * draws for itself; `background-color` is `bg-zinc-950`'s own value, taken from
- * Tailwind's variable so the two cannot drift, with the literal behind it for
+ * draws for itself; `background-color` is `bg-canvas`'s own value, taken from
+ * the theme variable so the two cannot drift, with the literal behind it for
  * the same reason `animate-reveal-mark` carries one — this rule has to hold
  * even where the theme variable was not emitted.
  */
 :root {
   color-scheme: dark;
-  background-color: var(--color-zinc-950, #09090b);
+  background-color: var(--color-canvas, #0b0b0d);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/** One focus ring for every control, drawn only for keyboard focus. In the
+ *  base layer, so a control that draws its own focus can still opt out. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-accent, #f2b544);
+    outline-offset: 2px;
+  }
 }
 
 /**
@@ -92,4 +127,19 @@
 
 @utility animate-reveal-mark {
   animation: reveal-mark 1.8s ease-out;
+}
+
+/**
+ * The ground a model is shown on: a soft overhead pool of light on the card's
+ * surface. Thumbnails are transparent, so this is what sits behind every
+ * model — and the orbit overlay wears it too, or the live view would open as a
+ * differently coloured square over the tile.
+ */
+@utility bg-stage {
+  background-color: var(--color-surface, #131316);
+  background-image: radial-gradient(
+    ellipse 70% 60% at 50% 42%,
+    rgb(255 255 255 / 0.055),
+    transparent 72%
+  );
 }

@@ -184,7 +184,9 @@ describe("the banner at the library top", () => {
     expect(banner()).toBeNull();
     expect(headerAbout()).toBeNull();
     expect(headerSurprise()).toBeUndefined();
-    expect(searchInput().placeholder).toBe("Search names and folders…");
+    expect(searchInput().placeholder).toBe(
+      "Describe what you are looking for…",
+    );
   });
 
   it("is absent while the report has not resolved — withheld, never withdrawn", async () => {
@@ -533,7 +535,7 @@ describe("the banner does not move the grid", () => {
     await act(async () => held.resolve(TOP));
     await settle();
     expect(
-      container.querySelectorAll("main .grid button").length,
+      container.querySelectorAll("main .grid [data-entry-tile]").length,
     ).toBeGreaterThan(0);
     expect(banner()).not.toBeNull();
     expect(container.querySelector("main")!.contains(banner())).toBe(false);

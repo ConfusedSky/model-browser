@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type * as THREE from "three";
 import type {
   AppRef,
@@ -17,7 +11,7 @@ import type {
 } from "../../../shared/types";
 import { renderableCredits } from "../../../shared/credits";
 import type { ApiClient } from "../api/client";
-import { MENU_ITEM_CLASS } from "../components/EntryMenu";
+import { COMMAND_ICON, MENU_ITEM_CLASS } from "../components/EntryMenu";
 import { CREDIT_LINK_CLASS, hostLabel } from "../lib/credits";
 import {
   AXIS_CAPTION_CLASS,
@@ -25,10 +19,7 @@ import {
   AXIS_GROUP_CLASS,
   AXIS_LETTERS,
   FLIP_TITLE,
-  OPEN_IN_CAPTION,
-  OPEN_IN_PANEL_CAPTION_CLASS,
-  OPEN_IN_GROUP_CLASS,
-  OPEN_IN_PILL_CLASS,
+  MAINTENANCE_COMMANDS,
   axisLetter,
   axisPillClass,
   axisWithLetter,
@@ -51,6 +42,14 @@ import { cameraForPose } from "../three/pose";
 import { getRenderer } from "../three/renderer";
 import { liveRenderSize } from "./renderSize";
 import { ViewerSession } from "./session";
+import Icon from "../components/Icon";
+
+/** The panel's launch buttons: the default application is the one filled
+ *  button in the panel, so what "open" means is never a question. */
+const OPEN_IN_PRIMARY_CLASS =
+  "flex h-9 min-w-0 flex-1 basis-full items-center justify-center gap-2 truncate rounded-lg bg-accent px-3 text-[13px] font-semibold text-accent-ink hover:bg-accent-hover";
+const OPEN_IN_SECONDARY_CLASS =
+  "flex h-8 min-w-0 flex-1 items-center justify-center truncate rounded-lg px-3 text-xs text-ink-2 ring-1 ring-line-strong hover:bg-white/5 hover:text-ink";
 
 export interface ViewerState {
   mode: "orbit" | "lightbox";
@@ -690,7 +689,7 @@ export default function ViewerLayer({
   }
 
   const spinner = (
-    <span className="absolute left-1/2 top-1/2 size-8 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-200" />
+    <span className="absolute left-1/2 top-1/2 size-7 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-2 border-white/10 border-t-white/50" />
   );
 
   if (viewer.mode === "orbit") {
@@ -698,7 +697,7 @@ export default function ViewerLayer({
     return (
       <div
         ref={containerRef}
-        className="fixed z-orbit-overlay cursor-grab touch-none rounded-lg bg-zinc-900 active:cursor-grabbing"
+        className="fixed z-orbit-overlay cursor-grab touch-none rounded-t-xl bg-stage active:cursor-grabbing"
         style={{
           left: rect.left,
           top: rect.top,
@@ -716,7 +715,7 @@ export default function ViewerLayer({
           (loadError !== null ? (
             <span
               role="alert"
-              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-zinc-800/90 px-2.5 py-1 text-xs text-red-400"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-raised/90 px-2.5 py-1 text-xs text-danger"
             >
               ⚠ failed to load
             </span>
@@ -729,7 +728,7 @@ export default function ViewerLayer({
 
   return (
     <div
-      className="fixed inset-0 z-lightbox flex items-center justify-center bg-black/70"
+      className="fixed inset-0 z-lightbox flex items-center justify-center bg-black/75 backdrop-blur-sm sm:p-4"
       onContextMenu={raiseEntryMenu}
       onPointerDown={(e) => {
         // Primary only: a secondary press on the backdrop raises the menu, and
@@ -743,25 +742,40 @@ export default function ViewerLayer({
         aria-modal="true"
         aria-label={viewer.entry.name}
         tabIndex={-1}
-        // Declared once, on the element that owns both: spelling either number
-        // again elsewhere lets a widened panel overlap the model silently.
-        style={{ "--lb-width": "95vw", "--lb-panel": "18rem" } as CSSProperties}
-        className="relative flex max-w-[var(--lb-width)] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 outline-none"
+        className="relative flex h-full w-full flex-col overflow-hidden bg-canvas outline-none sm:flex-row sm:rounded-2xl sm:border sm:border-line-strong sm:shadow-2xl sm:shadow-black/60"
       >
-        {/* The square is load-bearing: `snapshot()` captures at aspect 1, so a
-            squeezed live view disagrees with its thumbnail (D1). Sized against
-            the room left *after* the panel, or the panel is crushed until its
-            path text overflows; the `16rem` floor is the other direction. */}
-        <div className="relative h-[min(80vh,max(16rem,calc(var(--lb-width)_-_var(--lb-panel))))] w-[min(80vh,max(16rem,calc(var(--lb-width)_-_var(--lb-panel))))] shrink-0">
-          <div
-            ref={canvasHostRef}
-            className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
-            onPointerDown={startGesture}
-            onWheel={(e) => {
-              sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9);
-              renderNow();
-            }}
-          />
+        {/* The stage takes whatever the panel leaves, and the canvas is the
+            largest square inside it. The square is load-bearing: `snapshot()`
+            captures at aspect 1, so a squeezed live view disagrees with its
+            thumbnail (D1). The stage is a size container so the square can
+            take its smaller axis. */}
+        <div className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center bg-stage [container-type:size]">
+          <div className="relative size-[min(100cqw,100cqh)]">
+            <div
+              ref={canvasHostRef}
+              className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
+              onPointerDown={startGesture}
+              onWheel={(e) => {
+                sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9);
+                renderNow();
+              }}
+            />
+            {session === null &&
+              (loadError !== null ? (
+                <div
+                  role="alert"
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center"
+                >
+                  <Icon name="warning" className="size-7 text-danger/80" />
+                  <p className="text-sm font-medium text-ink">
+                    {viewer.entry.name}
+                  </p>
+                  <p className="text-xs text-danger">{loadError}</p>
+                </div>
+              ) : (
+                spinner
+              ))}
+          </div>
           {/* Siblings of the canvas host, not children: the host owns the
               orbit and zoom handlers, so a press on a button never orbits.
               Disabled rather than absent at the ends (D2). */}
@@ -772,7 +786,8 @@ export default function ViewerLayer({
             onClick={() => {
               if (prevEntry !== null) void goTo(prevEntry);
             }}
-            className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-zinc-800/80 p-2 text-zinc-200 hover:bg-zinc-700 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-zinc-800/80"
+            title="Previous model (←)"
+            className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-raised/80 p-2.5 text-ink ring-1 ring-line-strong backdrop-blur hover:bg-raised disabled:cursor-default disabled:opacity-0"
           >
             <svg
               aria-hidden="true"
@@ -794,7 +809,8 @@ export default function ViewerLayer({
             onClick={() => {
               if (nextEntry !== null) void goTo(nextEntry);
             }}
-            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-zinc-800/80 p-2 text-zinc-200 hover:bg-zinc-700 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-zinc-800/80"
+            title="Next model (→)"
+            className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-raised/80 p-2.5 text-ink ring-1 ring-line-strong backdrop-blur hover:bg-raised disabled:cursor-default disabled:opacity-0"
           >
             <svg
               aria-hidden="true"
@@ -809,23 +825,14 @@ export default function ViewerLayer({
               <path d="M9 6l6 6-6 6" />
             </svg>
           </button>
-          {session === null &&
-            (loadError !== null ? (
-              <div
-                role="alert"
-                className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center"
-              >
-                <span className="text-2xl" aria-hidden="true">
-                  ⚠
-                </span>
-                <p className="text-sm font-medium text-zinc-200">
-                  {viewer.entry.name}
-                </p>
-                <p className="text-xs text-red-400">{loadError}</p>
-              </div>
-            ) : (
-              spinner
-            ))}
+          {session !== null && (
+            <p
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-3 text-center text-xs text-ink-3"
+            >
+              Drag to turn · Scroll to zoom · ← → to step
+            </p>
+          )}
           {session !== null && (
             // The tile menu draws the same four buttons from the same strings
             // in `entryActions`, so neither copy can drift.
@@ -863,56 +870,85 @@ export default function ViewerLayer({
             </div>
           )}
         </div>
-        <div className="flex w-[var(--lb-panel)] min-w-0 flex-col gap-4 overflow-y-auto p-4">
+        <div className="flex max-h-[42dvh] w-full min-w-0 shrink-0 flex-col gap-5 overflow-y-auto border-t border-line p-5 sm:max-h-none sm:w-80 sm:border-t-0 sm:border-l">
           {/* pr-9 clears the dialog-anchored close button */}
-          <p className="break-all pr-9 text-sm font-medium text-zinc-200">
+          <p className="pr-9 text-[15px] leading-snug font-semibold [overflow-wrap:anywhere] text-ink">
             {viewer.entry.name}
           </p>
+          {openIn !== null && openIn.apps.length > 0 && (
+            // The panel's primary action: the default application leads as the
+            // one filled button, the rest follow as plain ones (L10). Plain
+            // buttons carrying `data-app-id` and no `data-command`, exactly as
+            // the menu's do.
+            <div
+              role="group"
+              aria-label="Open in"
+              className="flex flex-wrap gap-1.5"
+            >
+              {openIn.apps.map((app, i) => (
+                <button
+                  key={app.id}
+                  type="button"
+                  data-app-id={app.id}
+                  title={`Open in ${app.name}`}
+                  onClick={() => openIn.onChoose(app.id)}
+                  className={
+                    i === 0 ? OPEN_IN_PRIMARY_CLASS : OPEN_IN_SECONDARY_CLASS
+                  }
+                >
+                  {i === 0 && <Icon name="externalLink" className="size-3.5" />}
+                  {i === 0 ? `Open in ${app.name}` : app.name}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-500">path</span>
+              <span className="text-xs font-medium tracking-wider text-ink-3 uppercase">
+                path
+              </span>
               <button
                 type="button"
                 aria-label="Copy path"
                 onClick={copyPath}
-                className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs text-zinc-300 hover:bg-zinc-700"
+                className={
+                  copied
+                    ? "h-7 rounded-md bg-accent-soft px-2.5 text-xs text-accent"
+                    : "h-7 rounded-md px-2.5 text-xs text-ink-2 ring-1 ring-line-strong hover:bg-white/5 hover:text-ink"
+                }
               >
                 {copied ? "copied" : "copy"}
               </button>
             </div>
             {/* The filesystem path (library R2), through the one expansion the
                 copy button beside it also uses. */}
-            <p className="select-text break-all text-xs text-zinc-300">
+            <p className="font-mono text-[11.5px] leading-relaxed break-all text-ink-2 select-text">
               {expandLibraryPath(libraryTop, viewer.entry.path)}
             </p>
             {copyError !== null && (
-              <p role="status" className="text-xs text-red-400">
+              <p role="status" className="text-xs text-danger">
                 {copyError}
               </p>
             )}
           </div>
-          <dl className="flex flex-col gap-2 text-xs">
+          <dl className="flex flex-col gap-2 border-t border-line pt-4 text-xs">
             {viewer.entry.format !== undefined && (
               <div className="flex justify-between gap-2">
-                <dt className="text-zinc-500">format</dt>
-                <dd className="uppercase text-zinc-300">
-                  {viewer.entry.format}
-                </dd>
+                <dt className="text-ink-3">format</dt>
+                <dd className="uppercase text-ink-2">{viewer.entry.format}</dd>
               </div>
             )}
             <div className="flex justify-between gap-2">
-              <dt className="text-zinc-500">size</dt>
-              <dd className="text-zinc-300">
-                {formatBytes(viewer.entry.size)}
-              </dd>
+              <dt className="text-ink-3">size</dt>
+              <dd className="text-ink-2">{formatBytes(viewer.entry.size)}</dd>
             </div>
             <div className="flex justify-between gap-2">
-              <dt className="text-zinc-500">
+              <dt className="text-ink-3">
                 {viewer.entry.path.includes("!/")
                   ? "modified (zip)"
                   : "modified"}
               </dt>
-              <dd className="text-right text-zinc-300">
+              <dd className="text-right text-ink-2">
                 {formatDate(viewer.entry.mtime)}
               </dd>
             </div>
@@ -922,14 +958,14 @@ export default function ViewerLayer({
             {score !== undefined && scoreScale !== null && (
               <>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-zinc-500">{SCALE_BADGE[scoreScale]}</dt>
-                  <dd className="tabular-nums text-zinc-300">
+                  <dt className="text-ink-3">{SCALE_BADGE[scoreScale]}</dt>
+                  <dd className="tabular-nums text-ink-2">
                     {formatCosine(score.score)}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-zinc-500">{Z_LABEL}</dt>
-                  <dd className="tabular-nums text-zinc-300">
+                  <dt className="text-ink-3">{Z_LABEL}</dt>
+                  <dd className="tabular-nums text-ink-2">
                     {formatZ(score.z)}
                   </dd>
                 </div>
@@ -947,8 +983,8 @@ export default function ViewerLayer({
                     data-credit="author"
                     className="flex justify-between gap-2"
                   >
-                    <dt className="text-zinc-500">author</dt>
-                    <dd className="min-w-0 text-right text-zinc-300">
+                    <dt className="text-ink-3">author</dt>
+                    <dd className="min-w-0 text-right text-ink-2">
                       {credits.authorUrl !== undefined ? (
                         <a
                           href={credits.authorUrl}
@@ -970,8 +1006,8 @@ export default function ViewerLayer({
                     data-credit="license"
                     className="flex justify-between gap-2"
                   >
-                    <dt className="text-zinc-500">license</dt>
-                    <dd className="min-w-0 break-words text-right text-zinc-300">
+                    <dt className="text-ink-3">license</dt>
+                    <dd className="min-w-0 break-words text-right text-ink-2">
                       {/* The corpus's string, linked to the stored deed URL:
                           the URL carries the version (D3). */}
                       {credits.licenseUrl !== undefined ? (
@@ -995,8 +1031,8 @@ export default function ViewerLayer({
                     data-credit="source"
                     className="flex justify-between gap-2"
                   >
-                    <dt className="text-zinc-500">source</dt>
-                    <dd className="min-w-0 text-right text-zinc-300">
+                    <dt className="text-ink-3">source</dt>
+                    <dd className="min-w-0 text-right text-ink-2">
                       <a
                         href={credits.sourceUrl}
                         target="_blank"
@@ -1018,8 +1054,8 @@ export default function ViewerLayer({
                     data-credit="modified"
                     className="flex justify-between gap-2"
                   >
-                    <dt className="text-zinc-500">this copy</dt>
-                    <dd className="min-w-0 break-words text-right text-zinc-300">
+                    <dt className="text-ink-3">this copy</dt>
+                    <dd className="min-w-0 break-words text-right text-ink-2">
                       {credits.modified}
                     </dd>
                   </div>
@@ -1031,48 +1067,35 @@ export default function ViewerLayer({
               over this very panel, and two things sharing an accessible name
               are one thing to anything reading names. They wear the menu's own
               look (`MENU_ITEM_CLASS`, owned by `EntryMenu`). */}
-          {openIn !== null && (
-            // The menu's pill row from the same exported strings (L10). Not a
-            // menu, so plain buttons carrying `data-app-id` and no
-            // `data-command`, exactly as the menu's do.
-            <div
-              role="group"
-              aria-label="Open in"
-              className={OPEN_IN_GROUP_CLASS}
-            >
-              <span className={OPEN_IN_PANEL_CAPTION_CLASS}>
-                {OPEN_IN_CAPTION}
-              </span>
-              {openIn.apps.map((app) => (
-                <button
-                  key={app.id}
-                  type="button"
-                  data-app-id={app.id}
-                  title={app.name}
-                  onClick={() => openIn.onChoose(app.id)}
-                  className={OPEN_IN_PILL_CLASS}
-                >
-                  {app.name}
-                </button>
-              ))}
-            </div>
-          )}
           {panelCommands.length > 0 && (
             <div
-              className="-mx-1 flex flex-col overflow-hidden rounded-lg border border-zinc-700 text-sm text-zinc-200"
+              className="-mx-1 flex flex-col gap-px rounded-lg border border-line bg-surface p-1 text-[13px] text-ink"
               aria-label="Model actions"
               role="group"
             >
-              {panelCommands.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  data-command={c.id}
-                  onClick={() => runPanelCommand(c.id)}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {c.label}
-                </button>
+              {panelCommands.map((c, i) => (
+                <Fragment key={c.id}>
+                  {i > 0 &&
+                    MAINTENANCE_COMMANDS.has(c.id) &&
+                    !MAINTENANCE_COMMANDS.has(panelCommands[i - 1]!.id) && (
+                      <div
+                        role="separator"
+                        className="mx-1 my-0.5 h-px bg-line"
+                      />
+                    )}
+                  <button
+                    type="button"
+                    data-command={c.id}
+                    onClick={() => runPanelCommand(c.id)}
+                    className={MENU_ITEM_CLASS}
+                  >
+                    <Icon
+                      name={COMMAND_ICON[c.id]}
+                      className="size-3.5 text-ink-3"
+                    />
+                    {c.label}
+                  </button>
+                </Fragment>
               ))}
             </div>
           )}
@@ -1082,7 +1105,7 @@ export default function ViewerLayer({
             <p
               role="status"
               className={`text-xs ${
-                actionNote.tone === "error" ? "text-red-400" : "text-zinc-400"
+                actionNote.tone === "error" ? "text-danger" : "text-ink-2"
               }`}
             >
               {actionNote.text}
@@ -1092,10 +1115,11 @@ export default function ViewerLayer({
         <button
           type="button"
           aria-label="Close"
-          className="absolute right-3 top-3 rounded-full bg-zinc-800 px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-700"
+          title="Close (Esc)"
+          className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-white/5 hover:text-ink"
           onClick={() => onCloseIntent()}
         >
-          ✕
+          <Icon name="x" />
         </button>
       </div>
     </div>

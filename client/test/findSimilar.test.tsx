@@ -23,7 +23,6 @@ import {
   listDir,
   model,
   mountAppAtCurrentUrl,
-  openFind,
   pathInput,
   pressEnter,
   searchInput,
@@ -99,12 +98,11 @@ function dismissButton(): HTMLButtonElement | undefined {
     container.querySelectorAll<HTMLButtonElement>("main button"),
   ).find((b) => b.textContent?.includes("Dismiss"));
 }
-/** The offer to narrow the results by name — rendered only where there ARE
- *  results, so it is also a reading of what the view counts as one. */
-function narrowButton(): HTMLButtonElement | undefined {
-  return Array.from(
-    container.querySelectorAll<HTMLButtonElement>("main button"),
-  ).find((b) => b.textContent?.includes("Narrow"));
+/** The toolbar's offer to narrow what is on screen by name. */
+function narrowButton(): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    "button[data-narrow-toggle]",
+  );
 }
 function nameButton(): HTMLButtonElement | undefined {
   return Array.from(
@@ -286,8 +284,8 @@ describe("a similarity view", () => {
 
   it("an empty answer says what it is, in terms of the model it came from", async () => {
     // 4.6b. Two failures at once before the subject reached these places: a
-    // blank label, and an empty result falling through to Grid's bare "Nothing
-    // to show here" as though the folder were the empty thing.
+    // blank label, and an empty result falling through to Grid's empty-folder
+    // line as though the folder were the empty thing.
     indexAvailability.mockResolvedValue(READY);
     similar.mockResolvedValue({ ...NEIGHBOURS, entries: [] });
     await mountAppAtCurrentUrl(LINK, NESTED);
@@ -296,7 +294,7 @@ describe("a similarity view", () => {
     expect(container.textContent).toContain(
       'Nothing in the collection is similar to "hero.stl"',
     );
-    expect(container.textContent).not.toContain("Nothing to show here");
+    expect(container.textContent).not.toContain("This folder is empty");
     // Not the phrase sentence with an empty phrase in it, either.
     expect(container.textContent).not.toContain('Nothing matched ""');
     // And still leaveable — an empty view is the one that most needs a way out.
@@ -389,9 +387,7 @@ describe("a similarity view", () => {
     );
     // Said with the model on screen above it, not instead of it.
     expect(labels()).toEqual(["hero.stl"]);
-    expect(container.textContent).not.toContain("Nothing to show here");
-    // The offer to narrow the results reads the neighbours, and there are none.
-    expect(narrowButton()).toBeUndefined();
+    expect(container.textContent).not.toContain("This folder is empty");
   });
 
   it("asking for the reference’s own neighbours re-asks the same question, and needs no special case", async () => {
@@ -433,9 +429,10 @@ describe("a similarity view", () => {
     similar.mockResolvedValue(ANCHORED);
     await mountAppAtCurrentUrl(LINK, NESTED);
     await settle();
-    expect(narrowButton()).toBeDefined();
 
-    await openFind();
+    // Through the visible control rather than the shortcut, which is the one
+    // way in that nothing else here exercises.
+    await click(narrowButton()!);
     await type(findInput()!, "wing");
     await settle();
     expect(labels()).toEqual(["hero.stl", "wing.stl"]);

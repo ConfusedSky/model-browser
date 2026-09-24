@@ -23,10 +23,12 @@ import {
   container,
   deferred,
   dir,
+  flatButton,
   listDir,
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  openPanel,
   pathInput,
   pressEnter,
   searchInput,
@@ -216,7 +218,8 @@ const escape = (): Promise<void> =>
   act(async () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
   });
-/** The side panel's Show group: 'both' | 'folders' | 'models'. */
+/** The side panel's Show group: 'both' | 'folders' | 'models'. Drawn only
+ *  while the panel is open, which a fresh profile's is not. */
 const showButton = (kind: string): HTMLButtonElement =>
   Array.from(
     container.querySelectorAll<HTMLButtonElement>(
@@ -362,9 +365,7 @@ describe("retracing restores the place", () => {
     await scrollTo(450); // the anchor is k06, a folder
     await click(tile("/models/k00"));
     await settle();
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+    await click(flatButton());
     await settle();
     await scrollTo(450); // so "the top" is a move, not the scroller left alone
 
@@ -721,6 +722,7 @@ describe("a patch made while a retrace is in flight", () => {
   // A patch asks no new question, so the retrace's request still rides the
   // one in flight and lands with it. Only a different question supersedes.
   it("a kind filter flipped while a retrace is in flight does not lose the place", async () => {
+    await openPanel();
     await scrollTo(450);
     await click(tile("/models/k00"));
     await settle();

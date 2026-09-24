@@ -50,8 +50,9 @@ function layer(name: string): number {
 }
 
 const header = (): HTMLElement => container.querySelector("header")!;
-/** The controls' own flex row — the header's first child, message excluded. */
-const row = (): HTMLElement => header().firstElementChild as HTMLElement;
+/** The toolbar row holding the path — one of the header's own rows, the
+ *  message excluded. */
+const row = (): HTMLElement => pathInput().closest("header > div")!;
 
 beforeEach(() => mountApp("/models", NESTED));
 afterEach(() => unmountApp());
@@ -116,7 +117,7 @@ describe("the toolbar row", () => {
     await pressEnter(pathInput());
     await settle();
 
-    const failure = header().querySelector("p.text-red-400");
+    const failure = header().querySelector('[data-header-message="error"]');
     expect(failure).not.toBeNull();
     expect(row().contains(failure)).toBe(false);
     expect(failure!.parentElement).toBe(header());

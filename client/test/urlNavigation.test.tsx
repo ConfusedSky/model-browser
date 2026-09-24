@@ -77,7 +77,9 @@ describe("url navigation", () => {
     const len0 = window.history.length;
 
     await click(
-      container.querySelector<HTMLButtonElement>("main .grid button")!,
+      container.querySelector<HTMLButtonElement>(
+        "main .grid [data-entry-tile]",
+      )!,
     ); // → Alpha
     await settle();
     expect(search()).toContain("path=%2Fmodels%2FAlpha");
