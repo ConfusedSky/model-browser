@@ -309,7 +309,8 @@ describe("meaning search", () => {
     await settle();
 
     // The relevance bar is aria-hidden too, and is not one of the numbers.
-    const BADGE = "span[aria-hidden]:not([data-relevance-bar])";
+    const BADGE =
+      "span[aria-hidden]:not([data-relevance-bar]):not([data-orbit-zone])";
     const [hero] = tiles();
     expect(hero!.querySelectorAll(BADGE).length).toBe(2);
 

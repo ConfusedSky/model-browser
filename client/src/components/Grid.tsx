@@ -654,6 +654,8 @@ const Tile = memo(function Tile({
   previewThumbs,
 }: TileProps) {
   const ref = useRef<HTMLButtonElement>(null);
+  /** A touch press that began outside the orbit zone: its click is a tap. */
+  const edgeTapRef = useRef(false);
   const base =
     "group flex h-full w-full flex-col overflow-hidden rounded-xl border border-line bg-surface text-left text-ink-2 transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
   // A CSS animation (index.css), not a class swap, so the fade is the
@@ -831,8 +833,21 @@ const Tile = memo(function Tile({
               ? ` — ${SCALE_SPOKEN[badges.scale]} ${formatCosine(badges.score.score)}, ${Z_LABEL} ${formatZ(badges.score.z)}`
               : ` — ${strengthOf(badges.score.z, modest).toLowerCase()} match`)
         }
-        className={`${base} cursor-grab touch-none select-none active:cursor-grabbing ${markClass} ${anchorClass}`}
-        onPointerDown={(e) => onModelPointerDown(e, entry, e.currentTarget)}
+        className={`${base} cursor-grab touch-pan-y select-none active:cursor-grabbing ${markClass} ${anchorClass}`}
+        onPointerDown={(e) => {
+          // A finger turns the model only from the middle of its picture;
+          // the band around it scrolls the grid, and a tap there opens it.
+          const edge =
+            e.pointerType === "touch" &&
+            (e.target as Element).closest("[data-orbit-zone]") === null;
+          edgeTapRef.current = edge;
+          if (!edge) onModelPointerDown(e, entry, e.currentTarget);
+        }}
+        onClick={(e) => {
+          if (!edgeTapRef.current) return;
+          edgeTapRef.current = false;
+          onModelOpen(entry, e.currentTarget);
+        }}
         // A shifted secondary press is the one exception: not prevented, not
         // raised, so the browser's own menu appears.
         onContextMenu={(e) => {
@@ -861,6 +876,14 @@ const Tile = memo(function Tile({
             thumb={thumb}
             path={entry.path}
             onImageError={onImageError}
+          />
+          {/* The touch orbit zone: the middle of the picture, over it so a finger
+              lands here, where a drag is meant for the model; everything
+              outside it pans the page. */}
+          <span
+            aria-hidden="true"
+            data-orbit-zone
+            className="absolute inset-[17.5%] touch-none"
           />
           {/* Never composited into the render: a painted badge would make the
               score part of the thumbnail's cache key, and every query change
