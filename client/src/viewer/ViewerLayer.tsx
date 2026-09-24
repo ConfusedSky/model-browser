@@ -860,16 +860,28 @@ export default function ViewerLayer({
               <path d="M9 6l6 6-6 6" />
             </svg>
           </button>
-          {/* On a pill, so the model cannot draw over it; gone once the model
-              has been turned, since by then it has done its job. */}
+          {/* On a pill, so the model cannot draw over it, and at the foot of
+              the stage, where no control lives; gone once the model has been
+              turned, since by then it has done its job. Its length follows the
+              stage's own width (the stage is a size container), so it never
+              runs into the axis bar or past the edge. */}
           {session !== null && showHint && (
             <p
               aria-hidden="true"
-              className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-canvas/75 px-3 py-1 text-xs whitespace-nowrap text-ink-2 ring-1 ring-line backdrop-blur-sm sm:top-3 sm:bottom-auto"
+              className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-canvas/75 px-3 py-1 text-xs whitespace-nowrap text-ink-2 ring-1 ring-line backdrop-blur-sm"
             >
-              {COARSE_POINTER
-                ? "Drag to turn the model"
-                : "Drag to turn · scroll to zoom · ← → for the next model"}
+              {COARSE_POINTER ? (
+                "Drag to turn the model"
+              ) : (
+                <>
+                  <span className="@lg:hidden">
+                    Drag to turn · scroll to zoom
+                  </span>
+                  <span className="hidden @lg:inline">
+                    Drag to turn · scroll to zoom · ← → for the next model
+                  </span>
+                </>
+              )}
             </p>
           )}
           {session !== null && (
