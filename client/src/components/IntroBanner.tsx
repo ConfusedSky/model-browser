@@ -78,9 +78,15 @@ export default function IntroBanner({
           </div>
         )}
         <p className="text-xs text-ink-3">
-          {COARSE_POINTER
-            ? "Drag a model to turn it · tap it to open · ⋯ for more"
-            : "Drag any model to turn it · click it to open · right-click or ⋯ for more"}
+          {/* Tap wording wherever the layout is a phone's or the pointer is a
+              finger; a mouse on a wide screen gets the right-click route. */}
+          <span className={COARSE_POINTER ? "" : "sm:hidden"}>
+            Drag any model to turn it · tap it to open · ⋯ for more
+          </span>
+          <span className={COARSE_POINTER ? "hidden" : "hidden sm:inline"}>
+            Drag any model to turn it · click it to open · right-click or ⋯ for
+            more
+          </span>
         </p>
       </div>
       <button
