@@ -50,6 +50,9 @@ import { ViewerSession } from "./session";
 import Icon from "../components/Icon";
 import { baseName } from "../../../shared/names";
 
+/** What a press on the stage belongs to rather than the model. */
+const STAGE_CONTROLS = "button, [data-stage-control]";
+
 /** Read once: a device does not change what its pointer is mid-session. */
 const COARSE_POINTER =
   typeof window !== "undefined" &&
@@ -769,21 +772,28 @@ export default function ViewerLayer({
             largest square inside it. The square is load-bearing: `snapshot()`
             captures at aspect 1, so a squeezed live view disagrees with its
             thumbnail (D1). The stage is a size container so the square can
-            take its smaller axis. */}
-        <div className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center bg-stage [container-type:size]">
+            take its smaller axis.
+
+            The whole stage turns and zooms the model, not only the square: the
+            gutters beside it are drawn as the same surface, and a press there
+            that did nothing would read as a broken drag. Presses on the
+            stage's own controls are theirs. */}
+        <div
+          data-lightbox-stage
+          className="relative flex min-h-0 min-w-0 flex-1 cursor-grab touch-none items-center justify-center bg-stage [container-type:size] active:cursor-grabbing"
+          onPointerDown={(e) => {
+            if ((e.target as Element).closest(STAGE_CONTROLS) !== null) return;
+            setShowHint(false);
+            startGesture(e);
+          }}
+          onWheel={(e) => {
+            if ((e.target as Element).closest(STAGE_CONTROLS) !== null) return;
+            sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9);
+            renderNow();
+          }}
+        >
           <div className="relative size-[min(100cqw,100cqh)]">
-            <div
-              ref={canvasHostRef}
-              className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
-              onPointerDown={(e) => {
-                setShowHint(false);
-                startGesture(e);
-              }}
-              onWheel={(e) => {
-                sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9);
-                renderNow();
-              }}
-            />
+            <div ref={canvasHostRef} className="h-full w-full" />
             {session === null &&
               (loadError !== null ? (
                 <div
@@ -800,9 +810,7 @@ export default function ViewerLayer({
                 spinner
               ))}
           </div>
-          {/* Siblings of the canvas host, not children: the host owns the
-              orbit and zoom handlers, so a press on a button never orbits.
-              Disabled rather than absent at the ends (D2). */}
+          {/* Disabled rather than absent at the ends (D2). */}
           <button
             type="button"
             aria-label="Previous model"
@@ -811,7 +819,7 @@ export default function ViewerLayer({
               if (prevEntry !== null) void goTo(prevEntry);
             }}
             title="Previous model (←)"
-            className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-raised/80 p-2.5 text-ink ring-1 ring-line-strong backdrop-blur hover:bg-raised disabled:cursor-default disabled:opacity-0"
+            className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-raised/80 p-2.5 text-ink ring-1 ring-line-strong backdrop-blur cursor-pointer hover:bg-raised disabled:pointer-events-none disabled:opacity-0"
           >
             <svg
               aria-hidden="true"
@@ -834,7 +842,7 @@ export default function ViewerLayer({
               if (nextEntry !== null) void goTo(nextEntry);
             }}
             title="Next model (→)"
-            className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-raised/80 p-2.5 text-ink ring-1 ring-line-strong backdrop-blur hover:bg-raised disabled:cursor-default disabled:opacity-0"
+            className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-raised/80 p-2.5 text-ink ring-1 ring-line-strong backdrop-blur cursor-pointer hover:bg-raised disabled:pointer-events-none disabled:opacity-0"
           >
             <svg
               aria-hidden="true"
@@ -865,7 +873,8 @@ export default function ViewerLayer({
             // The tile menu draws the same four buttons from the same strings
             // in `entryActions`, so neither copy can drift.
             <div
-              className={`absolute left-3 top-3 ${AXIS_GROUP_CLASS}`}
+              data-stage-control
+              className={`absolute left-3 top-3 cursor-default ${AXIS_GROUP_CLASS}`}
               aria-label="Orbit axis"
             >
               <span className={AXIS_CAPTION_CLASS}>up axis</span>

@@ -500,3 +500,58 @@ describe("the orbit baseline tracks the pointer", () => {
     }
   });
 });
+
+describe("the lightbox stage", () => {
+  /** A press on `el` and a drag past the threshold, released on the window. */
+  async function dragFrom(el: Element): Promise<void> {
+    await act(async () => {
+      el.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: 50,
+          clientY: 50,
+        }),
+      );
+      pointer("pointermove", 80, 50);
+      pointer("pointermove", 90, 60);
+      pointer("pointerup", 90, 60);
+    });
+  }
+
+  it("turns the model from the gutter beside the square, not only from the square", async () => {
+    // The gutters are drawn as the same surface as the canvas; a press there
+    // that did nothing read as a broken drag.
+    const { props } = makeProps();
+    const orbit = vi.spyOn(ViewerSession.prototype, "orbit");
+    try {
+      await render({
+        ...props,
+        viewer: { ...props.viewer, mode: "lightbox" as const },
+      });
+      const stage = container!.querySelector("[data-lightbox-stage]")!;
+      await dragFrom(stage);
+      expect(orbit).toHaveBeenCalled();
+    } finally {
+      orbit.mockRestore();
+    }
+  });
+
+  it("leaves a press on the stage's own controls to them", async () => {
+    const { props } = makeProps();
+    const orbit = vi.spyOn(ViewerSession.prototype, "orbit");
+    try {
+      await render({
+        ...props,
+        viewer: { ...props.viewer, mode: "lightbox" as const },
+      });
+      const pill = container!.querySelector(
+        "[data-lightbox-stage] [data-stage-control] button",
+      )!;
+      await dragFrom(pill);
+      expect(orbit).not.toHaveBeenCalled();
+    } finally {
+      orbit.mockRestore();
+    }
+  });
+});
