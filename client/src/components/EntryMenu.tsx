@@ -53,7 +53,7 @@ const EDGE = 6;
  *  it rather than carrying a copy. A string and not a component, since the two
  *  surfaces differ in what they hand their `onClick`. */
 export const MENU_ITEM_CLASS =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-white/[0.06] focus:bg-white/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent touch:py-3";
+  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-white/[0.06] focus-visible:bg-white/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent touch:py-3";
 
 /** Each command's glyph, drawn wherever the command is — menu and panel. */
 export const COMMAND_ICON: Record<CommandId, IconName> = {
@@ -70,7 +70,8 @@ export const COMMAND_ICON: Record<CommandId, IconName> = {
 
 /** The arrow keys move focus here, so it has to be visible doing so — which
  *  the lightbox picker, where the pointer leaves it, does not need. */
-const FOCUS_RING = "focus:outline-none focus:ring-1 focus:ring-accent";
+const FOCUS_RING =
+  "focus:outline-none focus-visible:ring-1 focus-visible:ring-accent";
 
 /**
  * Keep the whole menu on screen (R2). Clamped rather than flipped: flipping
@@ -118,6 +119,9 @@ export default function EntryMenu({
 
   // On the first command: it is what a keyboard raise most often wants.
   const [focused, setFocused] = useState(0);
+  /** Whether the focused row is being shown; `null` until the menu has
+   *  focused its first row. */
+  const shownRef = useRef<boolean | null>(null);
 
   /**
    * One arrow step. **The axis group is entered at the letter in force**,
@@ -157,6 +161,10 @@ export default function EntryMenu({
     const el =
       ref.current?.querySelectorAll<HTMLButtonElement>("button")[focused];
     el?.focus();
+    // Read once the first row has focus: a pointer-raised menu holds it
+    // without showing it, a keyboard-raised one shows it.
+    if (el !== undefined && shownRef.current === null)
+      shownRef.current = el.matches(":focus-visible");
   }, [focused]);
 
   // At the window, so they work wherever focus is. App's find control stands
@@ -203,6 +211,26 @@ export default function EntryMenu({
       // with where `clampToViewport` will put it.
       className="fixed z-menu min-w-52 max-w-[calc(100vw-12px)] rounded-xl border border-line-strong bg-raised p-1 text-[13px] text-ink shadow-2xl shadow-black/60"
       onKeyDown={(e) => {
+        // A menu raised by the pointer holds focus on its first row without
+        // showing it; the first arrow shows that row rather than stepping
+        // past it, as the grid's first arrow lands on its first tile.
+        if (
+          shownRef.current === false &&
+          (e.key === "ArrowDown" ||
+            e.key === "ArrowUp" ||
+            e.key === "Home" ||
+            e.key === "End")
+        ) {
+          e.preventDefault();
+          shownRef.current = true;
+          const current = document.activeElement;
+          // Re-focused after a key, the row matches `:focus-visible`.
+          if (current instanceof HTMLElement) {
+            current.blur();
+            current.focus();
+          }
+          return;
+        }
         if (e.key === "ArrowDown") {
           e.preventDefault();
           setFocused((i) => step(i, 1));

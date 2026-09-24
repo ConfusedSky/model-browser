@@ -336,6 +336,42 @@ describe("raising the menu", () => {
     });
     expect(document.activeElement).toBe(t);
   });
+
+  it("raised by the pointer, shows no row until an arrow asks, and the first arrow shows the first row", async () => {
+    // happy-dom calls every focus visible; a pointer-raised menu is the case
+    // where the browser does not, so the stub plays that browser.
+    const original = Element.prototype.matches;
+    const matches = vi
+      .spyOn(Element.prototype, "matches")
+      .mockImplementation(function (this: Element, selector: string) {
+        return selector === ":focus-visible"
+          ? false
+          : original.call(this, selector);
+      });
+    try {
+      await secondaryPress(tile("widget.stl"));
+      expect(menu()).not.toBeNull();
+      const first = document.activeElement as HTMLElement;
+      expect(menu()!.contains(first)).toBe(true);
+
+      await act(async () => {
+        menu()!.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+        );
+      });
+      // Shown where it was, not stepped past.
+      expect(document.activeElement).toBe(first);
+
+      await act(async () => {
+        menu()!.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+        );
+      });
+      expect(document.activeElement).not.toBe(first);
+    } finally {
+      matches.mockRestore();
+    }
+  });
 });
 
 describe("the menu's contents", () => {
