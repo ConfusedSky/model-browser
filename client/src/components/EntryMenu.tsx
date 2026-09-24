@@ -53,7 +53,7 @@ const EDGE = 6;
  *  it rather than carrying a copy. A string and not a component, since the two
  *  surfaces differ in what they hand their `onClick`. */
 export const MENU_ITEM_CLASS =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-white/[0.06] focus:bg-white/[0.08] focus:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent touch:py-3";
+  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-white/[0.06] focus:bg-white/[0.08] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent touch:py-3";
 
 /** Each command's glyph, drawn wherever the command is — menu and panel. */
 export const COMMAND_ICON: Record<CommandId, IconName> = {

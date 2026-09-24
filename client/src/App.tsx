@@ -1409,9 +1409,10 @@ export default function App() {
   // mounted — never off `view.model`, which disagrees with it for the whole
   // teardown (R7).
   //
-  // A search in flight holds the queue too: the index shares the GPU and the
-  // page's main thread with the renders, and thumbnails for the view being
-  // replaced were slowing the answer that replaces it.
+  // A search in flight holds the queue too: renders for the view being
+  // replaced compete with the answer for the page, the GPU and the server.
+  // It does not stop renders already started, so it narrows that contention
+  // rather than removing it.
   const searchInFlight =
     state.inflight !== null && state.inflight.view.subject.kind !== "none";
   useEffect(() => {
