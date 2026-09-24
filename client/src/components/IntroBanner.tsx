@@ -45,7 +45,7 @@ export default function IntroBanner({
     <div
       role="region"
       aria-label="Introduction"
-      className="flex items-start gap-3 border-b border-line bg-[radial-gradient(ellipse_60%_120%_at_0%_0%,rgb(242_181_68/0.08),transparent_70%)] px-4 py-4 sm:px-5"
+      className="relative flex items-start gap-3 border-b border-line bg-[radial-gradient(ellipse_60%_120%_at_0%_0%,rgb(242_181_68/0.08),transparent_70%)] px-4 py-4 sm:px-5"
     >
       <span
         aria-hidden="true"
@@ -54,7 +54,7 @@ export default function IntroBanner({
         <Icon name="sparkles" />
       </span>
       <div data-intro-flow className="min-w-0 flex-1 space-y-2.5">
-        <p className="text-sm font-medium text-ink">
+        <p className="pr-10 text-sm font-medium text-ink sm:pr-0">
           {meaningRunnable ? SENTENCE_WITH_SEARCH : SENTENCE_PLAIN}
         </p>
         {/* One swipeable row on a phone, so the strip never buries the grid
@@ -89,7 +89,9 @@ export default function IntroBanner({
         onClick={onDismiss}
         aria-label="Dismiss introduction"
         title="Hide this introduction"
-        className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-surface hover:text-ink touch:size-11"
+        // On a phone it sits in the corner over the strip rather than in a
+        // column beside it, so the chips' row can run the full width.
+        className="absolute top-2.5 right-2 flex size-8 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-surface hover:text-ink touch:size-11 sm:static"
       >
         <Icon name="x" />
       </button>
