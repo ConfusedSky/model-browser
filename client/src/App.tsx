@@ -1405,6 +1405,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // An orbit overlay belongs to a tile on screen: a new view takes the tile
+  // away, and must take its overlay with it rather than leave it floating
+  // over whatever arrived.
+  useEffect(() => {
+    setViewer((v) => (v !== null && v.mode === "orbit" ? null : v));
+  }, [state.view.path, state.view.flat, state.view.subject]);
+
   // One renderer, one purpose at a time (D2/D3). Keyed off `viewer` — what is
   // mounted — never off `view.model`, which disagrees with it for the whole
   // teardown (R7).

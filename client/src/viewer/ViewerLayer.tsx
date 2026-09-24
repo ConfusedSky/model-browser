@@ -390,7 +390,7 @@ export default function ViewerLayer({
    * the old tile's path.
    */
   function endGesture(
-    at: { clientX: number; clientY: number },
+    at: { clientX: number; clientY: number; pointerType?: string },
     { promote }: { promote: boolean },
   ): void {
     if (!pointer.current.down) return;
@@ -411,7 +411,9 @@ export default function ViewerLayer({
       pendingPersistRef.current = p;
     }
     // A drag released outside the tile gets no later pointerleave, so the
-    // overlay would be stuck.
+    // overlay would be stuck. Nor does a finger: a touch stays captured by
+    // the tile it pressed and has no hover to leave, so its release is the
+    // end of the overlay.
     if (modeRef.current === "orbit") {
       const rect = containerRef.current?.getBoundingClientRect();
       const inside =
@@ -420,7 +422,7 @@ export default function ViewerLayer({
         at.clientX <= rect.right &&
         at.clientY >= rect.top &&
         at.clientY <= rect.bottom;
-      if (!inside) void dismissAfterPersist();
+      if (!inside || at.pointerType === "touch") void dismissAfterPersist();
     }
   }
   const endGestureRef = useRef(endGesture);

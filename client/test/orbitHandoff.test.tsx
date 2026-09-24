@@ -164,6 +164,43 @@ describe("orbit → thumbnail handoff", () => {
     expect(props.onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it("a finger's release inside the tile ends the overlay too, where a mouse's waits for it to leave", async () => {
+    // happy-dom lays nothing out, so the overlay's rect is all zeros and a
+    // release at (0, 0) is the one that lands "inside" it.
+    async function dragAndReleaseInside(pointerType: string): Promise<void> {
+      await act(async () => {
+        pointer("pointermove", 80, 50);
+        pointer("pointermove", 90, 60);
+        window.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            clientX: 0,
+            clientY: 0,
+            pointerType,
+          }),
+        );
+      });
+    }
+
+    const mouse = makeProps();
+    await render(mouse.props);
+    await dragAndReleaseInside("mouse");
+    mouse.resolvePersist();
+    await settle();
+    expect(mouse.props.onDismiss).not.toHaveBeenCalled();
+    await act(async () => root?.unmount());
+    container?.remove();
+
+    // A touch stays captured by the tile it pressed, so no pointerleave ever
+    // reaches the overlay: without this the overlay floats on over the grid.
+    const touch = makeProps();
+    await render(touch.props);
+    await dragAndReleaseInside("touch");
+    touch.resolvePersist();
+    await settle();
+    expect(touch.props.onDismiss).toHaveBeenCalledTimes(1);
+  });
+
   it("a held dismissal yields to a new gesture on the tile", async () => {
     const { props, resolvePersist } = makeProps();
     await render(props);
