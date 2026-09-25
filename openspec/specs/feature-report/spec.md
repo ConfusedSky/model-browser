@@ -207,9 +207,11 @@ An offer that also writes an **orientation** — one it establishes, or one it g
 outside this requirement, whether that orientation reaches the deployment or is held by the
 browser instead. Such an action is not reducible to its pixels: it changes where the model is
 shown from, which is the whole of what it claims, and what becomes of an orientation a
-deployment declines is `model-thumbnails`' question rather than this one. Withholding these
-would leave a viewer no way to hand a badly framed model back to the source that would frame
-it, on the very deployments where the framings are not theirs to begin with.
+deployment declines is `model-thumbnails`' question rather than this one. This requirement
+SHALL NOT withhold such an offer; whether one is offered is decided by the action's own
+requirement, and `entry-actions` withholds giving a framing up where the deployment does not accept
+thumbnail writes (*Refreshing a model's thumbnail and its framing*), while choosing an orbit
+axis stands wherever the model's menu does.
 
 An offer SHALL be withheld likewise where the deployment has not yet said what it accepts, so
 that nothing is rendered which then vanishes when the answer arrives. Withholding at the
@@ -225,8 +227,8 @@ this requirement governs only what is offered.
 - **THEN** both are absent, by the same stated reason
 
 #### Scenario: An offer that writes an orientation stands
-- **WHEN** an offer establishes an orientation for a model, or gives the stored one up, on a deployment that would not store the render it draws alongside
-- **THEN** the offer stands and the action takes effect, since what it claims is where the model is shown from rather than the image
+- **WHEN** an offer establishes an orientation for a model — choosing its orbit axis from the tile's menu — on a deployment that would not store the render it draws alongside
+- **THEN** the offer stands and the action takes effect, since what it claims is where the model is shown from rather than the image; giving a stored orientation up is not withheld by this requirement either, and is absent there only by `entry-actions`' own rule
 
 #### Scenario: Withheld until the deployment has answered
 - **WHEN** a viewer raises such an action before the deployment's report has been read, or after the read failed

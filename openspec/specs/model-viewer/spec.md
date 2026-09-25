@@ -6,7 +6,9 @@ How the browser renders a model interactively — in the grid's orbit overlay an
 ## Requirements
 
 ### Requirement: Drag-to-orbit on grid tiles via shared overlay canvas
-The client SHALL hold exactly one WebGL context for the entire app — a single renderer shared by the in-grid orbit overlay, the lightbox, and the thumbnail render queue. On mousedown over a model tile, the canvas SHALL overlay that tile's thumbnail image area — not the whole tile — so the file name label below remains visible throughout the interaction, and the live view SHALL match the static thumbnail's framing and color at the moment of handoff (no size jump, no brightness shift). On release the overlay persists until the pointer leaves the tile or the user scrolls/resizes, which dismisses it back to the static thumbnail. After an orbit drag, dismissal triggered by the pointer leaving the tile (or by the release landing outside it) SHALL hold the live view in place until the refreshed thumbnail has been applied to the tile and is ready to paint, so the overlay unmounts onto pixels matching the live view; if thumbnail persistence fails or exceeds a short timeout (~1.5s), the overlay SHALL dismiss anyway. Scroll/resize dismissal SHALL remain immediate. A held dismissal SHALL NOT interrupt or cancel a newer interaction begun before it completes. A press released without exceeding a small movement threshold (~5px) SHALL NOT be treated as an orbit; it is a click and opens the lightbox instead.
+The client SHALL hold exactly one WebGL context for the entire app — a single renderer shared by the in-grid orbit overlay, the lightbox, and the thumbnail render queue. On a press over a model tile, the canvas SHALL overlay that tile's thumbnail image area — not the whole tile — so the file name label below remains visible throughout the interaction, and the live view SHALL match the static thumbnail's framing and color at the moment of handoff (no size jump, no brightness shift). On release the overlay persists until the pointer leaves the tile or the user scrolls/resizes, which dismisses it back to the static thumbnail — except that a finger's release SHALL end it at once, since a touch has no hover to leave and would otherwise leave the overlay standing. After an orbit drag, dismissal triggered by the pointer leaving the tile (or by the release landing outside it, or by a finger's release) SHALL hold the live view in place until the refreshed thumbnail has been applied to the tile and is ready to paint, so the overlay unmounts onto pixels matching the live view; if thumbnail persistence fails or exceeds a short timeout (~1.5s), the overlay SHALL dismiss anyway. Scroll/resize dismissal SHALL remain immediate, and any change of view — a navigation, a flat toggle, a committed or left search — SHALL remove an overlay still standing, since the tile it belongs to has gone. A held dismissal SHALL NOT interrupt or cancel a newer interaction begun before it completes. A press released without exceeding a small movement threshold (~5px) SHALL NOT be treated as an orbit; it is a click and opens the lightbox instead.
+
+Under a finger, only the middle of a model tile's picture SHALL begin an orbit: a touch that starts in the band around it SHALL begin none, so a drag there scrolls the grid as it would anywhere else on the page, and a tap there SHALL open the lightbox as a click on the tile does. A mouse or pen press anywhere on the tile SHALL behave as before.
 
 #### Scenario: Orbiting a tile
 - **WHEN** the user presses and drags on a model tile
@@ -48,6 +50,22 @@ The client SHALL hold exactly one WebGL context for the entire app — a single 
 - **WHEN** the user presses and releases on a model tile without moving beyond the movement threshold
 - **THEN** no orbit is recorded, no camera state is saved, and the lightbox opens for that model
 
+#### Scenario: A finger's release ends the overlay
+- **WHEN** the user turns a model with a finger and lifts it while still over the tile
+- **THEN** the overlay settles onto the refreshed thumbnail and goes, where a mouse's release inside the tile would leave it until the pointer left
+
+#### Scenario: The band around the picture scrolls
+- **WHEN** a finger presses a model tile outside the middle of its picture and drags
+- **THEN** no orbit begins and the grid scrolls; the same finger pressing the middle and dragging turns the model
+
+#### Scenario: A tap on the band opens the model
+- **WHEN** a finger taps a model tile outside the middle of its picture
+- **THEN** the lightbox opens for that model
+
+#### Scenario: A new view takes a leftover overlay with its tile
+- **WHEN** an orbit overlay is still standing over a tile and the user navigates, toggles flat, or commits or leaves a search
+- **THEN** the overlay is gone with the tile rather than floating over the view that arrived
+
 ### Requirement: Hover-warmed mesh LRU
 The client SHALL maintain a byte-budgeted LRU of parsed meshes. Hovering a model tile for a linger threshold (~120ms) SHALL prefetch and parse that mesh into the LRU, with a small cap on concurrent parses. Eviction SHALL be by total byte budget, not entry count, measured against parsed geometry on the JS heap. Eviction SHALL explicitly dispose the evicted geometry so its GPU buffers are freed; dropping the reference alone frees heap but leaks VRAM.
 
@@ -79,7 +97,13 @@ When an orbit interaction ends (overlay release or lightbox close), the client S
 - **THEN** reopening the directory later shows that model's thumbnail in the released orientation
 
 ### Requirement: Lightbox expanded view
-Clicking a model tile — a press released without exceeding the drag threshold — SHALL dismiss the orbit overlay and open the model in a modal lightbox with full orbit and zoom controls. There SHALL be no separate expand affordance. Esc or clicking outside SHALL close it. A close that follows a manipulation of the view in the lightbox — an orbit, a zoom, or an axis change — SHALL persist camera state and thumbnail like an orbit release; a close that follows no such manipulation SHALL write nothing — neither a camera nor a thumbnail — since the view it shows records no decision of the user's, and a camera stored by an untouched close would outlive every orientation the source later holds for the model. While open the lightbox SHALL trap keyboard focus, and on close SHALL return focus to the tile that opened it. The lightbox SHALL contain the model's orbit-axis control: three axis buttons (X/Y/Z) plus a flip toggle covering all six spindles, with the current value indicated. Changing the axis SHALL smoothly animate the camera — a brief eased rotation, not an instant snap — to the new spindle's default three-quarter view, visibly rotating the chosen axis to screen-up, and SHALL immediately persist the axis, the end-state camera, and a re-rendered thumbnail (the end state is known upfront; persistence does not wait for the animation). A drag during the transition SHALL cancel the animation and orbit from the current pose. The lightbox SHALL show an info panel beside the viewer containing the model's file name, full virtual path (including `zip!/entry` notation for zip contents), format, size, and modified time — for zip entries the available mtime is the containing archive's, and the panel SHALL label it as the archive's modified time — with an affordance to copy the full path to the clipboard. The panel's content comes from the directory entry rather than the mesh, so it SHALL be shown from the moment the lightbox opens — including while the mesh is still loading and after it has failed to load. If the clipboard write fails, the panel SHALL report the failure briefly and SHALL NOT show a copied confirmation. The panel SHALL also present the entry's own actions as affordances — the same actions and the same availability rules the context menu applies, so an action absent from the menu for this entry is absent here. They SHALL be presented after the model's metadata rather than before it, since the panel describes the model first and offers what can be done to it second, and SHALL be drawn as the context menu draws the same actions, so that one command does not wear two looks within one view. The copy affordance stays with the path it copies and is not one of them. An action that changes the view SHALL leave the lightbox through the same close every other exit takes, persisting under the same rule. Resetting the model's framing from the panel SHALL discard its stored orientation, re-frame the open view to what the model then resolves to, and SHALL NOT have that discarded orientation written back by the close that follows. The panel's controls SHALL participate in the focus trap, and pointer or wheel interaction with the panel SHALL NOT orbit or zoom the model or close the lightbox.
+Clicking a model tile — a press released without exceeding the drag threshold — SHALL dismiss the orbit overlay and open the model in a modal lightbox with full orbit and zoom controls. There SHALL be no separate expand affordance. Esc SHALL close it, and so SHALL clicking outside it wherever the view leaves room outside itself. A close that follows a manipulation of the view in the lightbox — an orbit, a zoom, or an axis change — SHALL persist camera state and thumbnail like an orbit release; a close that follows no such manipulation SHALL write nothing — neither a camera nor a thumbnail — since the view it shows records no decision of the user's, and a camera stored by an untouched close would outlive every orientation the source later holds for the model. While open the lightbox SHALL trap keyboard focus, and on close SHALL return focus to the tile that opened it.
+
+The model SHALL be drawn in the largest square the stage beside the panel allows, and the **whole stage** — not only that square — SHALL turn and zoom the model, since the stage's margins are drawn as the same surface and a press there that did nothing would read as a broken drag; presses on the stage's own controls SHALL remain theirs. Once the model has loaded, and until the first press on the stage, the stage SHALL carry a short hint saying how to turn it — in touch wording on a device whose pointer is a finger, and shortened to fit a narrow stage — clear of the axis control. The lightbox SHALL raise no context menu of its own (see `entry-actions`): its panel carries every command it can perform.
+
+The lightbox SHALL contain the model's orbit-axis control: three axis buttons (X/Y/Z) plus a flip toggle covering all six spindles, with the current value indicated. Changing the axis SHALL smoothly animate the camera — a brief eased rotation, not an instant snap — to the new spindle's default three-quarter view, visibly rotating the chosen axis to screen-up, and SHALL immediately persist the axis, the end-state camera, and a re-rendered thumbnail (the end state is known upfront; persistence does not wait for the animation). A drag during the transition SHALL cancel the animation and orbit from the current pose.
+
+The lightbox SHALL show an info panel beside the viewer — below it on a narrow screen — led by the model's **file name**, with, for a model named by a relative path, a line naming the nearest folders that tell its kit apart (generic folder names such as sizes, support states or formats passed over, an archive named without its marker). Where the model's type has associated applications, the panel SHALL next carry the launch choices as its primary action (see `entry-actions`, *A model entry offers its associated applications as open-in choices*), above everything that describes the model. The panel SHALL then carry the model's full virtual path (including `zip!/entry` notation for zip contents), format, size, and modified time — for zip entries the available mtime is the containing archive's, and the panel SHALL label it as the archive's modified time — with an affordance to copy the full path to the clipboard. The panel's content comes from the directory entry rather than the mesh, so it SHALL be shown from the moment the lightbox opens — including while the mesh is still loading and after it has failed to load. If the clipboard write fails, the panel SHALL report the failure briefly and SHALL NOT show a copied confirmation; a copy that succeeds SHALL also be announced to assistive technology. The panel SHALL also present the entry's own actions as affordances — the same actions and the same availability rules the model's menu applies, less opening the model, copying its path, redrawing its thumbnail and choosing its axis, which the view already carries or cannot perform while it holds the renderer. They SHALL be presented after the model's metadata rather than before it, since the panel describes the model first and offers what can be done to it second — the launch choices being the one exception, as the decision the viewer exists to inform — and SHALL be drawn as the menu draws the same actions, everyday ones before a divider and maintenance after it, so that one command does not wear two looks within one view. The copy affordance stays with the path it copies and is not one of them. An action that changes the view SHALL leave the lightbox through the same close every other exit takes, persisting under the same rule. Resetting the model's framing from the panel, where it is offered, SHALL discard its stored orientation, re-frame the open view to what the model then resolves to, and SHALL NOT have that discarded orientation written back by the close that follows. The panel's controls SHALL participate in the focus trap, and pointer or wheel interaction with the panel SHALL NOT orbit or zoom the model or close the lightbox.
 
 #### Scenario: Expanding a model
 - **WHEN** the user clicks a model tile without dragging
@@ -119,11 +143,11 @@ Clicking a model tile — a press released without exceeding the drag threshold 
 
 #### Scenario: Copying the path
 - **WHEN** the user activates the copy affordance and the clipboard write succeeds
-- **THEN** the model's full virtual path is placed on the clipboard and brief feedback confirms it
+- **THEN** the model's full virtual path is placed on the clipboard and brief feedback confirms it, announced as well as shown
 
 #### Scenario: Copy failure falls back to selection
 - **WHEN** a copy of the path fails
-- **THEN** the failure is reported briefly and no copied confirmation is shown; the panel does **not** select the path text, the fallback this scenario is named for having been retired with the move to a shared action that has no rendered path to select
+- **THEN** the failure is reported briefly and no copied confirmation is shown, and the panel does **not** select the path text
 
 #### Scenario: Panel is available without a mesh
 - **WHEN** the lightbox is open while the mesh is still loading, or after the mesh failed to load
@@ -131,15 +155,27 @@ Clicking a model tile — a press released without exceeding the drag threshold 
 
 #### Scenario: Acting on the model from the info panel
 - **WHEN** the user activates one of the panel's action affordances
-- **THEN** an action that changes the view — revealing the model in its folder, or finding similar ones — closes the lightbox through the same close every exit takes, and resetting the framing discards the stored orientation, re-frames the open view to what the model then resolves to, and is not undone by the close that follows
+- **THEN** an action that changes the view — revealing the model in its folder, or finding similar ones — closes the lightbox through the same close every exit takes, and resetting the framing, where offered, discards the stored orientation, re-frames the open view to what the model then resolves to, and is not undone by the close that follows
 
 #### Scenario: The panel describes before it offers
-- **WHEN** the lightbox's info panel is shown for a model
-- **THEN** the actions come after the name, path and metadata, drawn as the context menu draws them, with the copy affordance still on the path line rather than among them
+- **WHEN** the lightbox's info panel is shown for a model whose type has associated applications
+- **THEN** the file name leads, "Open in \<default\>" follows as the panel's primary action above the path and metadata, and every other action comes after the name, path and metadata, drawn as the menu draws them, with the copy affordance still on the path line rather than among them
 
 #### Scenario: Panel interaction never orbits
 - **WHEN** the user presses, drags, clicks, or scrolls the wheel within the info panel
 - **THEN** the model neither orbits nor zooms and the lightbox stays open
+
+#### Scenario: The stage's margins turn the model
+- **WHEN** the stage is wider than the square the model is drawn in and the user drags in the margin beside the square
+- **THEN** the model turns as it would from the square, while a press on the stepping arrows or the axis control is left to that control
+
+#### Scenario: The hint goes at the first press
+- **WHEN** the user opens a model and presses the stage to turn it
+- **THEN** the hint saying how to turn it is shown until that press and not after
+
+#### Scenario: A result names its kit
+- **WHEN** the user opens a search result named `Kit/32mm/Supported/knight.stl`
+- **THEN** the panel's title is `knight.stl` with a line naming `Kit` beneath it, the generic folders passed over, and the full path in the path row
 
 ### Requirement: Upright model display
 Models SHALL be displayed in their file's own coordinates: no conversion SHALL be applied to geometry at parse time for any format. A model stands upright because its spindle defaults to its file format's up convention, as *Per-model orbit spindle* defines, and that default applies everywhere a model is rendered: thumbnails, orbit overlay, and lightbox.
@@ -363,8 +399,10 @@ listing narrowed to model entries — so that a find filter or a similarity anch
 honoured and non-model entries (folders, zip tiles) between two models are skipped rather than
 opened. When the open model is not present in the shown listing, stepping SHALL be inert
 rather than jumping to another model. Stepping SHALL stop at the ends without wrapping: at the
-first model there SHALL be no previous step and the previous control SHALL be present but
-disabled, and at the last model no next step and the next control disabled. A step SHALL
+first model there SHALL be no previous step and the previous control SHALL be disabled and not
+drawn, and at the last model no next step and the next control disabled and not drawn; a
+control not drawn SHALL take no presses, which fall through to the stage and turn the model.
+A step SHALL
 persist the leaving model's view under the same rule a close applies (the manipulation rule of
 *Lightbox expanded view*): a step that follows an orbit, a zoom or an axis change SHALL write
 that model's camera, axis and thumbnail — under that model's own path — before the view swaps,
@@ -396,7 +434,7 @@ screen when it closed.
 
 #### Scenario: The ends stop
 - **WHEN** the first model is open, the user presses ArrowLeft; and when the last model is open, the user presses ArrowRight
-- **THEN** nothing happens in each case — the lightbox stays open on the same model — and the corresponding on-screen control is shown disabled
+- **THEN** nothing happens in each case — the lightbox stays open on the same model — and the corresponding on-screen control is disabled and not drawn, a press where it would stand turning the model instead
 
 #### Scenario: A step after an orbit persists the leaving model
 - **WHEN** the user orbits the open model and then steps to the next model
@@ -462,6 +500,7 @@ When the source cannot be read, the delivery SHALL answer as `/api/file` does fo
 #### Scenario: Cached thumbnails are not disturbed
 - **WHEN** a model already thumbnailed under the current pixel recipe is displayed after this change ships
 - **THEN** its thumbnail is a cache hit and is not re-rendered, because the client shades the delivered GLB from the same vertices as it shaded the STL
+
 ### Requirement: The panel's links are in the lightbox's focus ring
 
 Every link the lightbox's side panel renders — the author, the license and the source of the
@@ -622,3 +661,19 @@ so that a desktop or Electron build issues exactly the requests a hosted one iss
 #### Scenario: A desktop build issues the same requests
 - **WHEN** the client runs against a local server with no cache, proxy or public origin anywhere in front of it
 - **THEN** it names the version on the same requests it would name it on when hosted, and no setting exists that stops it
+
+### Requirement: A lost graphics context is announced
+When the app's one WebGL context is lost — a driver reset, the GPU running out of memory —
+the client SHALL say so in an alert that assistive technology announces, stating that models
+and thumbnails will not draw until it is back and offering to reload the page, rather than
+leaving the viewer and every waiting tile to look merely slow. The alert SHALL go when the
+context is restored. While the context is lost, the lightbox SHALL NOT invite the user to turn
+the model, since nothing turns.
+
+#### Scenario: The GPU drops the page
+- **WHEN** the renderer's context is lost while the grid is on screen
+- **THEN** an alert says graphics have stopped and offers a Reload, which reloads the page
+
+#### Scenario: The hint does not promise a drag that does nothing
+- **WHEN** the context is lost while a model is open in the lightbox
+- **THEN** the gesture hint is withdrawn
