@@ -202,9 +202,13 @@ the same landing, and the two may lie in different far rows — each tagged with
 raised against and dropped when they change; the range extractor keeps both rows mounted. `place`
 does no DOM work itself: App places in exactly the commit where a fresh grid may still be chunked
 at one column (D2), so everything waits for `colsReady`. A layout effect after every commit then
-converges: while TanStack's offset has not caught up with `scrollTop` it waits; while the target
-row is not visible it writes `scrollTop` raw to the row's current start (the first pass is the
-phase 1 above); while a measurement has moved the row since this commit drew it, it waits again;
+converges: while TanStack's offset has not caught up with `scrollTop` it waits; while the view is
+not at the row's target — the target row not visible *and* `scrollTop` not already at the offset
+that would put it there — it writes `scrollTop` raw to the row's current start (the first pass is
+the phase 1 above); a row already at its target but off screen by the estimates is waited for, not
+written to again, since a write equal to the current offset fires no `scroll` and measures
+nothing (fix round 2, 2026-09-25: counting such writes as tries let four passes time out in one
+task before any row was measured); while a measurement has moved the row since this commit drew it, it waits again;
 and while any row in the visible range is still unmeasured it waits too (a D10 `measure()` runs
 in an earlier layout effect of the same commit, so the rows it moves are caught by the moved-row
 test); then `applyIn` lands it. "Measured" is `Grid`'s own record — a set of the row
@@ -274,8 +278,11 @@ nothing else read the field. (Stage C check-in, 2026-09-25.)
 
 ### D9. A column change keeps the top entry
 
-`Grid` keeps, per scroll frame, the index of the first entry in the first visible row and that
-row's offset from the scrollport top. When `cols` changes — a resize or a tile-size change — the
+`Grid` keeps, per scroll frame, the entry at the top of the view and how far into its row the view
+has scrolled, as a *fraction of the row's height* — a pixel offset carried to shorter rows would
+put the row wholly above the view. The entry is the kept one while its row is still the top row,
+else the first entry of the top row; a top row less than half shown yields to the next row, which
+is the one really at the top. When `cols` changes — a resize or a tile-size change — the
 rows are re-chunked, `virtualizer.measure()` clears TanStack's size cache (keyed by row index,
 so every index would otherwise keep the height of the row that held it before the re-chunk),
 and, in the same layout pass, the entry is placed at that offset through the handle's own landing
