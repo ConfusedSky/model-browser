@@ -20,6 +20,13 @@ export interface GridGeometry {
   /** The grid body's offset from the scroller's content top. */
   gridTop: number;
   rowHeights?: Partial<Record<RowComposition, number>>;
+  /** `"production"`: a scroll is heard as scrolling until a frame passes
+   *  without one, and `test/gridGeometry.ts` fires the scroll event and the
+   *  rows' `ResizeObserver` entries a frame later, as a browser does — so a row
+   *  mounted by a scroll is measured only after the commit that drew it. Unset,
+   *  never scrolling, and rows are measured as they mount. Install it before
+   *  the grid mounts: TanStack creates its observer once. */
+  scrollTiming?: "production";
 }
 
 let current: GridGeometry | null = null;
@@ -47,19 +54,40 @@ export function observeSeamRect(
 
 /**
  * TanStack's `observeElementOffset`: `scrollTop` on each `scroll`, as its
- * default reads it, but never "scrolling". TanStack skips measuring a row
- * while scrolling and leaves the catch-up to a `ResizeObserver` happy-dom never
- * fires, and its scroll-end debounce would fire outside `act`.
+ * default reads it. By default never "scrolling": TanStack skips measuring a
+ * row while scrolling and leaves the catch-up to a `ResizeObserver` happy-dom
+ * never fires, and its scroll-end debounce would fire outside `act`. Under
+ * `scrollTiming: "production"` it is scrolling until a frame passes with no
+ * scroll, as TanStack's debounce does, and the test helper's observer does the
+ * catching up.
  */
 export function observeSeamOffset(
+  g: GridGeometry,
+): (
   instance: Virtualizer<HTMLElement, HTMLDivElement>,
   cb: (offset: number, isScrolling: boolean) => void,
-): () => void {
-  const el = instance.scrollElement;
-  if (el === null) return () => {};
-  const onScroll = (): void => cb(el.scrollTop, false);
-  el.addEventListener("scroll", onScroll, { passive: true });
-  return () => el.removeEventListener("scroll", onScroll);
+) => () => void {
+  return (instance, cb) => {
+    const el = instance.scrollElement;
+    if (el === null) return () => {};
+    let end: number | null = null;
+    const onScroll =
+      g.scrollTiming === "production"
+        ? (): void => {
+            if (end !== null) cancelAnimationFrame(end);
+            end = requestAnimationFrame(() => {
+              end = null;
+              cb(el.scrollTop, false);
+            });
+            cb(el.scrollTop, true);
+          }
+        : (): void => cb(el.scrollTop, false);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (end !== null) cancelAnimationFrame(end);
+    };
+  };
 }
 
 export function seamRowHeight(

@@ -22,7 +22,10 @@ import {
   wait,
 } from "./appHarness";
 import { installGridGeometry } from "./gridGeometry";
-import Grid, { type GridHandle } from "../src/components/Grid";
+import Grid, {
+  MAX_PLACE_FRAMES,
+  type GridHandle,
+} from "../src/components/Grid";
 import type { ThumbState } from "../src/hooks/useThumbnails";
 import { resetLookupQueueForTests } from "../src/hooks/useThumbnails";
 import type { GridGeometry } from "../src/lib/gridGeometry";
@@ -62,39 +65,45 @@ const span = (from: number, to: number): number[] =>
 let host: HTMLElement | null = null;
 let root: Root | null = null;
 
+interface Report {
+  onBands?: (bands: ReadonlyMap<string, Band>) => void;
+  onPeek?: (path: string) => void;
+  handle?: { current: GridHandle | null };
+  thumbs?: Map<string, ThumbState>;
+}
+
+function gridOf(entries: DirEntry[], report: Report): React.ReactElement {
+  return (
+    <Grid
+      handle={report.handle}
+      entries={entries}
+      thumbs={report.thumbs ?? new Map()}
+      onEnter={() => {}}
+      onModelPointerDown={() => {}}
+      onModelOpen={() => {}}
+      onModelHover={() => {}}
+      onEntryMenu={() => {}}
+      onImageError={() => {}}
+      markedPath={null}
+      scoreFor={() => undefined}
+      scoreScale={null}
+      previews={new Map()}
+      onPeek={report.onPeek ?? (() => {})}
+      onBands={report.onBands ?? (() => {})}
+      scrollRoot={{ current: document.body }}
+    />
+  );
+}
+
 async function renderGrid(
   entries: DirEntry[],
-  report: {
-    onBands?: (bands: ReadonlyMap<string, Band>) => void;
-    onPeek?: (path: string) => void;
-    handle?: { current: GridHandle | null };
-    thumbs?: Map<string, ThumbState>;
-  } = {},
+  report: Report = {},
 ): Promise<void> {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(
-      <Grid
-        handle={report.handle}
-        entries={entries}
-        thumbs={report.thumbs ?? new Map()}
-        onEnter={() => {}}
-        onModelPointerDown={() => {}}
-        onModelOpen={() => {}}
-        onModelHover={() => {}}
-        onEntryMenu={() => {}}
-        onImageError={() => {}}
-        markedPath={null}
-        scoreFor={() => undefined}
-        scoreScale={null}
-        previews={new Map()}
-        onPeek={report.onPeek ?? (() => {})}
-        onBands={report.onBands ?? (() => {})}
-        scrollRoot={{ current: document.body }}
-      />,
-    );
+    root!.render(gridOf(entries, report));
   });
 }
 
@@ -106,6 +115,27 @@ function mountedRows(): number[] {
 }
 const bodyHeight = (): string =>
   document.querySelector<HTMLElement>("[data-grid-body]")!.style.height;
+
+/**
+ * Counts the frames the handle waited through with a placement pending: the
+ * runs of `Grid`'s frame loop, its `tick`. The handle lands regardless after
+ * `MAX_PLACE_FRAMES` of them, so fewer is a landing that converged.
+ */
+function countPlacementFrames(): { count: () => number; restore: () => void } {
+  const raf = window.requestAnimationFrame;
+  let ticks = 0;
+  window.requestAnimationFrame = (cb) =>
+    raf.call(window, (t) => {
+      if (cb.name === "tick") ticks += 1;
+      cb(t);
+    });
+  return {
+    count: () => ticks,
+    restore: () => {
+      window.requestAnimationFrame = raf;
+    },
+  };
+}
 
 /** Scroll `scroller` as a user does, and let the frame callbacks run. */
 async function scrollTo(scroller: HTMLElement, top: number): Promise<void> {
@@ -300,6 +330,37 @@ describe("the handle", () => {
     expect(tileOf(target)!.getBoundingClientRect().top).toBe(-50);
   });
 
+  it("lands an anchor to the pixel when the rows a scroll draws are measured after the commit", async () => {
+    // A browser's order: the write's `scroll` comes a frame later, TanStack
+    // draws the rows it brings while scrolling and skips measuring them, and
+    // the observer measures them after that commit. Only folder rows have been
+    // measured, so the first model and mixed rows drawn near row 80 are both
+    // compositions' first heights, and re-estimate the 70 undrawn rows above.
+    installGridGeometry({
+      ...SHORT,
+      rowHeights: { dirs: 150, models: 250, mixed: 400 },
+      scrollTiming: "production",
+    });
+    const entries = interleaved();
+    await renderGrid(entries, { handle });
+    const target = entries[80 * 3]!.path;
+    expect(tileOf(target)).toBeUndefined();
+
+    const landed = 10 * 150 + 35 * 250 + 35 * 400 + 50;
+    const frames = countPlacementFrames();
+    await act(async () => {
+      handle.current!.place({ kind: "anchor", path: target, offset: -50 });
+      await wait(300);
+    });
+    frames.restore();
+    expect(document.body.scrollTop).toBe(landed);
+    expect(tileOf(target)!.getBoundingClientRect().top).toBe(-50);
+    // Converged: the frame cap lands regardless, and must not be the fix.
+    // It did wait, for the scroll a frame after the write.
+    expect(frames.count()).toBeGreaterThan(0);
+    expect(frames.count()).toBeLessThan(MAX_PLACE_FRAMES);
+  });
+
   it("centres a tile whose row is not drawn", async () => {
     installGridGeometry(SHORT, { tileGap: 20 });
     await renderGrid(MODELS(600), { handle });
@@ -309,6 +370,42 @@ describe("the handle", () => {
     // Row 83 at 16600; its 180px tile in the middle of 400px.
     expect(document.body.scrollTop).toBe(16600 - 110);
     expect(tileOf("/models/m250.stl")!.getBoundingClientRect().top).toBe(110);
+  });
+
+  it.each([
+    ["the same entries", 0],
+    ["the entry moved down a row", 3],
+  ])(
+    "keeps a placement through a new listing array of %s",
+    async (_, ahead) => {
+      installGridGeometry(SHORT, { tileGap: 20 });
+      await renderGrid(MODELS(600), { handle });
+      const next = [
+        ...Array.from({ length: ahead }, (_, i) => model(`new${i}.stl`)),
+        ...MODELS(600),
+      ];
+      // As App's landing: the place in one commit, and a follow-up's fresh
+      // array arriving before its row is drawn.
+      await act(async () => {
+        handle.current!.place({ kind: "center", path: "/models/m250.stl" });
+        root!.render(gridOf(next, { handle }));
+      });
+      const row = Math.floor((250 + ahead) / 3);
+      expect(document.body.scrollTop).toBe(row * 200 - 110);
+      expect(tileOf("/models/m250.stl")!.getBoundingClientRect().top).toBe(110);
+    },
+  );
+
+  it("keeps a focus through a new listing array of the same entries", async () => {
+    installGridGeometry(SHORT);
+    await renderGrid(MODELS(600), { handle });
+    await act(async () => {
+      handle.current!.focusEntry("/models/m250.stl", { preventScroll: true });
+      root!.render(gridOf(MODELS(600), { handle }));
+    });
+    expect((document.activeElement as HTMLElement).dataset.entryTile).toBe(
+      "/models/m250.stl",
+    );
   });
 
   it("focuses a tile whose row is not drawn, and refuses an entry not shown", async () => {

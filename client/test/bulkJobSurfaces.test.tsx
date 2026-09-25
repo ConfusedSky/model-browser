@@ -801,7 +801,7 @@ describe("the library tab", () => {
     // A pose answer for the next folder's model rebuilds `poses`, and with it
     // the action host, on every landing. The tab's count is keyed on the scope
     // and the runner, not on the host — or every landing would re-enumerate
-    // the whole library (the coordinator's review of Stage C).
+    // the whole library.
     enumerated("/", [beneath("", "/a.stl")]);
     const withModel: DirListing = {
       path: "/models/Beta",

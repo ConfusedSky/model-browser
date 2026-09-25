@@ -372,6 +372,57 @@ describe("a column change keeps the top entry", () => {
       top.closest("[data-index]")!.querySelector("[data-entry-tile]"),
     ).toBe(top);
   });
+
+  it("keeps the same entry on top through successive column changes", async () => {
+    await mountApp("/models", LONG);
+    // Row 101 at the top, 50px scrolled past: m303 leads it.
+    await scrollTo(101 * 200 + 50);
+
+    install({ ...SHORT, cols: 5 });
+    await click(
+      container.querySelector<HTMLButtonElement>('[data-tile-size="s"]')!,
+    );
+    await settle();
+    // Fourth in row 60, which m300 leads.
+    expect(tile("/models/m303.stl")!.getBoundingClientRect().top).toBe(
+      SCROLLER_TOP - 50,
+    );
+
+    install({ ...SHORT, cols: 2 });
+    await click(
+      container.querySelector<HTMLButtonElement>('[data-tile-size="l"]')!,
+    );
+    await settle();
+    // Leading row 151 again, not m300 leading row 150.
+    expect(main().scrollTop).toBe(151 * 200 + 50);
+    expect(tile("/models/m303.stl")!.getBoundingClientRect().top).toBe(
+      SCROLLER_TOP - 50,
+    );
+  });
+
+  it("keeps the top entry when the columns change right after content above the grid moved", async () => {
+    await mountApp("/models", LONG);
+    await scrollTo(20050);
+    // In one frame the view scrolls on and the content above the grid grows
+    // by a row, so the grid now starts 200px down: row 149 is on top, 50px
+    // scrolled past, and m447 leads it.
+    install({ ...SHORT, gridTop: 200 });
+    await act(async () => {
+      main().scrollTop = 30050;
+    });
+    await wait(50);
+
+    install({ ...SHORT, cols: 5, gridTop: 200 });
+    await click(
+      container.querySelector<HTMLButtonElement>('[data-tile-size="s"]')!,
+    );
+    await settle();
+    // m447 is third in row 89.
+    expect(main().scrollTop).toBe(200 + 89 * 200 + 50);
+    expect(tile("/models/m447.stl")!.getBoundingClientRect().top).toBe(
+      SCROLLER_TOP - 50,
+    );
+  });
 });
 
 describe("with no grid mounted", () => {
@@ -395,5 +446,27 @@ describe("with no grid mounted", () => {
     searchInput().focus();
     await key(searchInput(), "ArrowDown");
     expect(document.activeElement).toBe(searchInput());
+  });
+});
+
+describe("a grid with nothing to show", () => {
+  it("an empty folder lands at the top through the grid's own empty state", async () => {
+    await mountApp("/models", LONG);
+    listDir.mockImplementation((target: string) =>
+      Promise.resolve(
+        structuredClone(
+          target === "/models/empty"
+            ? { path: "/models/empty", entries: [] }
+            : LONG,
+        ),
+      ),
+    );
+    await scrollTo(450);
+
+    await type(pathInput(), "/models/empty");
+    await pressEnter(pathInput());
+    await settle();
+    expect(main().textContent).toContain("Nothing here.");
+    expect(main().scrollTop).toBe(0);
   });
 });

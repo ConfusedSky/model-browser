@@ -83,20 +83,18 @@ export interface GridHandle {
 /** A placement waiting for its row to be drawn where TanStack says it lies. */
 interface Placing {
   resolved: Exclude<Resolved, { kind: "top" }>;
-  entries: DirEntry[];
   tries: number;
 }
 interface Focusing {
   path: string;
   options: FocusOptions | undefined;
-  entries: DirEntry[];
 }
 /** Raw writes a placement may make toward its row before `applyIn` lands it:
  *  each can draw a composition for the first time and re-estimate the rows. */
 const MAX_PLACE_TRIES = 4;
 /** Frames a placement may wait for TanStack to hear a scroll, so a missed
  *  event cannot leave the grid unlanded and the row pinned. */
-const MAX_PLACE_FRAMES = 10;
+export const MAX_PLACE_FRAMES = 10;
 
 /** The columns a grid displays, from its computed `grid-template-columns`:
  *  one resolved size per track, line names aside (D2). `""` (no layout) and
@@ -170,7 +168,9 @@ interface Props {
    *  against and the bands measured in. A `RefObject` so it is stable in deps
    *  and populated during commit. */
   scrollRoot: RefObject<HTMLElement | null>;
-  /** Filled while this grid is mounted, null otherwise (D6). */
+  /** Filled while this grid is mounted, null otherwise (D6) — its own empty
+   *  state ("Nothing here.") included, where `place` of the top writes 0 and
+   *  `focusEntry` returns false. */
   handle?: Ref<GridHandle>;
   size?: TileSize;
   /** The raw score pair on each result, rather than the strength alone. */
@@ -227,8 +227,8 @@ function Grid({
   // so the responsive rule lives only in the class strings.
   const [measuredCols, setMeasuredCols] = useState<number | null>(null);
   const cols = geometry?.cols ?? measuredCols ?? 1;
-  /** False until the first read: before it, rows are chunked at one column.
-   *  Stage C's handle defers its landings on this. */
+  /** False until the first read: before it, rows are chunked at one column,
+   *  so the handle defers its landings on this. */
   const colsReady = geometry !== null || measuredCols !== null;
   const empty = entries.length === 0;
   useLayoutEffect(() => {
@@ -275,9 +275,10 @@ function Grid({
    *  in one landing, often rows apart. */
   const [placing, setPlacing] = useState<Placing | null>(null);
   const [focusing, setFocusing] = useState<Focusing | null>(null);
-  // Raised against another listing: dropped, not resolved against this one.
-  if (placing !== null && placing.entries !== entries) setPlacing(null);
-  if (focusing !== null && focusing.entries !== entries) setFocusing(null);
+  // Dropped only when the entry is gone. A new array of the same entries is a
+  // follow-up answering the same landing; any other landing raises its own.
+  if (placing !== null && !indexOf.has(placing.resolved.path)) setPlacing(null);
+  if (focusing !== null && !indexOf.has(focusing.path)) setFocusing(null);
   const rowOf = (path: string | undefined): number | null => {
     const i = path === undefined ? undefined : indexOf.get(path);
     return i === undefined ? null : Math.floor(i / cols);
@@ -300,6 +301,10 @@ function Grid({
 
   // D10: a row is estimated at the height last measured for its composition.
   const compositionsRef = useRef<Compositions | null>(null);
+  /** Row elements measured at least once. A row a scroll draws is measured
+   *  only by TanStack's `ResizeObserver`, after the commit that drew it. A row
+   *  kept mounted through a re-chunk counts as measured before its re-measure. */
+  const measuredRowsRef = useRef(new WeakSet<Element>());
   let compositions = compositionsRef.current;
   if (
     compositions === null ||
@@ -382,6 +387,7 @@ function Grid({
         geometry !== null
           ? seamRowHeight(geometry, composition)
           : measureRowElement(el, entry, instance);
+      measuredRowsRef.current.add(el);
       const c = compositionsRef.current;
       if (c !== null && composition !== undefined) {
         if (!c.heights.has(composition)) c.remeasure = true;
@@ -393,7 +399,7 @@ function Grid({
     ...(geometry !== null
       ? {
           observeElementRect: observeSeamRect(geometry),
-          observeElementOffset: observeSeamOffset,
+          observeElementOffset: observeSeamOffset(geometry),
         }
       : {}),
   });
@@ -497,28 +503,66 @@ function Grid({
   // listing, previews or columns all arrive as renders.
   useEffect(sync);
 
-  /** The first entry of the top visible row and that row's offset from the
+  /** An entry of the top visible row and that row's offset from the
    *  scrollport's top, as of the last scroll frame (D9). */
   const topRef = useRef<{
     entries: DirEntry[];
     index: number;
+    path: string;
     offset: number;
   } | null>(null);
   const recordTop = useCallback((): void => {
-    const visible = readRanges().visible;
+    virtualizer.calculateRange();
+    // TanStack's starts carry the margin it last drew; a margin read this
+    // frame is not drawn yet, so the offset is taken back into that frame.
+    const at =
+      (virtualizer.scrollOffset ?? 0) -
+      (marginRef.current - virtualizer.options.scrollMargin);
+    const { visible } = layoutRanges(
+      virtualizer.measurementsCache,
+      at,
+      virtualizer.scrollRect?.height ?? 0,
+    );
     const item =
       visible === null
         ? undefined
         : virtualizer.measurementsCache[visible.first];
+    if (visible === null || item === undefined) {
+      topRef.current = null;
+      return;
+    }
+    const entries = entriesRef.current;
+    const cols = colsRef.current;
+    // The entry a column change kept stays the one kept while its row is on
+    // top; the row's first entry instead would wander with every change.
+    const kept =
+      topRef.current === null
+        ? undefined
+        : indexOfRef.current.get(topRef.current.path);
+    const index =
+      kept !== undefined && Math.floor(kept / cols) === visible.first
+        ? kept
+        : visible.first * cols;
+    const entry = entries[index];
     topRef.current =
-      visible === null || item === undefined
+      entry === undefined
         ? null
-        : {
-            entries: entriesRef.current,
-            index: visible.first * colsRef.current,
-            offset: item.start - (virtualizer.scrollOffset ?? 0),
-          };
-  }, [readRanges, virtualizer]);
+        : { entries, index, path: entry.path, offset: item.start - at };
+  }, [virtualizer]);
+
+  /** Nothing is left to move the rows on screen: each has been measured, and
+   *  no composition's first height waits to re-estimate the rows above. */
+  const settledOn = (visible: RowRange | null): boolean => {
+    if (compositionsRef.current?.remeasure === true) return false;
+    if (visible === null) return true;
+    for (let i = visible.first; i <= visible.last; i++) {
+      const el = virtualizer.elementsCache.get(
+        virtualizer.options.getItemKey(i),
+      );
+      if (el === undefined || !measuredRowsRef.current.has(el)) return false;
+    }
+    return true;
+  };
 
   const placeFramesRef = useRef(0);
   const place = useCallback((resolved: Resolved): void => {
@@ -534,7 +578,7 @@ function Grid({
       return;
     }
     placeFramesRef.current = 0;
-    setPlacing({ resolved, entries: entriesRef.current, tries: 0 });
+    setPlacing({ resolved, tries: 0 });
   }, []);
   const focusEntry = useCallback(
     (target: string | number, options?: FocusOptions): boolean => {
@@ -555,7 +599,7 @@ function Grid({
         tile.focus(options);
         return true;
       }
-      setFocusing({ path: entry.path, options, entries });
+      setFocusing({ path: entry.path, options });
       return true;
     },
     [],
@@ -580,7 +624,6 @@ function Grid({
     placeFramesRef.current = 0;
     setPlacing({
       resolved: { kind: "anchor", path: entry.path, offset: top!.offset },
-      entries,
       tries: 0,
     });
   });
@@ -598,14 +641,14 @@ function Grid({
   useLayoutEffect(() => {
     if (!colsReady) return;
     const grid = gridRef.current;
-    if (focusing !== null && focusing.entries === entries && grid !== null) {
+    if (focusing !== null && grid !== null) {
       const tile = findTile(grid, focusing.path);
       if (tile !== null) {
         tile.focus(focusing.options);
         setFocusing(null);
       }
     }
-    if (placing === null || placing.entries !== entries) return;
+    if (placing === null) return;
     const scroller = scrollRootRef.current.current;
     const index = indexOf.get(placing.resolved.path);
     if (scroller === null || index === undefined) {
@@ -637,6 +680,10 @@ function Grid({
         setPlacing({ ...placing, tries: placing.tries + 1 });
         return;
       }
+      // Rows a scroll drew are measured after this commit, and a first
+      // composition among them re-estimates the rows above: landing now
+      // would be undone. The frame loop checks again.
+      if (!settledOn(visibleRows)) return;
     }
     applyIn(scroller, placing.resolved);
     setPlacing(null);
@@ -663,9 +710,12 @@ function Grid({
       if (frame !== 0) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        // A moved margin re-renders, and that render's effect syncs.
-        if (readMargin()) return;
+        const moved = readMargin();
+        // Even on a frame whose margin moved: a resize before the next scroll
+        // frame re-anchors from this top.
         recordTop();
+        // A moved margin re-renders, and that render's effect syncs.
+        if (moved) return;
         // Where TanStack's range and the rows meeting the viewport part —
         // the grid wholly outside it — no render of TanStack's would redraw
         // the marker.
