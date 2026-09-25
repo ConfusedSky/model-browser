@@ -1160,27 +1160,45 @@ describe("bands rank work through the whole pipeline", () => {
     );
   });
 
-  it("a far folder’s cells wait behind a visible tile", async () => {
+  it("a far folder’s cells wait behind a visible tile, a near tile and a visible folder’s cells", async () => {
+    // Were every row visible, a's cell would rank near — still behind the
+    // tiles, which would all be visible, so only a visible folder's cell,
+    // near either way, tells a far cell from a near one.
     const gate = gateThumbs();
     const LISTING: DirListing = {
       path: "/models",
-      entries: [...BLOCKERS, dir("a"), model("z.stl")],
+      entries: [
+        ...BLOCKERS,
+        dir("a"),
+        model("w.stl"),
+        dir("b"),
+        model("z.stl"),
+        model("y.stl"),
+      ],
     };
-    peek.mockResolvedValue(found(1)); // a/m0 is a's cell, no tile of its own
-    installGridGeometry({ ...TALL, cols: 1 });
+    // a/m0 and b/m0 are the folders' cells, with no tile of their own.
+    peek.mockImplementation((path: string) =>
+      Promise.resolve([model(`${path.slice("/models/".length)}/m0.stl`)]),
+    );
+    // Two to a row: the blockers, then a beside w, b beside z, and y alone.
+    installGridGeometry({ ...TALL, cols: 2 });
     await mountApp("/models", LISTING);
     const hold = holdSlots();
     await onScreen(dirTile("/models/a"));
+    await onScreen(dirTile("/models/b"));
     await startBlockers(gate);
-    // z on screen, the folder a row above and far → its cell far.
+    // b and z on screen, y a row below and near, a a row above and far → its
+    // cell far. a's cell is pushed first.
     await atBottom(modelTile("/models/z.stl"));
+    await gate.open(["/models/a/m0.stl"]);
     await gate.open();
     await hold.release();
 
     const order = renderedAfterBlockers();
-    expect(order.indexOf("/models/z.stl")).toBeLessThan(
-      order.indexOf("/models/a/m0.stl"),
-    );
+    const cell = order.indexOf("/models/a/m0.stl");
+    expect(order.indexOf("/models/z.stl")).toBeLessThan(cell);
+    expect(order.indexOf("/models/y.stl")).toBeLessThan(cell);
+    expect(order.indexOf("/models/b/m0.stl")).toBeLessThan(cell);
     expect(order).toContain("/models/a/m0.stl"); // deferred, not withheld: it drains
   });
 });
