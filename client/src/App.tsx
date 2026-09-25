@@ -630,9 +630,6 @@ export default function App() {
   /** The GPU context is gone: nothing more will draw until it comes back. */
   const [glLost, setGlLost] = useState(false);
   useEffect(() => onContextLost(setGlLost), []);
-  /** A visitor who has searched has met the app: the introduction does not
-   *  come back when they leave the results, for the rest of this page. */
-  const [searchedOnce, setSearchedOnce] = useState(false);
   /** The query last sent to the other corpus because its words belonged
    *  there: a file name to the names, a description to meaning. */
   const [autoMode, setAutoMode] = useState<{
@@ -1352,7 +1349,6 @@ export default function App() {
    *  *is* the visitor choosing meaning mode; `commit` and not `dispatch`, so
    *  Back from the results returns to the view it was clicked from (D4). */
   function runQuery(text: string): void {
-    setSearchedOnce(true);
     setSearchMode("meaning");
     commit({ type: "runQuery", text, mode: "meaning" });
   }
@@ -1407,7 +1403,6 @@ export default function App() {
   function submitSearch(): void {
     const text = state.drafts.queryText.trim();
     if (text === "") return;
-    setSearchedOnce(true);
     // Asked of the other corpus for this one search when the words plainly
     // belong to it, and said so over the results, with the way back one click
     // away.
@@ -2860,7 +2855,7 @@ export default function App() {
     state.view.path === "/" &&
     state.view.subject.kind === "none" &&
     !state.view.flat;
-  const bannerDrawn = introOffered && !introDismissed && !searchedOnce && atTop;
+  const bannerDrawn = introOffered && !introDismissed && atTop;
   /** For a visitor the banner no longer reaches (D6), and withheld wherever the
    *  example as typed would fail to find what it names. */
   const placeholderExample = useCyclingPlaceholder(

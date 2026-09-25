@@ -323,9 +323,8 @@ describe("a chip is a submitted meaning search", () => {
     });
     await settle();
     expect(resultsLabel()).toBeNull();
-    // A visitor who has searched has met the app: the strip stays away for the
-    // rest of the page rather than greeting them again on every return.
-    expect(banner()).toBeNull();
+    // Back at the top and not dismissed, so it greets them again.
+    expect(banner()).not.toBeNull();
   });
 
   it("the surprise action runs the query the pick chose", async () => {
@@ -486,9 +485,7 @@ describe("dismissal", () => {
     });
     await settle();
 
-    // Hidden for the rest of this page, but nothing was recorded — so the next
-    // load draws it again.
-    expect(banner()).toBeNull();
+    expect(banner()).not.toBeNull();
     expect(introDismissedStore.read()).toBe(false);
     await unmountApp();
     features.mockResolvedValue(INTRO);

@@ -76,11 +76,9 @@ The banner SHALL carry a dismiss affordance. Dismissing it SHALL record the choi
 this browser's own storage, so the banner is not drawn again in this browser on any
 later visit, and SHALL NOT be recorded anywhere shared. Running an example query or the
 surprise action SHALL NOT count as dismissal: nothing about it is recorded, and
-the next page load draws the banner again. Once any search has run on the page — an
-example query, the surprise action, or a phrase the visitor submitted — the banner SHALL NOT
-be drawn again for the rest of that page, returning to the top included: a visitor who has
-searched has met the app, and a banner that came back each time they left the results would
-bury the grid they came back to. Wherever the introduction is offered — dismissed or not —
+the next page load draws the banner again. Searching SHALL NOT retire the banner either:
+whenever a visitor who has not dismissed it returns to the top — from results or from a
+folder — the banner SHALL be drawn again. Wherever the introduction is offered — dismissed or not —
 the header SHALL carry a persistent About link and, while meaning search can run and the
 layout is wider than a phone's, the surprise action, so that what the banner offered stays
 one click away after it is gone; a phone-width header, which keeps its room for the search
@@ -97,11 +95,11 @@ banner dismissed for the page's lifetime and drawn again on the next load, never
 
 #### Scenario: A chip is not a dismissal
 - **WHEN** a visitor runs an example query, navigates back to the top, and later reloads the page
-- **THEN** the banner is not drawn on returning to the top, since the visitor has searched on this page, and is drawn again after the reload, since nothing was recorded, until dismissed
+- **THEN** the banner is drawn on returning to the top and again after the reload, since nothing was recorded, until dismissed
 
-#### Scenario: A typed search counts as meeting the app
-- **WHEN** a visitor submits a phrase of their own and then dismisses the results at the top
-- **THEN** the banner is not drawn again on that page
+#### Scenario: Returning home after a search
+- **WHEN** a visitor who has not dismissed the banner submits a phrase of their own and then dismisses the results at the top
+- **THEN** the banner is drawn again
 
 ### Requirement: Example queries reach a visitor who no longer sees the banner
 Where the introduction is offered and the banner is not drawn — dismissed, or the view
