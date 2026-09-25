@@ -326,8 +326,7 @@ describe("folder contact sheets", () => {
 
   it("keeps the archive icon on a zip tile, chrome-free", async () => {
     // Zips are never previewed and are not folders: no chrome, no observer
-    // registration, the emoji stands. Unfalsified until now (review's catch —
-    // emptying the emoji span passed every test in the repo).
+    // registration, the archive glyph stands — an emptied glyph must fail here.
     await mountApp("/models", {
       path: "/models",
       entries: [
@@ -344,11 +343,9 @@ describe("folder contact sheets", () => {
       '[data-entry-tile="/models/pack.zip"]',
     )!;
     expect(zip.querySelector("[data-folder-chrome]")).toBeNull();
-    expect(
-      Array.from(zip.querySelectorAll("span")).some(
-        (s) => s.textContent === "🗜️",
-      ),
-    ).toBe(true);
+    const glyph = zip.querySelector('[role="img"][aria-label="zip archive"]');
+    expect(glyph).not.toBeNull();
+    expect(glyph!.querySelector("svg")).not.toBeNull();
   });
 
   it("draws one preview full size", async () => {

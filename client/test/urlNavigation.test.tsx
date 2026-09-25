@@ -12,6 +12,7 @@ import {
   model,
   mountApp,
   pressEnter,
+  resultsLabel,
   searchInput,
   settle,
   type,
@@ -77,7 +78,9 @@ describe("url navigation", () => {
     const len0 = window.history.length;
 
     await click(
-      container.querySelector<HTMLButtonElement>("main .grid button")!,
+      container.querySelector<HTMLButtonElement>(
+        "main .grid [data-entry-tile]",
+      )!,
     ); // → Alpha
     await settle();
     expect(search()).toContain("path=%2Fmodels%2FAlpha");
@@ -101,14 +104,14 @@ describe("url navigation", () => {
     await pop();
     await settle();
     expect(labels()).toEqual(["Alpha", "widget.stl"]);
-    expect(container.textContent).not.toContain("Search results for");
+    expect(resultsLabel()).toBeNull();
     expect(window.history.length).toBe(len); // restoration replaced, never pushed
 
     // Simulate forward to the search view.
     window.history.replaceState(null, "", "/?path=%2Fmodels&flat=1&q=found");
     await pop();
     await settle();
-    expect(container.textContent).toContain('Search results for "found".');
+    expect(resultsLabel()).toBe("1 result “found”");
     expect(labels()).toEqual(["found.stl"]);
     expect((searchInput() as HTMLInputElement).value).toBe("found");
     expect(window.history.length).toBe(len);
@@ -201,7 +204,7 @@ describe("url deep links", () => {
       { flat: true, q: "found" },
       expect.any(AbortSignal),
     );
-    expect(container.textContent).toContain('Search results for "found".');
+    expect(resultsLabel()).toBe("1 result “found”");
     expect(labels()).toEqual(["found.stl"]);
   });
 

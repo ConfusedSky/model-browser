@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 //
-// The launch actions in the tile menu (open-in-slicer §3): the open-in pill row
-// and *Open with…*.
+// The launch actions in the tile menu (open-in-slicer §3): an "Open in <app>"
+// row per application, and *Open with…*.
 //
-// What these pin is the client half and only that — which entries offer the row
-// and the item, what order the row is in, what a press hands the server, when
-// the session's report is read and re-read, and what the keyboard reaches now
-// that the menu has two pill groups instead of one. What the *server* does with
+// What these pin is the client half and only that — which entries offer the
+// rows and the item, what order the rows are in, what a press hands the server,
+// when the session's report is read and re-read, and what the keyboard reaches
+// through them. What the *server* does with
 // a launch — extraction, absolutization, the exit code — is the server suite's.
 //
 // The report is the app's one reading of the platform registry, held in state:
@@ -31,11 +31,8 @@ import {
   tiles,
   unmountApp,
 } from "./appHarness";
-import {
-  CHOOSER_FAILED,
-  LAUNCH_FAILED,
-  OPEN_IN_PILL_CLASS,
-} from "../src/lib/entryActions";
+import { MENU_ITEM_CLASS } from "../src/components/EntryMenu";
+import { CHOOSER_FAILED, LAUNCH_FAILED } from "../src/lib/entryActions";
 
 vi.mock("../src/api/client", async () =>
   (await import("./appHarness")).apiClientModule(),
@@ -121,7 +118,7 @@ async function secondaryPress(el: HTMLElement): Promise<void> {
 const menu = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[role="menu"]');
 /** The command rows, by the id each carries — the helper every other menu test
- *  file uses, asked here to prove the pills stay out of it. */
+ *  file uses, asked here to prove the application rows stay out of it. */
 const items = (): string[] =>
   Array.from(
     menu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
@@ -132,18 +129,18 @@ const commandRows = (): HTMLButtonElement[] =>
   );
 const commandIds = (): string[] =>
   commandRows().map((b) => b.dataset.command ?? "");
-/** The open-in row's pills, in the order they are drawn. */
-const pills = (): HTMLButtonElement[] =>
+/** The "Open in <app>" rows, in the order they are drawn. */
+const appRows = (): HTMLButtonElement[] =>
   Array.from(
     menu()?.querySelectorAll<HTMLButtonElement>("[data-app-id]") ?? [],
   );
-const pillIds = (): string[] => pills().map((b) => b.dataset.appId ?? "");
-const pillNames = (): string[] => pills().map((b) => b.textContent ?? "");
+const appIds = (): string[] => appRows().map((b) => b.dataset.appId ?? "");
+const appNames = (): string[] => appRows().map((b) => b.textContent ?? "");
 const openWithItem = (): HTMLButtonElement | null =>
   menu()?.querySelector<HTMLButtonElement>('[data-command="openWith"]') ?? null;
 const tile = (name: string): HTMLButtonElement =>
   tiles().find((t) => (t.getAttribute("title") ?? "") === name)!;
-const arrow = (key: "ArrowDown" | "ArrowUp" | "End"): Promise<void> =>
+const arrow = (key: "ArrowDown" | "ArrowUp"): Promise<void> =>
   act(async () => {
     menu()!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
   });
@@ -155,7 +152,8 @@ const escape = (): Promise<void> =>
   });
 /** The path bar's transient line, where every entry action reports a failure. */
 const pathError = (): string | null =>
-  container.querySelector("header p.text-red-400")?.textContent ?? null;
+  container.querySelector('header [data-header-message="error"]')
+    ?.textContent ?? null;
 const focusedEl = (): HTMLElement => document.activeElement as HTMLElement;
 
 beforeEach(() => {
@@ -165,7 +163,7 @@ afterEach(async () => {
   await unmountApp();
 });
 
-describe("which entries offer the open-in row", () => {
+describe("which entries offer the open-in rows", () => {
   it("offers it on a model whose type has applications, default first", async () => {
     apps.mockResolvedValue(REPORT);
     await mountApp("/models", NESTED);
@@ -175,12 +173,21 @@ describe("which entries offer the open-in row", () => {
     // Ids, because a name is a display string and an id is what launches; and
     // the order is the assertion — the default leads, the associations follow
     // in the order the registry gave them.
-    expect(pillIds()).toEqual([F3D.id, LYCHEE.id, PHOTON.id]);
+    expect(appIds()).toEqual([F3D.id, LYCHEE.id, PHOTON.id]);
     // Names are what the user reads: ids never render (L2).
-    expect(pillNames()).toEqual(["F3D", "LycheeSlicer", "Photon Workshop"]);
-    // The row wears the axis row's pill class, from `entryActions` — one copy,
-    // so the two rows cannot drift into two different-looking controls.
-    expect(pills()[0]!.className).toContain(OPEN_IN_PILL_CLASS);
+    expect(appNames()).toEqual([
+      "Open in F3D",
+      "Open in LycheeSlicer",
+      "Open in Photon Workshop",
+    ]);
+    // Right after the command that opens the model here, and drawn as the
+    // menu's own rows, from the one class `EntryMenu` owns.
+    expect(
+      Array.from(menu()!.querySelectorAll<HTMLElement>("button"))
+        .slice(0, 4)
+        .map((b) => b.dataset.command ?? b.dataset.appId),
+    ).toEqual(["open", F3D.id, LYCHEE.id, PHOTON.id]);
+    expect(appRows()[0]!.className).toBe(MENU_ITEM_CLASS);
   });
 
   it("is absent on a directory and on an archive, which have no type to associate", async () => {
@@ -189,7 +196,7 @@ describe("which entries offer the open-in row", () => {
     await settle();
 
     await secondaryPress(tile("Alpha"));
-    expect(pills()).toHaveLength(0);
+    expect(appRows()).toHaveLength(0);
     // And the chooser item goes with it: both are model-only, whatever the
     // report says about the machine.
     // The two container rows are the bulk-job launchers (`bulk-thumbnail-jobs`
@@ -206,7 +213,7 @@ describe("which entries offer the open-in row", () => {
     await escape();
 
     await secondaryPress(tile("kit.zip"));
-    expect(pills()).toHaveLength(0);
+    expect(appRows()).toHaveLength(0);
     expect(openWithItem()).toBeNull();
   });
 
@@ -220,7 +227,7 @@ describe("which entries offer the open-in row", () => {
     await settle();
 
     await secondaryPress(tile("thing.obj"));
-    expect(pills()).toHaveLength(0);
+    expect(appRows()).toHaveLength(0);
     // The rest of the model menu is untouched, group and all.
     expect(commandIds()).toContain("reRenderThumbnail");
     expect(menu()!.querySelectorAll('[role="menuitemradio"]')).toHaveLength(3);
@@ -234,11 +241,11 @@ describe("which entries offer the open-in row", () => {
     await settle();
 
     await secondaryPress(tile("widget.stl"));
-    expect(pills()).toHaveLength(0);
+    expect(appRows()).toHaveLength(0);
     expect(openWithItem()).toBeNull();
   });
 
-  it("draws one pill per application id, never the default twice", async () => {
+  it("draws one row per application id, never the default twice", async () => {
     // The default is its own source and *need* not appear among the
     // associations (L1) — but nothing in the report's shape forbids it, and a
     // configured override answers for itself. The same application twice is a
@@ -251,7 +258,7 @@ describe("which entries offer the open-in row", () => {
     await settle();
 
     await secondaryPress(tile("widget.stl"));
-    expect(pillIds()).toEqual([LYCHEE.id, PHOTON.id]);
+    expect(appIds()).toEqual([LYCHEE.id, PHOTON.id]);
   });
 
   it("draws a type with no default at all as its associations alone", async () => {
@@ -263,20 +270,20 @@ describe("which entries offer the open-in row", () => {
     await settle();
 
     await secondaryPress(tile("widget.stl"));
-    expect(pillIds()).toEqual([LYCHEE.id, PHOTON.id]);
+    expect(appIds()).toEqual([LYCHEE.id, PHOTON.id]);
   });
 
-  it("keeps the pills out of the command rows, which are read by id", async () => {
-    // The pills are `menuitem`, chosen over `menuitemradio` because choosing
-    // one *does* something rather than marking the model as being something —
-    // and the ARIA role is the honest one even though it costs the role-based
-    // reading its precision. So the command rows are read by **`data-command`**,
-    // which the pills deliberately do not carry: a command is a row from the
-    // table, and a pill is not one.
+  it("keeps the application rows out of the command rows, which are read by id", async () => {
+    // The application rows are `menuitem`, chosen over `menuitemradio` because
+    // choosing one *does* something rather than marking the model as being
+    // something — and the ARIA role is the honest one even though it costs the
+    // role-based reading its precision. So the command rows are read by
+    // **`data-command`**, which the application rows deliberately do not carry:
+    // a command is a row from the table, and a launch is not one.
     //
-    // This is the assertion, and the two halves are both needed: no pill
+    // This is the assertion, and the two halves are both needed: no launch
     // answers to the id attribute, and reading by it yields exactly the
-    // commands. Read by role instead and the pills come too — stated here
+    // commands. Read by role instead and the launches come too — stated here
     // rather than left as a trap, since the older menu files still read by
     // role and are correct only because no report reaches them.
     apps.mockResolvedValue(REPORT);
@@ -284,21 +291,22 @@ describe("which entries offer the open-in row", () => {
     await settle();
 
     await secondaryPress(tile("widget.stl"));
-    expect(pills()).toHaveLength(3);
-    expect(pills().every((p) => p.dataset.command === undefined)).toBe(true);
+    expect(appRows()).toHaveLength(3);
+    expect(appRows().every((p) => p.dataset.command === undefined)).toBe(true);
     expect(commandIds()).not.toContain("");
+    // Everyday commands, then the maintenance ones after the divider.
     expect(commandIds()).toEqual([
       "open",
       "reveal",
       "copyPath",
+      "openWith",
       "reRenderThumbnail",
       "resetFraming",
-      "openWith",
     ]);
     // The role-based reading, said out loud: three more, and every one of them
     // id-less. This is why `commandIds` is the selector above.
-    expect(items()).toHaveLength(commandIds().length + pills().length);
-    expect(items().filter((id) => id === "")).toHaveLength(pills().length);
+    expect(items()).toHaveLength(commandIds().length + appRows().length);
+    expect(items().filter((id) => id === "")).toHaveLength(appRows().length);
   });
 });
 
@@ -313,7 +321,7 @@ describe("Open with… follows the configured chooser", () => {
     expect(openWithItem()!.textContent).toBe("Open with…");
   });
 
-  it("is absent when no chooser is configured, and the pill row is unaffected", async () => {
+  it("is absent when no chooser is configured, and the application rows are unaffected", async () => {
     // The spec's own pairing: the machine without a chooser still gets its
     // associated applications, it just cannot be handed to one this app does
     // not know about.
@@ -324,7 +332,7 @@ describe("Open with… follows the configured chooser", () => {
     await secondaryPress(tile("widget.stl"));
     expect(openWithItem()).toBeNull();
     expect(commandIds()).not.toContain("openWith");
-    expect(pillIds()).toEqual([F3D.id, LYCHEE.id, PHOTON.id]);
+    expect(appIds()).toEqual([F3D.id, LYCHEE.id, PHOTON.id]);
   });
 });
 
@@ -336,7 +344,7 @@ describe("what a launch does, and what it does not", () => {
     renderThumbnail.mockClear();
 
     await secondaryPress(tile("widget.stl"));
-    await click(pills()[1]!); // LycheeSlicer
+    await click(appRows()[1]!); // LycheeSlicer
     await settle();
 
     expect(openApp).toHaveBeenCalledTimes(1);
@@ -356,13 +364,13 @@ describe("what a launch does, and what it does not", () => {
     // Success first: the evidence a user wants is the other application's
     // window, so this surface stays quiet.
     await secondaryPress(tile("widget.stl"));
-    await click(pills()[0]!);
+    await click(appRows()[0]!);
     await settle();
     expect(pathError()).toBeNull();
 
     openApp.mockRejectedValueOnce(new Error("gtk-launch exited 1"));
     await secondaryPress(tile("widget.stl"));
-    await click(pills()[0]!);
+    await click(appRows()[0]!);
     await settle();
     expect(pathError()).toBe(LAUNCH_FAILED);
   });
@@ -378,7 +386,7 @@ describe("what a launch does, and what it does not", () => {
     await settle();
 
     expect(openWith).toHaveBeenCalledWith("/models/widget.stl");
-    // Not the pill's sentence: nothing was chosen, so "that application" would
+    // Not the launch's sentence: nothing was chosen, so "that application" would
     // name something the user never picked (4.3).
     expect(pathError()).toBe(CHOOSER_FAILED);
     expect(pathError()).not.toBe(LAUNCH_FAILED);
@@ -395,7 +403,7 @@ describe("when the registry is read", () => {
     // Three menus on three entries, raised and dismissed. The report is state;
     // opening a menu asks the registry nothing (D6/2.5).
     await secondaryPress(tile("widget.stl"));
-    expect(pillIds()).toHaveLength(3); // it did read the report, from state
+    expect(appIds()).toHaveLength(3); // it did read the report, from state
     await escape();
     await secondaryPress(tile("kit.zip"));
     await escape();
@@ -420,14 +428,14 @@ describe("when the registry is read", () => {
       types: { "model/stl": { default: LYCHEE, associated: [F3D, PHOTON] } },
     });
     await secondaryPress(tile("widget.stl"));
-    expect(pillIds()[0]).toBe(F3D.id); // still the old row while the menu is up
+    expect(appIds()[0]).toBe(F3D.id); // still the old row while the menu is up
     await click(openWithItem()!);
     await settle();
 
     expect(openWith).toHaveBeenCalledTimes(1);
     expect(apps).toHaveBeenCalledTimes(2);
     await secondaryPress(tile("widget.stl"));
-    expect(pillIds()).toEqual([LYCHEE.id, F3D.id, PHOTON.id]);
+    expect(appIds()).toEqual([LYCHEE.id, F3D.id, PHOTON.id]);
   });
 
   it("reads it again even when the chooser command failed", async () => {
@@ -448,7 +456,7 @@ describe("when the registry is read", () => {
 });
 
 describe("the open command is labelled for the entry", () => {
-  it("says Open lightbox on a model, Open folder on a directory, Open archive on a zip", async () => {
+  it("says View model on a model, Open folder on a directory, Open archive on a zip", async () => {
     // The 4.3 naming decision, read off the rendered menu: the label the user
     // sees is the resolved one, per kind — not the table's fallback string.
     apps.mockResolvedValue(REPORT);
@@ -458,7 +466,7 @@ describe("the open command is labelled for the entry", () => {
       menu()!.querySelector<HTMLButtonElement>('[data-command="open"]')!;
 
     await secondaryPress(tile("widget.stl"));
-    expect(openRow().textContent).toBe("Open lightbox");
+    expect(openRow().textContent).toBe("View model");
     await escape();
     await secondaryPress(tile("Alpha"));
     expect(openRow().textContent).toBe("Open folder");
@@ -468,85 +476,76 @@ describe("the open command is labelled for the entry", () => {
   });
 });
 
-describe("the keyboard, across two pill groups", () => {
+describe("the keyboard, through the launches and the axis group", () => {
   // '-z' stored throughout, so the axis group's landing rule cannot pass by
   // landing on the group's first button and calling it the letter in force.
   beforeEach(() => {
     apps.mockResolvedValue(REPORT);
   });
 
-  it("opens on the first command, below both rows", async () => {
+  it("opens on the first command", async () => {
     await mountApp("/models", NESTED);
     await settle();
 
     await secondaryPress(tile("widget.stl"));
-    // Not `[role="menuitem"]` — the pills answer to that too now. The menu
+    // Not `[role="menuitem"]` — the launches answer to that too. The menu
     // opens on the first *command*, which is what the menu is for.
     expect(focusedEl()).toBe(commandRows()[0]!);
     expect(focusedEl().dataset.command).toBe("open");
   });
 
-  it("enters the open-in row at the default, and walks it pill by pill", async () => {
+  it("walks the launches in drawn order, straight after the command that opens the model", async () => {
     await mountApp("/models", NESTED);
     await settle();
 
     await secondaryPress(tile("widget.stl"));
-    // Up off the first command crosses into the row above it — and lands on
-    // its *first* pill, the default, not on the pill that happens to be
-    // nearest (which is the last one). The axis group's rule, generalized.
-    await arrow("ArrowUp");
+    await arrow("ArrowDown");
     expect(focusedEl().dataset.appId).toBe(F3D.id);
-    expect(focusedEl()).not.toBe(pills()[2]);
-
-    // Stepping on from there reaches the rest, in drawn order.
     await arrow("ArrowDown");
     expect(focusedEl().dataset.appId).toBe(LYCHEE.id);
     await arrow("ArrowDown");
     expect(focusedEl().dataset.appId).toBe(PHOTON.id);
-    // And out of the row into the commands.
+    // And on out of them into the rest of the commands.
+    await arrow("ArrowDown");
+    expect(focusedEl().dataset.command).toBe("reveal");
+  });
+
+  it("crosses off the last command into the axis group, at the letter in force", async () => {
+    await mountApp("/models", NESTED);
+    await settle();
+
+    await secondaryPress(tile("widget.stl"));
+    // Every command and launch but the first, which is where the menu opened.
+    const rows = commandRows().length + appRows().length;
+    for (let i = 1; i < rows; i++) await arrow("ArrowDown");
+    expect(focusedEl().dataset.command).toBe("resetFraming"); // the last row
+    await arrow("ArrowDown");
+    // 'z' is the spindle an STL is framed about with none stored (its format's
+    // up axis, file-frame-spindle D2), and the group is entered at the letter
+    // in force rather than at `X`, the button nearest the step.
+    expect(focusedEl().dataset.axis).toBe("z");
+    // Down walks on through the group — `flip` — and only then wraps to the top.
+    await arrow("ArrowDown");
+    expect(focusedEl().dataset.axis).toBe("flip");
     await arrow("ArrowDown");
     expect(focusedEl().dataset.command).toBe("open");
   });
 
-  it("crosses on into the axis row, which still lands on the letter in force", async () => {
+  it("wraps off the first command into the axis group at the letter in force, not onto flip", async () => {
     await mountApp("/models", NESTED);
     await settle();
 
     await secondaryPress(tile("widget.stl"));
-    await arrow("ArrowUp"); // into the open-in row, at the default
-    expect(focusedEl().dataset.appId).toBe(F3D.id);
-    await arrow("ArrowUp"); // on into the axis row above it
-    // 'z' is the spindle an STL is framed about with none stored (its
-    // format's up axis, file-frame-spindle D2), and the axis group is entered
-    // at the letter in force rather than at `flip` — which here is also proof
-    // the crossing rule fired: the step arrived from below, where the nearest
-    // button is `flip`, not 'z'.
+    await arrow("ArrowUp"); // wrap: `flip` is the nearest button
     expect(focusedEl().dataset.axis).toBe("z");
-    // Down walks on through the row it is in — `flip` — and only then
-    // crosses into the open-in row, at its default.
-    await arrow("ArrowDown");
-    expect(focusedEl().dataset.axis).toBe("flip");
-    await arrow("ArrowDown");
-    expect(focusedEl().dataset.appId).toBe(F3D.id);
   });
 
-  it("wraps off the last command into the topmost row, not into the pill above it", async () => {
+  it("launches the focused application by the same body the pointer reaches", async () => {
     await mountApp("/models", NESTED);
     await settle();
 
     await secondaryPress(tile("widget.stl"));
-    await arrow("End");
-    expect(focusedEl().dataset.command).toBe("openWith"); // the last row
-    await arrow("ArrowDown"); // wrap
-    expect(focusedEl().dataset.axis).toBe("z"); // the STL's default, the letter in force
-  });
-
-  it("launches the focused pill by the same body the pointer reaches", async () => {
-    await mountApp("/models", NESTED);
-    await settle();
-
-    await secondaryPress(tile("widget.stl"));
-    await arrow("ArrowUp"); // the default
+    await arrow("ArrowDown"); // the default
     await arrow("ArrowDown"); // LycheeSlicer
     await click(focusedEl());
     await settle();

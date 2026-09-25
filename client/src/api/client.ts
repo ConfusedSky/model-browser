@@ -88,6 +88,15 @@ export interface ApiClient {
     opts?: { flat?: boolean; q?: string; folderMatching?: boolean },
     signal?: AbortSignal,
   ): Promise<DirListing>;
+  /** How many entries a name search for `q` beneath `path` would show — asked
+   *  beside a meaning search, so a model's name is never lost to guesses.
+   *  Optional: a client without it simply never offers the names. */
+  nameMatchCount?(
+    path: string,
+    q: string,
+    folderMatching: boolean,
+    signal?: AbortSignal,
+  ): Promise<number>;
   /** Every model beneath `path`, with the caches' thumbnail facts
    *  (`listing-tree-cache`). An enumeration, not a listing: no response cap,
    *  and `complete` says whether the traversal ran out of budget. */
@@ -289,6 +298,20 @@ async function blobToBase64(blob: Blob): Promise<string> {
 
 export class HttpApiClient implements ApiClient {
   constructor(private fetchFn: typeof fetch = (...args) => fetch(...args)) {}
+
+  async nameMatchCount(
+    path: string,
+    q: string,
+    folderMatching: boolean,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    const listing = await this.listDir(
+      path,
+      { flat: true, q, folderMatching },
+      signal,
+    );
+    return listing.entries.length;
+  }
 
   async listDir(
     path: string,

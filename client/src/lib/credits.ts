@@ -17,4 +17,5 @@ export function hostLabel(url: string): string {
 
 /** `_blank` because following a credit in place would tear down a live session.
  *  `break-words`, never `break-all`, which splits ordinary words mid-word. */
-export const CREDIT_LINK_CLASS = "break-words text-sky-400 hover:underline";
+export const CREDIT_LINK_CLASS =
+  "break-words text-accent underline-offset-2 hover:underline touch:inline-block touch:py-2";

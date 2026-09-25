@@ -127,7 +127,9 @@ describe("flat toggle follows the in-flight navigation target", () => {
     });
 
     await click(
-      container.querySelector<HTMLButtonElement>("main .grid button")!,
+      container.querySelector<HTMLButtonElement>(
+        "main .grid [data-entry-tile]",
+      )!,
     ); // into 'sub'
     expect(pathInput().value).toBe("/models/a/sub"); // optimistic, before any response
 
@@ -149,7 +151,9 @@ describe("flat toggle follows the in-flight navigation target", () => {
     });
 
     await click(
-      container.querySelector<HTMLButtonElement>("main .grid button")!,
+      container.querySelector<HTMLButtonElement>(
+        "main .grid [data-entry-tile]",
+      )!,
     ); // navigate into 'sub' — fails
     await settle();
     expect(container.textContent).toContain("boom");

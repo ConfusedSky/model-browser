@@ -6,13 +6,20 @@ import {
   click,
   container,
   dir,
+  flatButton,
+  labels,
   listDir,
   model,
   mountApp,
+  pressEnter,
+  resultsLabel,
+  searchInput,
   settle,
   skeleton,
   tiles,
+  type,
   unmountApp,
+  upButton,
   wait,
 } from "./appHarness";
 
@@ -65,7 +72,7 @@ describe("listing skeleton", () => {
     expect(skeleton()).toBeNull();
     // Container tiles are labeled by their own name now that a deep search can
     // return one named by a relative path; the full name stays in the title.
-    expect(tiles().map((b) => b.textContent)).toEqual(["b"]);
+    expect(labels()).toEqual(["b"]);
   });
 
   it("a newer navigation while pending wins and clears the skeleton", async () => {
@@ -81,13 +88,11 @@ describe("listing skeleton", () => {
 
     // The header stays live: toggling flat issues a newer request that takes
     // over the in-flight flag, and its fast response clears the skeleton.
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+    await click(flatButton());
     await settle();
 
     expect(skeleton()).toBeNull();
-    expect(tiles().map((b) => b.textContent)).toEqual(["a"]);
+    expect(labels()).toEqual(["a"]);
   });
 
   it("a superseded request landing neither dismisses nor re-triggers the skeleton", async () => {
@@ -107,9 +112,7 @@ describe("listing skeleton", () => {
 
     // Newest request is now the never-resolving flat toggle; then the
     // abandoned navigation finally lands.
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+    await click(flatButton());
     landA();
     await settle();
 
@@ -130,9 +133,7 @@ describe("listing skeleton", () => {
 
     await click(tiles()[0]!);
     await pastDelay();
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+    await click(flatButton());
     failA(new Error("stale boom"));
     await settle();
 
@@ -146,13 +147,13 @@ describe("listing skeleton", () => {
       return Promise.resolve(opts?.flat === true ? FLAT : NESTED);
     });
 
-    await click(
-      container.querySelector<HTMLButtonElement>("button[aria-pressed]")!,
-    );
+    await click(flatButton());
     await settle();
     expect(container.textContent).toContain("omitted");
 
-    await click(tiles()[0]!); // into a never-resolving navigation
+    // Into a never-resolving navigation, through the folder — a flat view
+    // lists its models first.
+    await click(tiles().find((t) => t.dataset.entryTile === "/models/a")!);
     await pastDelay();
     expect(skeleton()).not.toBeNull();
     expect(container.textContent).not.toContain("omitted");
@@ -177,6 +178,31 @@ describe("listing skeleton", () => {
 
     expect(skeleton()).toBeNull();
     expect(container.textContent).toContain("walk failed");
-    expect(tiles().map((b) => b.textContent)).toEqual(["a"]); // prior grid restored
+    expect(labels()).toEqual(["a"]); // prior grid restored
+  });
+});
+
+describe("the results line over the skeleton", () => {
+  it("says what the wait is for, not what the departed search found", async () => {
+    listDir.mockImplementation(
+      (p: string, opts?: { q?: string }): Promise<DirListing> =>
+        opts?.q !== undefined
+          ? Promise.resolve({ path: "/models", entries: [model("a/x.stl")] })
+          : p === "/"
+            ? new Promise<DirListing>(() => {})
+            : Promise.resolve(NESTED),
+    );
+    await type(searchInput(), "abc");
+    await pressEnter(searchInput());
+    await settle();
+    expect(resultsLabel()).toBe("1 result “abc”");
+
+    // Up leaves the search for a listing that never lands.
+    await click(upButton());
+    await pastDelay();
+
+    expect(skeleton()).not.toBeNull();
+    expect(resultsLabel()).toBeNull();
+    expect(container.textContent).toContain("Opening the library…");
   });
 });

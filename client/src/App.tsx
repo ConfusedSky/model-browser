@@ -1,4 +1,6 @@
 import {
+  Fragment,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -22,10 +24,11 @@ import { HttpApiClient, HttpError, type ApiClient } from "./api/client";
 import { withLocalFramings } from "./api/localFramings";
 import EntryMenu from "./components/EntryMenu";
 import FindBar from "./components/FindBar";
-import Grid from "./components/Grid";
+import Grid, { SkeletonGrid, type TileSize } from "./components/Grid";
+import Icon, { type IconName } from "./components/Icon";
 import IntroBanner from "./components/IntroBanner";
 import JobChip from "./components/JobChip";
-import SidePanel from "./components/SidePanel";
+import SidePanel, { collapseStore } from "./components/SidePanel";
 import PathBar from "./components/PathBar";
 import { useCyclingPlaceholder } from "./hooks/useCyclingPlaceholder";
 import { SKELETON_DELAY_MS, useDelayedFlag } from "./hooks/useDelayedFlag";
@@ -38,7 +41,6 @@ import {
   resettable,
   type FramingWrite,
   type StoredFraming,
-  LIGHTBOX_MENU_EXCLUDES,
   LIGHTBOX_PANEL_EXCLUDES,
   openEntryIn,
   openInApps,
@@ -50,7 +52,6 @@ import {
   type CommandId,
   type EntryCommand,
   type LiveFramingView,
-  type MenuItemId,
 } from "./lib/entryActions";
 import { GestureTracker } from "./lib/gesture";
 import { createHoverWarmer } from "./lib/hover";
@@ -60,11 +61,13 @@ import {
   applyIn,
   findTile,
   measureIn,
+  tilesIn,
   resolvePlacement,
   type PlacementRequest,
 } from "./lib/placement";
 import { pushRecent } from "./lib/recents";
-import { scaleOf } from "./lib/scoreScale";
+import { stored } from "./lib/stored";
+import { scaleOf, showScoresStore } from "./lib/scoreScale";
 import {
   applySessionSearchMode,
   folderMatchingEnabled,
@@ -77,6 +80,9 @@ import {
   setSearchMode,
   setSearchTuning,
   resolveTuning,
+  optionsOffDefault,
+  looksLikeDescription,
+  looksLikeFileName,
   type SearchKinds,
   type SearchMode,
   type Tuning,
@@ -141,7 +147,7 @@ import {
 } from "./three/models";
 import { POSE_VERSION } from "./three/pose";
 import { RenderQueue, type Band } from "./three/queue";
-import { RIG_VERSION, THUMB_LIGHTING } from "./three/renderer";
+import { RIG_VERSION, THUMB_LIGHTING, onContextLost } from "./three/renderer";
 import ViewerLayer, { type ViewerState } from "./viewer/ViewerLayer";
 import { aoEnabled, setAoEnabled } from "./viewer/aoToggle";
 import type { ViewerSession } from "./viewer/session";
@@ -177,6 +183,33 @@ const NO_SCORES: Record<string, IndexScore> = {};
 const NO_PREVIEWS: ReadonlyMap<string, DirEntry[]> = new Map();
 const NO_PREVIEW: DirEntry[] = [];
 
+/** Below this top z a meaning search reads as a guess. Measured against both
+ *  indexes: nonsense phrases top out at 1.7–2.4 where real ones start near
+ *  2.4 — so this catches most nonsense and a few vague phrases, never a
+ *  strong one. */
+const WEAK_TOP_Z = 2.5;
+/** Below this top z no result in the set is called better than "Fair". */
+const STRONG_TOP_Z = 3.6;
+/** How many guesses a weak set shows before "Show all". */
+const WEAK_SHOWN = 12;
+const RENDERING_DELAY_MS = 300;
+/** What the name search answers at most, so a probe count there is a floor. */
+const NAME_COUNT_CAP = 500;
+const NOTE_ACTION_CLASS =
+  "font-medium text-accent underline-offset-2 hover:underline touch:py-2";
+
+const TILE_SIZES = ["s", "m", "l"] as const;
+const TILE_SIZE_NAME: Record<TileSize, string> = {
+  s: "Small",
+  m: "Medium",
+  l: "Large",
+};
+const tileSizeStore = stored<TileSize>(
+  "model-browser:tile-size",
+  (raw) => (raw === "s" || raw === "l" ? raw : "m"),
+  (v) => v,
+);
+
 /** Keyed on the listing's identity, so it is scanned once per landing. */
 const carriedPreviews = new WeakMap<DirEntry[], Map<string, DirEntry[]>>();
 function carriedPreviewsFor(entries: DirEntry[]): Map<string, DirEntry[]> {
@@ -190,15 +223,6 @@ function carriedPreviewsFor(entries: DirEntry[]): Map<string, DirEntry[]> {
   return map;
 }
 const NO_SUBJECT: Subject = { kind: "none" };
-
-const NO_EXCLUDES: readonly MenuItemId[] = [];
-
-/** Only the lightbox withholds: the orbit overlay is the tile it covers. */
-function menuExcludes(
-  surface: "tile" | "orbit" | "lightbox",
-): readonly MenuItemId[] {
-  return surface === "lightbox" ? LIGHTBOX_MENU_EXCLUDES : NO_EXCLUDES;
-}
 
 function baseName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
@@ -429,17 +453,14 @@ export default function App() {
   findOpenRef.current = findOpen;
 
   /** **Not a viewer**: it never sets `viewer`, which the render-queue
-   *  suspension keys off (2.4). `surface` is not derivable from `viewer`
-   *  either — an orbit overlay leaves the rest of the grid right-clickable. */
+   *  suspension keys off (2.4). Raised from a tile or from the orbit overlay
+   *  over one, which is the tile it covers; the lightbox raises none — its
+   *  panel carries every command. */
   const [menu, setMenu] = useState<{
     entry: DirEntry;
     el: HTMLElement | null;
     x: number;
     y: number;
-    surface: "tile" | "orbit" | "lightbox";
-    /** Present only on the lightbox's menu, whose live session Reset framing
-     *  must move; the orbit overlay keeps the tile's queued body (6.8). */
-    live?: () => LiveFramingView | null;
   } | null>(null);
   const menuRef = useRef<typeof menu>(null);
   menuRef.current = menu;
@@ -603,6 +624,24 @@ export default function App() {
     setViewerNote(null);
   }, [viewer?.entry.path]);
   const [ao, setAoState] = useState(aoEnabled);
+  const [panelOpen, setPanelOpen] = useState(() => !collapseStore.read());
+  const panelToggleRef = useRef<HTMLButtonElement>(null);
+  const [showScores, setShowScores] = useState(() => showScoresStore.read());
+  /** The GPU context is gone: nothing more will draw until it comes back. */
+  const [glLost, setGlLost] = useState(false);
+  useEffect(() => onContextLost(setGlLost), []);
+  /** A visitor who has searched has met the app: the introduction does not
+   *  come back when they leave the results, for the rest of this page. */
+  const [searchedOnce, setSearchedOnce] = useState(false);
+  /** The query last sent to the other corpus because its words belonged
+   *  there: a file name to the names, a description to meaning. */
+  const [autoMode, setAutoMode] = useState<{
+    text: string;
+    mode: SearchMode;
+  } | null>(null);
+  const [tileSize, setTileSize] = useState<TileSize>(() =>
+    tileSizeStore.read(),
+  );
   const trackerRef = useRef(new GestureTracker());
 
   // `history.state` cannot live in a reducer, so whether a model open writes a
@@ -843,6 +882,20 @@ export default function App() {
           : libraryMissingText(libraryState.root);
 
   const showSkeleton = useDelayedFlag(busy(state), SKELETON_DELAY_MS);
+  /** What the wait is for, said where the count will land: a user's request
+   *  in flight, never a background revalidation. */
+  const asked =
+    state.inflight !== null && state.inflight.followUp !== true
+      ? state.inflight.view
+      : null;
+  const waitLabel =
+    asked === null
+      ? ""
+      : asked.subject.kind === "query"
+        ? `Searching for “${asked.subject.text}”…`
+        : asked.subject.kind === "similar"
+          ? "Finding similar models…"
+          : `Opening ${asked.path === "/" ? "the library" : baseName(asked.path)}…`;
   // `busy`, not `inflight !== null`: a follow-up keeps the answered grid up,
   // and the user's place in it is real.
   busyRef.current = busy(state) || showSkeleton;
@@ -1142,6 +1195,7 @@ export default function App() {
       setFindText("");
       setFindOpen(false);
       setMarked(null);
+      arrivalFocusRef.current = {};
       // So a volume mounted later needs a navigation, not a reload (R4).
       const lib = libraryRef.current;
       if (lib !== null && lib.state !== "ready") probeLibrary();
@@ -1154,7 +1208,7 @@ export default function App() {
     // An ordinary request, so it supersedes a committed search. Targeted at
     // `dest`, so untoggling mid-navigation follows the user rather than
     // snapping back.
-    commit({ type: "toggleFlat" });
+    commit({ type: "toggleFlat", prefs: ownPrefs() });
   }
 
   /**
@@ -1177,8 +1231,15 @@ export default function App() {
       // lands on and retraces the way ↑ does (retrace-placement D3). `entry`,
       // not `up`: no folder was left, so there is no child to centre.
       const base = liveView(stateRef.current);
+      // The view it lands on, options restored and all, is the one the trail
+      // filed when the listing was left.
+      const prefs =
+        otherwise.type === "clearSubject" || otherwise.type === "queryText"
+          ? otherwise.prefs
+          : undefined;
       const key = listingKey({
         ...base,
+        ...prefs,
         subject: { kind: "none" },
         model: null,
       });
@@ -1197,7 +1258,7 @@ export default function App() {
     // in-app similarity view returns where the ✕ returns. Ordinary typing
     // asserts nothing and owns no URL.
     if (value.trim() === "" && live.subject.kind !== "none") {
-      leaveSubject({ type: "queryText", text: value });
+      leaveSubject({ type: "queryText", text: value, prefs: ownPrefs() });
       return;
     }
     dispatch({ type: "queryText", text: value });
@@ -1209,15 +1270,60 @@ export default function App() {
     commit({ type: "deferredToName" });
   }
 
+  /**
+   * Where focus goes when a navigation lands, if the keyboard has lost it: the
+   * pressed tile unmounts with its listing, which drops focus to `<body>` and
+   * leaves the next Tab starting from the top of the page. Coming up, the
+   * folder just left; otherwise the first tile.
+   */
+  const arrivalFocusRef = useRef<{ child?: string } | null>(null);
+  useEffect(() => {
+    const want = arrivalFocusRef.current;
+    if (want === null || state.inflight !== null || state.result === null)
+      return;
+    arrivalFocusRef.current = null;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const main = mainRef.current;
+    if (main === null) return;
+    const el =
+      (want.child !== undefined ? findTile(main, want.child) : null) ??
+      tilesIn(main)[0];
+    el?.focus({ preventScroll: true });
+  }, [state.result, state.inflight]);
+
+  function focusFirstTile(): void {
+    const main = mainRef.current;
+    if (main !== null) tilesIn(main)[0]?.focus();
+  }
+
+  /** The tile the keyboard was on when Narrow opened, to come back to. */
+  const findFromRef = useRef<string | null>(null);
   function openFind(): void {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.dataset.entryTile !== undefined)
+      findFromRef.current = active.dataset.entryTile;
     setFindOpen(true);
     setFindFocus((n) => n + 1);
   }
 
   /** A closed control must never leave the grid silently narrowed. */
   function closeFind(): void {
+    const fromBar = document.activeElement?.closest("[data-find-bar]") != null;
+    const back = findFromRef.current;
+    findFromRef.current = null;
     setFindOpen(false);
     setFindText("");
+    // The bar's input is about to unmount under the keyboard: back to the
+    // tile it was raised from, if it is still there.
+    if (fromBar)
+      requestAnimationFrame(() => {
+        const main = mainRef.current;
+        const tile =
+          main !== null && back !== null ? findTile(main, back) : null;
+        if (tile !== null) tile.focus();
+        else focusFirstTile();
+      });
   }
 
   /** Decides what the *server* returns, so a committed query is re-issued (D3).
@@ -1235,10 +1341,18 @@ export default function App() {
     commit({ type: "setMode", mode: next });
   }
 
+  /** The results line's "the other corpus" links: this search, asked of the
+   *  other corpus, and the profile's own choice left as it was — leaving the
+   *  results puts it back (`clearSubject`'s `prefs`). */
+  function switchModeOnce(next: SearchMode): void {
+    commit({ type: "setMode", mode: next });
+  }
+
   /** `setSearchMode` and not `applySessionSearchMode`, because clicking a chip
    *  *is* the visitor choosing meaning mode; `commit` and not `dispatch`, so
    *  Back from the results returns to the view it was clicked from (D4). */
   function runQuery(text: string): void {
+    setSearchedOnce(true);
     setSearchMode("meaning");
     commit({ type: "runQuery", text, mode: "meaning" });
   }
@@ -1291,7 +1405,27 @@ export default function App() {
   }
 
   function submitSearch(): void {
-    if (state.drafts.queryText.trim() === "") return;
+    const text = state.drafts.queryText.trim();
+    if (text === "") return;
+    setSearchedOnce(true);
+    // Asked of the other corpus for this one search when the words plainly
+    // belong to it, and said so over the results, with the way back one click
+    // away.
+    if (live.mode === "meaning" && looksLikeFileName(text)) {
+      setAutoMode({ text, mode: "name" });
+      commit({ type: "submit", mode: "name" });
+      return;
+    }
+    if (
+      live.mode === "name" &&
+      looksLikeDescription(text) &&
+      meaningRunnableAt(state.index, target)
+    ) {
+      setAutoMode({ text, mode: "meaning" });
+      commit({ type: "submit", mode: "meaning" });
+      return;
+    }
+    setAutoMode(null);
     commit({ type: "submit" });
   }
 
@@ -1304,13 +1438,29 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // An orbit overlay belongs to a tile on screen: a new view takes the tile
+  // away, and must take its overlay with it rather than leave it floating
+  // over whatever arrived.
+  useEffect(() => {
+    setViewer((v) => (v !== null && v.mode === "orbit" ? null : v));
+  }, [state.view.path, state.view.flat, state.view.subject]);
+
   // One renderer, one purpose at a time (D2/D3). Keyed off `viewer` — what is
   // mounted — never off `view.model`, which disagrees with it for the whole
   // teardown (R7).
+  //
+  // A search in flight holds the queue too: renders for the view being
+  // replaced compete with the answer for the page, the GPU and the server.
+  // It does not stop renders already started, so it narrows that contention
+  // rather than removing it.
+  const searchInFlight =
+    state.inflight !== null &&
+    state.inflight.followUp !== true &&
+    state.inflight.view.subject.kind !== "none";
   useEffect(() => {
-    if (viewer !== null) queue.suspend();
+    if (viewer !== null || searchInFlight) queue.suspend();
     else queue.resume();
-  }, [viewer, queue]);
+  }, [viewer, searchInFlight, queue]);
 
   // A separate service that may start after this app did, so it is re-read on
   // the interactions the app already makes rather than on a timer (3.8).
@@ -1434,8 +1584,31 @@ export default function App() {
         goUpRef.current();
         return;
       }
+      // `/` jumps to the search box, as it does on most sites that have one.
+      if (
+        e.key === "/" &&
+        !typing &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        viewerRef.current === null &&
+        !menuOpenRef.current
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
       if (e.key !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey) return;
-      if (typing && el.closest("[data-find-bar]") === null) return;
+      // An empty search box is not typing: it is where dismissing the
+      // introduction leaves the keyboard, and Narrow is what Ctrl-F means
+      // there. A half-written query keeps the browser's own find.
+      const idleSearch =
+        el instanceof HTMLInputElement &&
+        el.hasAttribute("data-search-input") &&
+        el.value === "";
+      if (typing && el.closest("[data-find-bar]") === null && !idleSearch)
+        return;
       if (viewerRef.current !== null) return;
       e.preventDefault();
       openFind();
@@ -1648,14 +1821,88 @@ export default function App() {
   // dep is deliberately narrower than the selector's argument: a fresh array
   // per state change would re-render every tile for an availability tick.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const kept = useMemo(() => byKind(state), [state.result]);
-  const filteredListing = useMemo(
-    () =>
+  const kept = useMemo(() => {
+    const k = byKind(state);
+    const v = state.result?.forView;
+    // A flat view or a name search is asked for to find models; the folders
+    // they also list are a way onward, so they go after rather than burying
+    // the first model. A meaning search keeps its ranking.
+    if (v === undefined) return k;
+    const meaning =
+      state.result?.scope !== undefined && state.result.scope !== null;
+    const flatPlain = v.flat && v.subject.kind === "none";
+    const byName = v.subject.kind === "query" && !meaning;
+    if (!flatPlain && !byName) return k;
+    return [
+      ...k.filter((e) => e.kind === "model"),
+      ...k.filter((e) => e.kind !== "model"),
+    ];
+  }, [state.result]);
+  /** The strongest z among the results. The index's own `weak` flag misses
+   *  some phrases that match nothing, and a top this low reads as a guess
+   *  whatever the flag says. */
+  const topZ = useMemo(() => {
+    let top = Number.NEGATIVE_INFINITY;
+    if (label.meaning)
+      for (const e of kept) {
+        const z = scoreFor(e.path)?.z;
+        if (z !== undefined && z > top) top = z;
+      }
+    return top;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kept, label.meaning, scoreFor]);
+  const weakSet =
+    labelQuery !== null &&
+    label.meaning &&
+    (label.weak || (Number.isFinite(topZ) && topZ < WEAK_TOP_Z));
+  /** A set whose best is only middling: its words stop at "Fair", so a guess
+   *  is never called a good match. */
+  const modestSet =
+    label.meaning && Number.isFinite(topZ) && topZ < STRONG_TOP_Z;
+  /** How many entries a name search would find for the meaning query on
+   *  screen, asked beside it. */
+  const [nameHits, setNameHits] = useState<{
+    key: string;
+    count: number;
+  } | null>(null);
+  const hitsPath = state.result?.forView.path;
+  /** The whole question — where, how names match, and what — so an answer is
+   *  never shown for another folder or another option. */
+  const hitsKey =
+    labelQuery !== null && label.meaning && hitsPath !== undefined
+      ? `${hitsPath}\u0000${live.folderMatching}\u0000${labelQuery}`
+      : null;
+  useEffect(() => {
+    setNameHits(null);
+    if (hitsKey === null || labelQuery === null || hitsPath === undefined)
+      return;
+    const ctrl = new AbortController();
+    const key = hitsKey;
+    api
+      .nameMatchCount?.(hitsPath, labelQuery, live.folderMatching, ctrl.signal)
+      .then(
+        (count) => setNameHits({ key, count }),
+        () => {},
+      );
+    return () => ctrl.abort();
+    // `hitsKey` carries every input the question reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, hitsKey]);
+  const nameMatches =
+    nameHits !== null && nameHits.key === hitsKey ? nameHits.count : 0;
+  /** The query whose weak guesses were all asked for, past the first row. */
+  const [allGuessesFor, setAllGuessesFor] = useState<string | null>(null);
+  const guessesCapped =
+    weakSet && allGuessesFor !== labelQuery && kept.length > WEAK_SHOWN;
+
+  const filteredListing = useMemo(() => {
+    const narrowed =
       needle === ""
         ? kept
-        : kept.filter((e) => e.name.toLowerCase().includes(needle)),
-    [kept, needle],
-  );
+        : kept.filter((e) => e.name.toLowerCase().includes(needle));
+    // A weak set is a row of guesses, not a page of them, until asked.
+    return guessesCapped ? narrowed.slice(0, WEAK_SHOWN) : narrowed;
+  }, [kept, needle, guessesCapped]);
   // Prepended here and nowhere earlier, so it is shown and never counted —
   // **exempt from the find filter** too, or the neighbours have nothing to say
   // what they are near.
@@ -1664,6 +1911,42 @@ export default function App() {
       anchor === undefined ? filteredListing : [anchor, ...filteredListing],
     [anchor, filteredListing],
   );
+  /** Models on screen still waiting for a picture — said once in the results
+   *  line, rather than only as a spinner per tile. */
+  const pendingThumbs = useMemo(() => {
+    const waiting = (path: string): boolean => {
+      const t = thumbs.get(path);
+      return t === undefined || (t.status === "loading" && t.url === undefined);
+    };
+    let n = 0;
+    for (const e of shownEntries) {
+      if (e.kind === "model") {
+        if (waiting(e.path)) n++;
+      } else {
+        // A folder's sheet is rendered model by model too.
+        for (const cell of previews.get(e.path) ?? [])
+          if (waiting(cell.path)) n++;
+      }
+    }
+    return n;
+  }, [shownEntries, thumbs, previews]);
+
+  /** Held a beat before it shows, so a set the caches answer at once never
+   *  flashes a count. */
+  const renderingShown = useDelayedFlag(pendingThumbs > 0, RENDERING_DELAY_MS);
+
+  /** What a plain listing holds — the line a search spends on its label. */
+  const listingSummary = useMemo(() => {
+    const n = { folder: 0, archive: 0, model: 0 };
+    for (const e of kept)
+      n[
+        e.kind === "model" ? "model" : e.kind === "zip" ? "archive" : "folder"
+      ]++;
+    return (Object.keys(n) as (keyof typeof n)[])
+      .filter((k) => n[k] > 0)
+      .map((k) => `${n[k]} ${k}${n[k] === 1 ? "" : "s"}`)
+      .join(" · ");
+  }, [kept]);
   /** Off `shownEntries`, so stepping honours a find filter and skips folders
    *  (lightbox-sibling-stepping D1). */
   const modelSiblings = useMemo(
@@ -1789,7 +2072,9 @@ export default function App() {
       // Not `commit`, so the leaving grid's place is filed here too (D2).
       dispatch: (action) => {
         recordNow();
-        dispatch(action);
+        dispatch(
+          action.type === "similar" ? { ...action, prefs: ownPrefs() } : action,
+        );
       },
       markOnArrival: (path) => raisePlacement({ kind: "reveal", path }),
       open: (entry, el) => {
@@ -1847,31 +2132,14 @@ export default function App() {
       el: HTMLElement | null,
       at: { x: number; y: number },
     ): void => {
-      setMenu({ entry, el, x: at.x, y: at.y, surface: "tile" });
+      setMenu({ entry, el, x: at.x, y: at.y });
     },
     [],
   );
-  /** A different *surface*, not a different menu (D6) — read from `viewerRef`,
-   *  so this stays stable as a prop. */
+  /** The orbit overlay swallows `contextmenu` for the tile it sits over. */
   const onViewerEntryMenu = useCallback(
-    (
-      entry: DirEntry,
-      el: HTMLElement | null,
-      at: { x: number; y: number },
-      live?: () => LiveFramingView | null,
-    ): void => {
-      const surface =
-        viewerRef.current?.mode === "lightbox" ? "lightbox" : "orbit";
-      // Only the lightbox's menu: the overlay keeps the tile's body (6.8).
-      setMenu({
-        entry,
-        el,
-        x: at.x,
-        y: at.y,
-        surface,
-        live: surface === "lightbox" ? live : undefined,
-      });
-    },
+    (entry: DirEntry, el: HTMLElement | null, at: { x: number; y: number }) =>
+      setMenu({ entry, el, x: at.x, y: at.y }),
     [],
   );
   const closeMenu = useCallback((): void => {
@@ -1883,14 +2151,6 @@ export default function App() {
       const raised = menuRef.current;
       closeMenu();
       if (raised === null) return;
-      // The LIVE body: the generic one would queue a render behind the viewer's
-      // suspension and lose to the closing persist (`resetFramingLive`). Read
-      // now rather than at raise time, so a reframe between the two is not
-      // stale.
-      if (command.id === "resetFraming" && raised.live !== undefined) {
-        resetFramingLive(raised.entry, actionHost, raised.live());
-        return;
-      }
       command.run?.(raised.entry, actionHost, raised.el);
     },
     [closeMenu, actionHost],
@@ -1899,11 +2159,7 @@ export default function App() {
    *  not offered. From the thumbs map, which is what the tile drew; a model
    *  never given one is marked at the default it is framed about. */
   const menuAxis = useMemo<OrbitAxis | null>(() => {
-    if (
-      menu === null ||
-      !orbitAxisApplies(menu.entry, menuExcludes(menu.surface))
-    )
-      return null;
+    if (menu === null || !orbitAxisApplies(menu.entry)) return null;
     return (
       thumbs.get(menu.entry.path)?.axis ??
       defaultAxisFor(formatOfEntry(menu.entry))
@@ -1926,11 +2182,7 @@ export default function App() {
    *  affordance that does nothing. From `apps`, so raising fires no request. */
   const menuOpenIn = useMemo(() => {
     if (menu === null) return null;
-    const list = openInApps(
-      menu.entry,
-      { index: state.index, apps, features },
-      menuExcludes(menu.surface),
-    );
+    const list = openInApps(menu.entry, { index: state.index, apps, features });
     return list.length === 0 ? null : list;
   }, [menu, state.index, apps, features]);
   const onChooseApp = useCallback(
@@ -1945,11 +2197,7 @@ export default function App() {
     () =>
       menu === null
         ? []
-        : commandsFor(
-            menu.entry,
-            { index: state.index, apps, features },
-            menuExcludes(menu.surface),
-          ),
+        : commandsFor(menu.entry, { index: state.index, apps, features }),
     [menu, state.index, apps, features],
   );
 
@@ -2077,6 +2325,7 @@ export default function App() {
       model: null,
     });
     navigate(parent);
+    arrivalFocusRef.current = { child: target };
     raisePlacement({
       kind: "up",
       placement: trailWalkBack(historyIndex(), parentKey)?.placement ?? null,
@@ -2170,88 +2419,266 @@ export default function App() {
     [commit],
   );
 
+  /** The probe walks the same capped search the names would, so a count at
+   *  the cap is a floor. */
+  const nameCountText =
+    nameMatches >= NAME_COUNT_CAP ? `${NAME_COUNT_CAP}+` : String(nameMatches);
+  /** A weak set's ways out, in the order they are likeliest to help. Names
+   *  are offered until the probe has said there are none. */
+  const probeSaidNone =
+    nameHits !== null && nameHits.key === hitsKey && nameHits.count === 0;
+  const weakWaysOut: { label: string; run: () => void }[] = [
+    ...(guessesCapped && labelQuery !== null
+      ? [
+          {
+            label: `Show all ${label.shown}`,
+            run: () => {
+              setAllGuessesFor(labelQuery);
+              // Onto the first guess that was held back.
+              requestAnimationFrame(() => {
+                const main = mainRef.current;
+                if (main !== null) tilesIn(main)[WEAK_SHOWN]?.focus();
+              });
+            },
+          },
+        ]
+      : []),
+    ...(probeSaidNone
+      ? []
+      : [
+          {
+            label:
+              nameMatches > 0
+                ? `See the ${nameCountText} name ${nameMatches === 1 ? "match" : "matches"}`
+                : "Search names instead",
+            run: () => switchModeOnce("name"),
+          },
+        ]),
+    ...(labelQuery !== null &&
+    state.view.path !== "/" &&
+    meaningRunnableAt(state.index, "/")
+      ? [
+          {
+            label: "Search the whole library",
+            run: () =>
+              commit({ type: "runQuery", text: labelQuery, mode: "meaning" }),
+          },
+        ]
+      : []),
+  ];
+
+  /**
+   * The results line: the count first, so a narrow screen truncates the query
+   * rather than the number, then the query as a chip, then whatever qualifies
+   * the set. No `weak`/`capped` notes for neighbours: the index publishes
+   * neither for them, and rendering them off `false` would report a
+   * measurement that came out negative (4.7).
+   */
+  const resultsHead: {
+    count: string;
+    query: string;
+    icon: IconName;
+    notes: ReactNode[];
+  } | null =
+    labelQuery !== null
+      ? {
+          count: searchHasNoMatches
+            ? "No matches"
+            : weakSet
+              ? "No strong matches"
+              : label.meaning
+                ? // A different act from the index's ceiling, in different
+                  // words (D9). Gated on *both* bounds being in force: floorless,
+                  // `matched` is everything scored, and countless the short set
+                  // is the cap saying so twice.
+                  label.capping &&
+                  label.matched !== undefined &&
+                  label.matched > label.shown
+                  ? `Top ${label.shown} of ${label.matched} ${modestSet ? "fair " : ""}matches`
+                  : modestSet
+                    ? `${label.shown} fair ${label.shown === 1 ? "match" : "matches"}`
+                    : `${label.shown} closest ${label.shown === 1 ? "match" : "matches"}`
+                : `${kept.length} ${kept.length === 1 ? "result" : "results"}`,
+          query: labelQuery,
+          icon: label.meaning ? "sparkles" : "type",
+          notes: searchHasNoMatches
+            ? []
+            : [
+                weakSet && (
+                  <>
+                    Nothing stood out —{" "}
+                    {guessesCapped ? "here are" : "these are"} the closest
+                    guesses.{" "}
+                    {weakWaysOut.map((way, i) => (
+                      <Fragment key={way.label}>
+                        {i > 0 && " · "}
+                        <button
+                          type="button"
+                          onClick={way.run}
+                          className={NOTE_ACTION_CLASS}
+                        >
+                          {way.label}
+                        </button>
+                      </Fragment>
+                    ))}
+                  </>
+                ),
+                // Asked beside every meaning search: a model's own name is
+                // never lost among guesses.
+                label.meaning && !weakSet && nameMatches > 0 && (
+                  <>
+                    {nameCountText}{" "}
+                    {nameMatches === 1 ? "name matches" : "names match"} “
+                    {labelQuery}” too.{" "}
+                    <button
+                      type="button"
+                      onClick={() => switchModeOnce("name")}
+                      className={NOTE_ACTION_CLASS}
+                    >
+                      Show them
+                    </button>
+                  </>
+                ),
+                // Not the ranking's horizon but the index's own ceiling (D2).
+                label.capped &&
+                  "The index returned fewer than asked for — its cap.",
+                !label.meaning &&
+                  autoMode?.mode === "name" &&
+                  autoMode.text === labelQuery && (
+                    <>
+                      Searched file names — “{labelQuery}” looks like one.{" "}
+                      <button
+                        type="button"
+                        onClick={() => switchModeOnce("meaning")}
+                        className={NOTE_ACTION_CLASS}
+                      >
+                        Search by meaning instead
+                      </button>
+                    </>
+                  ),
+                label.meaning &&
+                  autoMode?.mode === "meaning" &&
+                  autoMode.text === labelQuery && (
+                    <>
+                      Searched by meaning — “{labelQuery}” reads like a
+                      description.{" "}
+                      <button
+                        type="button"
+                        onClick={() => switchModeOnce("name")}
+                        className={NOTE_ACTION_CLASS}
+                      >
+                        Search names instead
+                      </button>
+                    </>
+                  ),
+              ].filter((n): n is Exclude<typeof n, false> => n !== false),
+        }
+      : labelModel !== null
+        ? {
+            count: searchHasNoMatches
+              ? "Nothing similar"
+              : `${label.shown} similar ${label.shown === 1 ? "model" : "models"}`,
+            query: baseName(labelModel),
+            icon: "box",
+            notes: searchHasNoMatches ? [] : ["From across the collection."],
+          }
+        : null;
+
   /** Always present, so the grid starts at the same height in every state, the
    *  skeleton included. Opposite ends, so a long query cannot push the caveat
    *  off screen. */
   const noticeBar = (
-    labelText: string,
+    summary: string,
     caveat: string,
-    narrow = false,
     stale = false,
-  ) => (
-    <div className="flex h-8 shrink-0 items-baseline justify-between gap-4 px-4 pt-3 text-xs">
-      <div className="flex min-w-0 items-baseline gap-2">
-        {/* The find control is otherwise Ctrl-F-or-nothing, which is invisible
-            to anyone who does not try it. */}
-        {narrow && !findOpen && (
-          <button
-            type="button"
-            onClick={openFind}
-            title="Narrow these by name (Ctrl-F)"
-            className="shrink-0 rounded px-1.5 text-zinc-500 hover:text-zinc-200"
-          >
-            ⌕ Narrow
-          </button>
-        )}
-        <p className="min-w-0 truncate text-zinc-400">{labelText}</p>
-        {/* The ONLY way out of a committed view on screen (D9), and the same
+    /** Off over the skeleton: the renders it would count, and the answer
+     *  whose count and query it would head, belong to the view that left. */
+    status = true,
+  ) => {
+    const head = status ? resultsHead : null;
+    return (
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pt-3 pb-1 text-[13px]">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {head !== null ? (
+            <>
+              <p className="shrink-0 font-semibold text-ink">{head.count}</p>
+              <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface py-1 pr-2.5 pl-2 text-xs text-ink-2 ring-1 ring-line">
+                <Icon name={head.icon} className="size-3 text-ink-3" />
+                <span className="min-w-[6ch] truncate">“{head.query}”</span>
+              </span>
+            </>
+          ) : (
+            summary !== "" && (
+              <p className="min-w-0 truncate text-xs text-ink-3">{summary}</p>
+            )
+          )}
+          {/* The ONLY way out of a committed view on screen (D9), and the same
             transition emptying the input delegates to. Rendered for a model as
             for a phrase — which is the whole reason a similarity view is
             leaveable at all, since there is no text to empty. */}
-        {dismissable && (
-          <button
-            type="button"
-            onClick={() => leaveSubject({ type: "clearSubject" })}
-            // One sentence for both destinations: where it lands is the entry's
-            // provenance, and reading `history.state` during a render would
-            // read it one render stale.
-            title="Stop showing this and go back to browsing"
-            className="shrink-0 rounded px-1.5 text-zinc-500 hover:text-zinc-200"
+          {dismissable && (
+            <button
+              type="button"
+              onClick={() => {
+                // The button unmounts with the results it leaves.
+                arrivalFocusRef.current = {};
+                leaveSubject({ type: "clearSubject", prefs: ownPrefs() });
+              }}
+              // One sentence for both destinations: where it lands is the entry's
+              // provenance, and reading `history.state` during a render would
+              // read it one render stale.
+              title="Leave these results"
+              aria-label="Dismiss"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-surface hover:text-ink touch:size-11"
+            >
+              <Icon name="x" className="size-3.5" strokeWidth={2.25} />
+            </button>
+          )}
+        </div>
+        {/* One status at a time on the right: a refresh outranks the renders
+          it will restart. The whole of §5.2's affordance — not a panel, an
+          overlay or a spinner, but the same weight as the notes below. On a
+          phone it takes its own line rather than crowd the count. */}
+        {!status ? null : waitLabel !== "" ? (
+          <p
+            aria-live="polite"
+            className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
           >
-            ✕ Dismiss
-          </button>
-        )}
-        {/* The whole of §5.2's affordance: not a panel, an overlay or a
-            spinner, but the same weight as the caveat opposite. */}
-        {stale && (
-          <p aria-live="polite" className="shrink-0 text-zinc-500">
+            {waitLabel}
+          </p>
+        ) : stale ? (
+          <p
+            aria-live="polite"
+            className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
+          >
             Refreshing…
           </p>
+        ) : (
+          renderingShown &&
+          pendingThumbs > 0 && (
+            <p className="flex shrink-0 items-center gap-2 text-xs text-ink-3 max-sm:basis-full">
+              <span
+                aria-hidden="true"
+                className="size-3 animate-[spin_1s_linear_infinite] rounded-full border-[1.5px] border-white/10 border-t-white/50"
+              />
+              Rendering {pendingThumbs} thumbnail
+              {pendingThumbs === 1 ? "" : "s"}…
+            </p>
+          )
+        )}
+        {/* What qualifies the set, on its own line under it. */}
+        {(caveat !== "" || (head !== null && head.notes.length > 0)) && (
+          <div className="flex basis-full flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
+            {caveat !== "" && <p className="text-warn">{caveat}</p>}
+            {head?.notes.map((n, i) => (
+              <p key={i}>{n}</p>
+            ))}
+          </div>
         )}
       </div>
-      <p className="shrink-0 text-amber-400">{caveat}</p>
-    </div>
-  );
+    );
+  };
 
-  // No `weak`/`capped` clauses here: the index publishes neither for
-  // neighbours, and rendering them off `false` would report a measurement that
-  // came out negative (4.7).
-  const similarLabel =
-    labelModel !== null && !searchHasNoMatches
-      ? `Models similar to "${baseName(labelModel)}", from across the collection.`
-      : "";
-  const resultsLabel =
-    labelQuery !== null && !searchHasNoMatches
-      ? `${label.meaning ? "Meaning matches" : "Search results"} for "${labelQuery}".${
-          // The set is weak, not the results (D10 — no per-result numbers).
-          label.weak ? " Nothing stood out — these are the closest." : ""
-        }${
-          // Not the ranking's horizon but the index's own ceiling (D2).
-          label.capped
-            ? " The index returned fewer than asked for — its cap."
-            : ""
-        }${
-          // A different act from the ceiling above, in different words (D9).
-          // Gated on *both* bounds being in force rather than on the numbers
-          // differing: floorless, `matched` is everything scored, and countless
-          // the short set is the cap saying so twice.
-          label.capping &&
-          label.matched !== undefined &&
-          label.matched > label.shown
-            ? ` Showing ${label.shown} of ${label.matched} above the floor.`
-            : ""
-        }`
-      : similarLabel;
   // Over `kept`: the kind option is part of the view's identity, the live
   // filter is not.
   const shownModels = kept.filter((e) => e.kind === "model").length;
@@ -2271,44 +2698,115 @@ export default function App() {
       : "";
   // A value and not a ternary in the JSX, because this does not *replace* the
   // grid: a similarity anchor is still drawn above it.
+  /** A listing that failed with nothing else to show in its place. */
+  const failedPath =
+    state.failure !== null &&
+    state.failure.forView.subject.kind === "none" &&
+    state.result === null
+      ? state.failure.forView.path
+      : null;
   const emptyNotice = searchHasNoMatches ? (
     labelModel !== null ? (
-      <p className="mt-16 text-center text-sm text-zinc-600">
+      <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
         Nothing in the collection is similar to "{baseName(labelModel)}" — the
         index holds no neighbours for it.
       </p>
     ) : // A truncated search never finished, so "no match" would be false: the
     // walk ran out before covering the tree (D5).
     truncated ? (
-      <p className="mt-16 text-center text-sm text-zinc-600">
+      <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
         Nothing matched "{labelQuery}" in the part of the tree the search could
         cover — it ran out of budget before finishing. Try searching from a
         deeper folder.
       </p>
-    ) : scope !== null ? (
+    ) : scope !== null && scope.status === "unindexed" ? (
       // Three outcomes, and only "nothing indexed" is fixed by indexing (4.1).
-      <p className="mt-16 text-center text-sm text-zinc-600">
-        {scope.status === "unindexed"
-          ? `Nothing here has been indexed yet — meaning search covers ${scope.covers.join(", ")} files outside archives.`
-          : `Nothing matched "${labelQuery}".${
-              scope.status === "partial"
-                ? ` ${scope.indexed} of ${scope.scanned} models here are indexed.`
-                : ""
-            }`}
+      <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
+        Nothing here has been indexed yet — meaning search covers{" "}
+        {scope.covers.join(", ")} files outside archives.
       </p>
     ) : (
-      <p className="mt-16 text-center text-sm text-zinc-600">
-        Nothing matched "{labelQuery}".
-      </p>
+      <div className="mx-auto mt-20 flex max-w-md flex-col items-center gap-4 px-6 text-center">
+        <Icon name="search" className="size-8 text-ink-3" strokeWidth={1.5} />
+        <p className="text-sm leading-relaxed text-ink-2">
+          Nothing matched “{labelQuery}”
+          {state.view.path !== "/" && <> in {baseName(state.view.path)}</>}.
+          {scope !== null &&
+            scope.status === "partial" &&
+            ` ${scope.indexed} of ${scope.scanned} models here are indexed.`}
+        </p>
+        {/* A search covers this folder and below, so the likeliest repair for
+            "nothing" is the same query from the top. */}
+        {labelQuery !== null &&
+          state.view.path !== "/" &&
+          (!label.meaning || meaningRunnableAt(state.index, "/")) && (
+            <button
+              type="button"
+              onClick={() =>
+                commit({
+                  type: "runQuery",
+                  text: labelQuery,
+                  mode: label.meaning ? "meaning" : "name",
+                })
+              }
+              className="flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-semibold text-accent-ink hover:bg-accent-hover touch:h-11"
+            >
+              <Icon name="search" className="size-3.5" strokeWidth={2.25} />
+              Search the whole library
+            </button>
+          )}
+        {/* The other corpus, for this one search: a phrase asked of the names
+            or a name asked of meaning is the likeliest mismatch after scope. */}
+        {labelQuery !== null &&
+          (label.meaning ||
+            meaningRunnableAt(state.index, state.view.path)) && (
+            <button
+              type="button"
+              onClick={() => switchModeOnce(label.meaning ? "name" : "meaning")}
+              className="flex h-9 items-center gap-2 rounded-lg px-4 text-[13px] text-ink-2 ring-1 ring-line-strong hover:bg-surface hover:text-ink touch:h-11"
+            >
+              <Icon
+                name={label.meaning ? "type" : "sparkles"}
+                className="size-3.5"
+              />
+              {label.meaning
+                ? "Search names instead"
+                : "Search by meaning instead"}
+            </button>
+          )}
+      </div>
     )
+  ) : failedPath !== null ? (
+    // A listing that could not be had: where it was asked for, and the
+    // nearest place that can be — not "nothing here", which is a claim
+    // about a folder that may not exist.
+    <div className="mx-auto mt-20 flex max-w-md flex-col items-center gap-4 px-6 text-center">
+      <Icon name="warning" className="size-8 text-ink-3" strokeWidth={1.5} />
+      <p className="text-sm leading-relaxed text-ink-2">
+        Couldn't open “
+        {failedPath === "/" ? "the library" : baseName(failedPath)}”.
+      </p>
+      {/* The top, not the parent: a mistyped path's parent is as likely
+          not to exist. */}
+      {failedPath !== "/" && (
+        <button
+          type="button"
+          onClick={() => navigate("/")}
+          className="flex h-9 items-center gap-2 rounded-lg px-4 text-[13px] text-ink-2 ring-1 ring-line-strong hover:bg-surface hover:text-ink touch:h-11"
+        >
+          <Icon name="home" className="size-3.5" />
+          Go to the library
+        </button>
+      )}
+    </div>
   ) : kindHidesAll ? (
-    <p className="mt-16 text-center text-sm text-zinc-600">
+    <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
       {counted === "folders"
         ? "No folders matched — the results are models only."
         : "No models matched — the results are folders only."}
     </p>
   ) : filterHidesAll ? (
-    <p className="mt-16 text-center text-sm text-zinc-600">
+    <p className="mx-auto mt-20 max-w-md px-6 text-center text-sm leading-relaxed text-ink-2">
       The filter is hiding everything below.
     </p>
   ) : null;
@@ -2327,6 +2825,29 @@ export default function App() {
         ? { text: error, tone: "error" }
         : null);
 
+  /** Any search option off its default — name or meaning — marked on the
+   *  button that opens them. */
+  const optionsChanged =
+    optionsOffDefault(live.folderMatching, live.kinds, live.tuning) ||
+    (live.subject.kind === "similar" && live.subject.pool !== undefined);
+
+  /** Meaning is offered where it can run, and shown wherever it is in force:
+   *  a link can put the app in meaning mode on a machine with no index, and a
+   *  mode you cannot see or leave is a trap. */
+  const showMode =
+    meaningRunnableAt(state.index, target) || live.mode === "meaning";
+  /** Says what a search will match and where it starts, since it covers
+   *  this folder and below. */
+  const meaningInForce = showMode && live.mode === "meaning";
+  const searchPlaceholder =
+    target === "/"
+      ? meaningInForce
+        ? "Describe what you are looking for…"
+        : "Search file and folder names…"
+      : meaningInForce
+        ? `Describe a model in ${baseName(target)}…`
+        : `Search names in ${baseName(target)}…`;
+
   /** `=== true` and nothing looser: unknown, failed and off all withhold, as
    *  every gated offer is withheld (`landing-page` D3). */
   const introOffered = features?.intro === true;
@@ -2339,7 +2860,7 @@ export default function App() {
     state.view.path === "/" &&
     state.view.subject.kind === "none" &&
     !state.view.flat;
-  const bannerDrawn = introOffered && !introDismissed && atTop;
+  const bannerDrawn = introOffered && !introDismissed && !searchedOnce && atTop;
   /** For a visitor the banner no longer reaches (D6), and withheld wherever the
    *  example as typed would fail to find what it names. */
   const placeholderExample = useCyclingPlaceholder(
@@ -2361,84 +2882,299 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
+    <div className="flex h-dvh flex-col bg-canvas text-ink">
       {/* A block around the row, so the transient line can grow the header
           without pushing the controls out of line with the path input.
           `z-chrome` is for the suggestion list, which hangs over a grid whose
           score badges outrank its own `z-20`. */}
-      <header className="relative z-chrome border-b border-zinc-800 p-3">
-        <div className="flex items-center gap-2">
+      <header className="relative z-chrome border-b border-line bg-canvas">
+        {/* Global row: where you are in the app, and what you can ask of the
+            whole library. */}
+        <div className="flex h-14 items-center gap-3 px-3 sm:px-4">
+          <button
+            type="button"
+            onClick={() => navigate("/")}
+            title="Library top"
+            aria-label="Model Browser — library top"
+            className="flex shrink-0 items-center gap-2 rounded-md py-1 pr-1.5 pl-1 text-ink hover:bg-surface touch:min-w-11 touch:py-2"
+          >
+            <span className="flex size-7 items-center justify-center rounded-md bg-accent text-accent-ink">
+              <Icon name="box" className="size-4" strokeWidth={2} />
+            </span>
+            <span className="hidden text-sm font-semibold tracking-tight md:inline">
+              Model Browser
+            </span>
+          </button>
+          <div
+            role="search"
+            className="mx-auto flex h-10 min-w-0 max-w-2xl flex-1 items-center rounded-lg border border-line bg-surface pr-1 transition-colors touch:h-12 focus-within:border-accent/60 focus-within:bg-raised"
+          >
+            <Icon
+              name={live.mode === "meaning" && showMode ? "sparkles" : "search"}
+              className="ml-3 hidden size-4 text-ink-3 sm:block"
+            />
+            <input
+              ref={searchInputRef}
+              type="search"
+              enterKeyHint="search"
+              value={state.drafts.queryText}
+              onChange={(e) => handleQueryTextChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitSearch();
+                // Down from the box is down into the results.
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  focusFirstTile();
+                }
+              }}
+              placeholder={
+                placeholderExample !== null
+                  ? `Try “${placeholderExample}”`
+                  : searchPlaceholder
+              }
+              // Never the placeholder: the accessible name must not change under
+              // a screen reader while the visible hint cycles (D6). It follows
+              // the mode, which only the user changes.
+              aria-label={
+                meaningInForce
+                  ? "Search by meaning"
+                  : "Search file and folder names"
+              }
+              data-search-input
+              spellCheck={false}
+              className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-sm text-ink outline-none placeholder:text-ink-3 focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden"
+            />
+            {showMode && (
+              <div
+                role="group"
+                aria-label="Search by"
+                className="mr-1 flex shrink-0 rounded-md bg-sunken p-0.5 text-xs"
+              >
+                {(["name", "meaning"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    aria-pressed={live.mode === m}
+                    onClick={() => setMode(m)}
+                    title={
+                      m === "name"
+                        ? "Match file and folder names"
+                        : "Match what the models look like"
+                    }
+                    aria-label={m === "name" ? "Name" : "Meaning"}
+                    className={
+                      live.mode === m
+                        ? "flex h-7 items-center gap-1 rounded bg-raised px-2 font-medium capitalize text-ink shadow-sm ring-1 ring-line-strong touch:h-10 touch:min-w-11 touch:px-3"
+                        : "flex h-7 items-center gap-1 rounded px-2 capitalize text-ink-3 hover:text-ink-2 touch:h-10 touch:min-w-11 touch:px-3"
+                    }
+                  >
+                    <Icon
+                      name={m === "name" ? "type" : "sparkles"}
+                      className="size-3.5 sm:hidden"
+                    />
+                    <span className="hidden sm:inline">{m}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={submitSearch}
+              disabled={state.drafts.queryText.trim() === ""}
+              title={
+                meaningInForce
+                  ? "Search this folder and everything below it by what the models look like"
+                  : "Search this folder and everything below it by name — files and folders"
+              }
+              aria-label="Search"
+              className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-white/5 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent touch:size-11"
+            >
+              <Icon name="arrowLeft" className="size-4 rotate-180" />
+            </button>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {introOffered && introSearchable && (
+              <button
+                type="button"
+                onClick={() => runQuery(pickExample(EXAMPLE_QUERIES))}
+                title="Run an example search"
+                aria-label="Surprise me"
+                className="hidden h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink sm:flex"
+              >
+                <Icon name="dice" />
+                <span className="hidden lg:inline">Surprise me</span>
+              </button>
+            )}
+            {/* What the banner offered, after it is gone: the header never
+                scrolls (`landing-page` D3). */}
+            {introOffered && (
+              <a
+                href={ABOUT_URL}
+                aria-label="About"
+                className="flex h-9 items-center gap-2 rounded-md px-2.5 text-sm text-ink-2 hover:bg-surface hover:text-ink touch:h-11 touch:min-w-11"
+              >
+                <Icon name="info" />
+                <span className="hidden lg:inline">About</span>
+              </a>
+            )}
+          </div>
+        </div>
+        {/* Local row: this folder, and how to look at it. */}
+        <div className="flex h-11 items-center gap-1 border-t border-line px-2 sm:px-3">
           <button
             type="button"
             onClick={goUp}
             disabled={target === "/"}
             aria-label="Parent directory"
-            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+            title="Up a folder (Alt+↑)"
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-surface hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent touch:size-11"
           >
-            ↑
+            <Icon name="cornerUp" />
           </button>
           <PathBar path={target} api={api} onNavigate={navigate} />
-          <input
-            ref={searchInputRef}
-            value={state.drafts.queryText}
-            onChange={(e) => handleQueryTextChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submitSearch();
-            }}
-            placeholder={placeholderExample ?? "Search names and folders…"}
-            // Never the placeholder: the accessible name must not change under
-            // a screen reader while the visible hint cycles (D6).
-            aria-label="Search names and folders"
-            spellCheck={false}
-            className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
-          />
-          <button
-            type="button"
-            onClick={submitSearch}
-            disabled={state.drafts.queryText.trim() === ""}
-            title="Search this folder and everything below it by name — files and folders"
-            className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
-          >
-            Search
-          </button>
-          <button
-            type="button"
-            onClick={toggleFlat}
-            aria-pressed={live.flat}
-            title="Show every model under this folder in one grid"
-            className={`rounded-lg border px-3 py-2 text-sm ${
-              live.flat
-                ? "border-sky-500 text-sky-400 hover:border-sky-400"
-                : "border-zinc-700 text-zinc-300 hover:border-zinc-500"
-            }`}
-          >
-            Flat
-          </button>
-          {/* What the banner offered, after it is gone: the header never
-              scrolls (`landing-page` D3). */}
-          {introOffered && (
-            <a
-              href={ABOUT_URL}
-              className="ml-auto rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500"
-            >
-              About
-            </a>
-          )}
-          {introOffered && introSearchable && (
+          <div className="flex shrink-0 items-center gap-1 pl-1">
             <button
               type="button"
-              onClick={() => runQuery(pickExample(EXAMPLE_QUERIES))}
-              className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500"
+              onClick={findOpen ? closeFind : openFind}
+              aria-pressed={findOpen}
+              data-narrow-toggle
+              title="Narrow these by name (Ctrl-F)"
+              className={
+                findOpen
+                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 bg-surface px-2.5 text-[13px] text-ink"
+                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+              }
             >
-              Surprise me
+              <Icon name="filter" className="size-3.5" />
+              <span className="hidden sm:inline">Narrow</span>
             </button>
-          )}
+            <button
+              type="button"
+              onClick={toggleFlat}
+              aria-pressed={live.flat}
+              data-flat-toggle
+              title="Show every model under this folder in one grid"
+              className={
+                live.flat
+                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 bg-accent-soft px-2.5 text-[13px] font-medium text-accent"
+                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+              }
+            >
+              <Icon name="layers" className="size-3.5" />
+              <span className="hidden sm:inline">Flat</span>
+            </button>
+            <span
+              aria-hidden="true"
+              className="mx-1 hidden h-5 w-px bg-line sm:block"
+            />
+            <div
+              role="group"
+              aria-label="Tile size"
+              className="hidden items-center rounded-md p-0.5 sm:flex"
+            >
+              {TILE_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  data-tile-size={size}
+                  aria-label={`${TILE_SIZE_NAME[size]} tiles`}
+                  title={`${TILE_SIZE_NAME[size]} tiles`}
+                  onClick={() => {
+                    setTileSize(size);
+                    tileSizeStore.write(size);
+                  }}
+                  className={
+                    tileSize === size
+                      ? "flex size-8 items-center justify-center rounded-md bg-surface text-ink"
+                      : "flex size-8 items-center justify-center rounded-md text-ink-3 hover:text-ink-2"
+                  }
+                >
+                  <Icon
+                    name="grid"
+                    className={
+                      size === "s"
+                        ? "size-2.5"
+                        : size === "m"
+                          ? "size-3.5"
+                          : "size-4.5"
+                    }
+                    strokeWidth={size === "s" ? 2.5 : 1.75}
+                  />
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              aria-pressed={ao}
+              title="Ambient occlusion: soft shading in creases. Turn it off if turning a model feels slow."
+              onClick={() => {
+                setAoEnabled(!ao);
+                setAoState(!ao);
+              }}
+              // On a phone the toolbar's room goes to the path; the switch
+              // lives in Options there.
+              className="hidden h-8 items-center gap-2 rounded-md px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink touch:h-11 touch:min-w-11 sm:flex"
+            >
+              <span className="hidden md:inline">Occlusion</span>
+              <span className="md:hidden">AO</span>
+              <span
+                aria-hidden="true"
+                className={
+                  ao
+                    ? "flex h-4 w-7 items-center justify-end rounded-full bg-accent p-0.5"
+                    : "flex h-4 w-7 items-center justify-start rounded-full bg-white/15 p-0.5"
+                }
+              >
+                <span
+                  className={
+                    ao
+                      ? "size-3 rounded-full bg-accent-ink"
+                      : "size-3 rounded-full bg-ink-2"
+                  }
+                />
+              </span>
+            </button>
+            {/* The panel's own dot, carried out to where it is opened from:
+                it answers "why are my results strange?" while closed (D5). */}
+            <button
+              ref={panelToggleRef}
+              type="button"
+              data-panel-toggle
+              aria-expanded={panelOpen}
+              aria-label="Options"
+              title="Search options and library tools"
+              onClick={() => {
+                setPanelOpen(!panelOpen);
+                collapseStore.write(panelOpen);
+              }}
+              className={
+                panelOpen
+                  ? "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 bg-surface px-2.5 text-[13px] text-ink"
+                  : "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+              }
+            >
+              <Icon name="sliders" className="size-3.5" />
+              <span className="hidden lg:inline">Options</span>
+              {optionsChanged && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-1 right-1 size-1.5 rounded-full bg-accent"
+                />
+              )}
+            </button>
+          </div>
         </div>
         {headerMessage !== null && (
           <p
-            className={`mt-1 text-xs ${
-              headerMessage.tone === "error" ? "text-red-400" : "text-zinc-400"
-            }`}
+            role={headerMessage.tone === "error" ? "alert" : "status"}
+            data-header-message={headerMessage.tone}
+            // A failure stands in the flow until it is dealt with; a brief
+            // confirmation floats over the grid instead of shifting it.
+            className={
+              headerMessage.tone === "error"
+                ? "border-t border-line bg-danger/10 px-4 py-1.5 text-xs text-danger"
+                : "pointer-events-none absolute top-full left-1/2 mt-3 flex -translate-x-1/2 items-center gap-2 rounded-full border border-line-strong bg-raised px-3.5 py-1.5 text-xs whitespace-nowrap text-ink shadow-xl shadow-black/50"
+            }
           >
             {headerMessage.text}
           </p>
@@ -2479,20 +3215,11 @@ export default function App() {
                   focusSignal={findFocus}
                   onChange={setFindText}
                   onClose={closeFind}
+                  onDown={focusFirstTile}
                 />
               )}
-              {noticeBar("", "")}
-              <div
-                aria-hidden="true"
-                className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 p-4"
-              >
-                {Array.from({ length: 12 }, (_, i) => (
-                  <div
-                    key={i}
-                    className="aspect-square animate-pulse rounded-xl border border-zinc-800 bg-zinc-900"
-                  />
-                ))}
-              </div>
+              {noticeBar(waitLabel, "", false, false)}
+              <SkeletonGrid size={tileSize} />
             </>
           ) : (
             <>
@@ -2503,10 +3230,11 @@ export default function App() {
                   focusSignal={findFocus}
                   onChange={setFindText}
                   onClose={closeFind}
+                  onDown={focusFirstTile}
                 />
               )}
               {deferredSubject.kind !== "none" && (
-                <p className="px-4 pt-1 text-xs text-amber-400">
+                <p className="mx-4 mt-3 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-xs text-warn">
                   {deferredSubject.kind === "query" ? (
                     <>
                       This view is a meaning search for &ldquo;
@@ -2534,40 +3262,48 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => runDeferredByName()}
-                      className="underline hover:text-amber-300"
+                      className="font-medium underline underline-offset-2 hover:text-ink"
                     >
                       Search names instead
                     </button>
                   )}
                 </p>
               )}
-              {noticeBar(
-                resultsLabel,
-                omittedNotice,
-                entries.length > 0,
-                refreshing,
-              )}
+              {noticeBar(listingSummary, omittedNotice, refreshing)}
               {/* An anchor is something to show, so it stays above its own
                   "nothing similar". */}
               {emptyNotice === null || anchor !== undefined ? (
-                <Grid
-                  entries={shownEntries}
-                  thumbs={thumbs}
-                  onEnter={enterEntry}
-                  onModelPointerDown={onModelPointerDown}
-                  onModelOpen={openLightbox}
-                  onModelHover={onModelHover}
-                  onEntryMenu={onEntryMenu}
-                  onImageError={reportImageError}
-                  markedPath={marked}
-                  anchorPath={anchor?.path}
-                  scoreFor={scoreFor}
-                  scoreScale={scoreScale}
-                  previews={previews}
-                  onPeek={requestPeek}
-                  onBands={reportBands}
-                  scrollRoot={mainRef}
-                />
+                // Dimmed while the view it will be replaced by is on its way,
+                // so a press on the old answer does not read as the new one.
+                <div
+                  className={
+                    waitLabel !== ""
+                      ? "opacity-50 transition-opacity duration-150"
+                      : "transition-opacity duration-150"
+                  }
+                >
+                  <Grid
+                    entries={shownEntries}
+                    thumbs={thumbs}
+                    onEnter={enterEntry}
+                    onModelPointerDown={onModelPointerDown}
+                    onModelOpen={openLightbox}
+                    onModelHover={onModelHover}
+                    onEntryMenu={onEntryMenu}
+                    onImageError={reportImageError}
+                    markedPath={marked}
+                    anchorPath={anchor?.path}
+                    scoreFor={scoreFor}
+                    scoreScale={scoreScale}
+                    previews={previews}
+                    onPeek={requestPeek}
+                    onBands={reportBands}
+                    scrollRoot={mainRef}
+                    size={tileSize}
+                    showScores={showScores}
+                    modestSet={modestSet}
+                  />
+                </div>
               ) : null}
               {emptyNotice}
             </>
@@ -2581,6 +3317,22 @@ export default function App() {
           similar={liveSimilar}
           library={libraryJobs}
           onSimilarTuning={setSimilarTuning}
+          ao={ao}
+          onAo={(on) => {
+            setAoEnabled(on);
+            setAoState(on);
+          }}
+          showScores={showScores}
+          onShowScores={(on) => {
+            setShowScores(on);
+            showScoresStore.write(on);
+          }}
+          open={panelOpen}
+          onClose={() => {
+            setPanelOpen(false);
+            collapseStore.write(true);
+            panelToggleRef.current?.focus();
+          }}
           path={target}
           folderMatching={live.folderMatching}
           kinds={live.kinds}
@@ -2592,9 +3344,27 @@ export default function App() {
           features={features}
           onFolderMatching={setFolderMatching}
           onKinds={setKinds}
-          onMode={setMode}
         />
       </div>
+      {glLost && (
+        <div
+          role="alert"
+          className="fixed bottom-4 left-1/2 z-menu flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-danger/40 bg-raised px-4 py-2.5 text-[13px] text-ink shadow-2xl shadow-black/60"
+        >
+          <Icon name="warning" className="size-4 text-danger" />
+          <span>
+            Graphics stopped — the GPU dropped this page's drawing context.
+            Models and thumbnails won't draw until it is back.
+          </span>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink hover:bg-accent-hover touch:py-3"
+          >
+            Reload
+          </button>
+        </div>
+      )}
       {/* Outside the body row, so it outlives every listing navigated through
           (D2). `dismissed` hides it without cancelling anything. */}
       {job !== null && !job.dismissed && (
@@ -2606,22 +3376,6 @@ export default function App() {
           viewOpen={viewer !== null}
         />
       )}
-      <div className="fixed bottom-3 left-3 z-50 flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-900/90 p-1 text-xs">
-        <button
-          type="button"
-          aria-pressed={ao}
-          title="Ambient occlusion — turn off to speed up orbiting on weaker GPUs; thumbnails follow this setting and are cached under each"
-          onClick={() => {
-            setAoEnabled(!ao);
-            setAoState(!ao);
-          }}
-          className={`rounded-full px-2.5 py-1 ${
-            ao ? "bg-sky-700 text-white" : "text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          ssao
-        </button>
-      </div>
       {/* Which items an entry offers, and which a surface declines, both live
           in `entryActions`, never here (D6). */}
       {menu !== null && menuCommands.length > 0 && (
@@ -2653,6 +3407,8 @@ export default function App() {
           // Through `scoreFor`, so the panel reports what the tile did (D7).
           score={scoreFor(viewer.entry.path)}
           scoreScale={scoreScale}
+          showScores={showScores}
+          modestSet={modestSet}
           ao={ao}
           api={api}
           lru={lru}

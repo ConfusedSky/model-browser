@@ -30,6 +30,7 @@ import {
   click,
   container,
   dir,
+  labels,
   listDir,
   model,
   mountApp,
@@ -98,11 +99,10 @@ function refreshing(): Element | null {
  * confirmation — "no banner" has to mean "no *error*", not "no line".
  */
 function headerError(): string | null {
-  return container.querySelector("header p.text-red-400")?.textContent ?? null;
-}
-/** Each tile's visible label, in grid order. */
-function labelled(): string[] {
-  return tiles().map((t) => t.textContent ?? "");
+  return (
+    container.querySelector('header [data-header-message="error"]')
+      ?.textContent ?? null
+  );
 }
 
 const POSE: IndexPose = {
@@ -137,7 +137,7 @@ describe("a stale-marked listing", () => {
     await click(tiles()[0]!);
     await settle();
 
-    expect(labelled()).toEqual(["b"]); // shown immediately, not withheld
+    expect(labels()).toEqual(["b"]); // shown immediately, not withheld
     expect(refreshing()?.textContent).toBe("Refreshing…");
     expect(calls).toBe(2); // the navigation, and the follow-up it provoked
 
@@ -145,7 +145,7 @@ describe("a stale-marked listing", () => {
     // corrects is on screen — so the skeleton must never take that grid away.
     await pastDelay();
     expect(skeleton()).toBeNull();
-    expect(labelled()).toEqual(["b"]);
+    expect(labels()).toEqual(["b"]);
     expect(refreshing()).not.toBeNull();
   });
 
@@ -162,7 +162,7 @@ describe("a stale-marked listing", () => {
     await settle();
 
     expect(calls).toBe(2);
-    expect(labelled()).toEqual(["c"]); // the tree as the disk actually has it
+    expect(labels()).toEqual(["c"]); // the tree as the disk actually has it
     expect(refreshing()).toBeNull(); // an unmarked answer says nothing
   });
 
@@ -187,7 +187,7 @@ describe("a stale-marked listing", () => {
     expect(refreshing()?.textContent).toBe("Refreshing…");
     // Still the cached answer, because the client stopped asking rather than
     // grinding until the server happened to agree.
-    expect(labelled()).toEqual(["b"]);
+    expect(labels()).toEqual(["b"]);
   });
 
   it("a follow-up that fails says nothing at all — no banner over a good grid", async () => {
@@ -212,7 +212,7 @@ describe("a stale-marked listing", () => {
     // the navigation having failed is a lie about which request broke, painted
     // over entries that failure never touched.
     expect(headerError()).toBeNull();
-    expect(labelled()).toEqual(["b"]);
+    expect(labels()).toEqual(["b"]);
     // Still truthful, and for the reason the line says: it was *not* refreshed.
     expect(refreshing()?.textContent).toBe("Refreshing…");
     // And not retried — the once-guard is the effect's dependency, and no
@@ -251,7 +251,7 @@ describe("a stale-marked listing", () => {
 
     expect(calls).toBe(1);
     expect(refreshing()).toBeNull();
-    expect(labelled()).toEqual(["c"]);
+    expect(labels()).toEqual(["c"]);
   });
 
   it("a superseded follow-up is discarded — the newer listing stands", async () => {
@@ -276,13 +276,13 @@ describe("a stale-marked listing", () => {
     await type(pathInput(), "/other");
     await pressEnter(pathInput());
     await settle();
-    expect(labelled()).toEqual(["z"]);
+    expect(labels()).toEqual(["z"]);
 
     // The correction for a listing nobody is looking at, home at last.
     landFollowUp();
     await settle();
 
-    expect(labelled()).toEqual(["z"]); // it did not reach the grid
+    expect(labels()).toEqual(["z"]); // it did not reach the grid
     expect(refreshing()).toBeNull(); // nor put the line back up
   });
 

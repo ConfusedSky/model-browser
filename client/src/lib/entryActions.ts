@@ -441,16 +441,16 @@ export function negatedAxis(current: OrbitAxis): OrbitAxis {
 }
 
 export const AXIS_GROUP_CLASS =
-  "flex items-center gap-1 rounded-full bg-zinc-800/80 p-1 text-xs";
+  "flex items-center gap-0.5 rounded-lg bg-sunken p-0.5 text-xs ring-1 ring-line";
 /** A `<span>`, so it stays out of any button index. */
-export const AXIS_CAPTION_CLASS = "px-1.5 text-zinc-500";
-export const AXIS_DIVIDER_CLASS = "h-4 w-px bg-zinc-700";
+export const AXIS_CAPTION_CLASS = "px-1.5 text-ink-3";
+export const AXIS_DIVIDER_CLASS = "mx-0.5 h-4 w-px bg-line-strong";
 /** The spindle in force is the *filled* pill. */
 export const axisPillClass = (active: boolean): string =>
-  `rounded-full px-2.5 py-1 ${active ? "bg-sky-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`;
-/** Amber rather than sky: a state, not a pick. */
+  `rounded-md px-2.5 py-1.5 touch:px-3.5 touch:py-3.5 ${active ? "bg-accent font-medium text-accent-ink" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
+/** Neutral rather than the accent: a state, not a pick. */
 export const flipPillClass = (active: boolean): string =>
-  `rounded-full px-2.5 py-1 ${active ? "bg-amber-700 text-white" : "text-zinc-400 hover:text-zinc-200"}`;
+  `rounded-md px-2.5 py-1.5 touch:px-3.5 touch:py-3.5 ${active ? "bg-white/15 font-medium text-ink ring-1 ring-line-strong" : "text-ink-2 hover:bg-white/5 hover:text-ink"}`;
 export const FLIP_TITLE = "Negate the spindle axis (+axis ↔ −axis)";
 
 /** Model-only — a container tile is a glyph with no spindle — and withheld on
@@ -519,19 +519,6 @@ export function setOrbitAxis(
  * state, a clamp, focus handoff and a second Escape level.
  */
 
-/** Wraps, unlike the axis row: the registry chooses how long a name is, and a
- *  wrapped `rounded-full` reads as a blob. */
-export const OPEN_IN_GROUP_CLASS =
-  "flex flex-wrap items-center gap-1 rounded-2xl bg-zinc-800/80 p-1 text-xs";
-/** `nowrap`: "open in" broken across two lines reads as two captions. */
-export const OPEN_IN_CAPTION_CLASS = `${AXIS_CAPTION_CLASS} whitespace-nowrap`;
-/** `w-full` takes the whole line where the row wraps, so the caption reads as a
- *  heading. */
-export const OPEN_IN_PANEL_CAPTION_CLASS = `${OPEN_IN_CAPTION_CLASS} w-full`;
-/** One class for every pill: which application leads is said by **order**. */
-export const OPEN_IN_PILL_CLASS = `${axisPillClass(false)} max-w-full truncate`;
-export const OPEN_IN_CAPTION = "open in";
-
 /** The format detector *is* the mime table (L6): one prefix, not a second map
  *  to drift. */
 function entryMime(entry: DirEntry): string | null {
@@ -591,6 +578,16 @@ export interface EntryCommand {
     | null;
 }
 
+/** The commands that tend the library's thumbnails rather than use a model:
+ *  drawn after a divider, so an everyday action is never the neighbour of a
+ *  destructive one. */
+export const MAINTENANCE_COMMANDS: ReadonlySet<CommandId> = new Set([
+  "generateBeneath",
+  "resetBeneath",
+  "reRenderThumbnail",
+  "resetFraming",
+]);
+
 /**
  * The commands, and D6's per-kind table with them — in one place rather than
  * at each call site:
@@ -598,8 +595,8 @@ export interface EntryCommand {
  * ```
  * model tile                   dir tile                       zip tile
  * ──────────                   ────────                       ────────
- * Open lightbox                Open folder                    Open archive
- * Reveal in app                Reveal in app                  Reveal in app
+ * View model                   Open folder                    Open archive
+ * Show in folder               Show in folder                 Show in folder
  * Copy path                    Copy path                      Copy path
  * Find similar                 —                              —
  * —                            Generate thumbnails beneath    Generate thumbnails beneath
@@ -624,7 +621,7 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     // Beside `open in <X>` and *Open with…*, a bare "Open" is one too many.
     labelFor: (entry) =>
       entry.kind === "model"
-        ? "Open lightbox"
+        ? "View model"
         : entry.kind === "dir"
           ? "Open folder"
           : "Open archive",
@@ -633,7 +630,7 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   },
   {
     id: "reveal",
-    label: "Reveal in app",
+    label: "Show in folder",
     applies: () => true,
     run: (entry, host) => {
       // The mark after the navigate, never before: `navigate` clears it on
@@ -692,8 +689,7 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
     // Offered even on a current image: a failed one is what this exists to fix.
     // **Everything it produces is pixels** — the orientation is left as found —
     // so where the deployment would not store them the press does nothing at
-    // all, and the row goes rather than render and discard. `resetFraming`
-    // stays: giving up an orientation moves the model whoever keeps it.
+    // all, and the row goes rather than render and discard.
     applies: (entry, ctx) =>
       entry.kind === "model" && ctx.features?.thumbWrites === true,
     run: (entry, host) =>
@@ -702,7 +698,11 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
   {
     id: "resetFraming",
     label: "Reset framing",
-    applies: (entry) => entry.kind === "model",
+    // Gated like the re-render: where the deployment keeps no framing, nothing
+    // a visitor turns outlives the viewer, so a "reset" promises a persistence
+    // the tile does not have (issue #23) — closing the view is the reset.
+    applies: (entry, ctx) =>
+      entry.kind === "model" && ctx.features?.thumbWrites === true,
     // A second command because the orientation is shared with the viewer (D7).
     run: (entry, host) =>
       refreshThumbnail(entry, host, { discardFraming: true }),
@@ -718,26 +718,13 @@ export const ENTRY_COMMANDS: readonly EntryCommand[] = [
 ];
 
 /**
- * The per-*surface* axis of the table above, as a call-site filter so no row has
- * to know where it is rendered (D6). *Re-render* goes because its render waits
- * on `queue.whenResumed()` while the open view holds the suspension (D2/D3);
- * *reset framing* is rerouted to `resetFramingLive` rather than withheld.
- *
- * **The orbit overlay must not be filtered by this list**: filtering it gives a
- * right-click within a second of an orbit the three-item lightbox menu.
- */
-export const LIGHTBOX_MENU_EXCLUDES: readonly MenuItemId[] = [
-  "open",
-  "reRenderThumbnail",
-  "orbitAxis",
-];
-
-// Neither list names the container rows: the lightbox only opens a model.
-
-/**
- * Deliberately not the menu's list on the same surface: the panel already shows
- * the path it would copy. The launch rows are deliberately *absent* from this
- * list (L10) — a one-shot launch changes nothing in this view.
+ * The per-*surface* axis of the table above, as a call-site filter so no row
+ * has to know where it is rendered (D6): the lightbox panel's rows. The panel
+ * already shows the path it would copy; *re-render* waits on
+ * `queue.whenResumed()` while the open view holds the suspension (D2/D3). The
+ * launch rows are deliberately *absent* from this list (L10) — a one-shot
+ * launch changes nothing in this view. It names no container rows: the
+ * lightbox only opens a model.
  */
 export const LIGHTBOX_PANEL_EXCLUDES: readonly MenuItemId[] = [
   "open",

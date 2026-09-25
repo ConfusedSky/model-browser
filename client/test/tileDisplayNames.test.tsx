@@ -81,12 +81,12 @@ async function renderGrid(
 }
 
 const gridTiles = (): HTMLButtonElement[] =>
-  Array.from(host.querySelectorAll<HTMLButtonElement>("button"));
+  Array.from(host.querySelectorAll<HTMLButtonElement>("[data-entry-tile]"));
 const tileFor = (path: string): HTMLButtonElement =>
   host.querySelector<HTMLButtonElement>(`[data-entry-tile="${path}"]`)!;
-/** A tile's label — the last child of its button, as the harness reads them. */
+/** A tile's drawn name, as the harness reads them. */
 const labelOf = (el: HTMLElement): string =>
-  el.lastElementChild?.textContent ?? "";
+  el.querySelector("[data-tile-name]")?.textContent ?? "";
 const cellTitles = (path: string): (string | null)[] =>
   Array.from(
     tileFor(path).querySelectorAll<HTMLElement>("[data-preview-cell]"),

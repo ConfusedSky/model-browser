@@ -18,8 +18,24 @@
   stubbed `stageModel` fails as `Cannot destructure property 'pivot' of undefined`
 - Never re-declare RIG_VERSION's value in a mock — a literal silently masks a bump (rig.test.ts
   pins the expected value; everywhere else tracks it via the spread)
-- `main button` is not "a tile" — the results header carries controls too. Use the harness's
-  `tiles()` (`main .grid button`); a looser selector reports affordances as entries
+- `main button` is not "a tile" — the results header carries controls too, and every tile
+  has a ⋯ actions button beside it in the grid. Use the harness's `tiles()`
+  (`main .grid [data-entry-tile]`); a looser selector reports affordances as entries
+- The side panel starts closed for a fresh profile and renders nothing until opened, so an
+  absence assertion about its contents passes vacuously on a closed panel. Open it with the
+  harness's `openPanel()` (the toolbar's `button[data-panel-toggle]`) before asserting either way
+- Match scores (the k/sim and z numbers) are drawn only under the "Show match scores"
+  preference, off by default, so an assertion that a number is *absent* passes vacuously
+  unless it is on. Seed `showScoresStore.write(true)` (lib/scoreScale.ts) before the mount,
+  or call the harness's `showMatchScores()` after it
+- Read the results line through the harness's `resultsLabel()` (`2 results “found”`, null
+  over a plain listing) rather than a sentence in `container.textContent`: when the copy
+  changes, a `not.toContain` on the old sentence keeps passing and asserts nothing
+- The name count beside a meaning search (`nameMatchCount`) is opt-in: the harness client
+  carries it only after `offerNameProbe()`. App wraps the client in `withLocalFramings`,
+  whose method always exists and *rejects* when the inner one is missing, so "no method"
+  reaches App as a refused count — falsify that case on the rejection path, not on App's
+  `ask === undefined` guard, which the wrapper never lets fire
 - Preference modules (`aoToggle.ts`, `lib/searchOptions.ts`) hold state in a
   module closure: `localStorage.clear()` does not reset them and tests inherit each other's
   settings. Reset via their setters in `beforeEach`, or re-import after `vi.resetModules()`

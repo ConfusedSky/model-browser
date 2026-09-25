@@ -146,13 +146,12 @@ describe("D6's per-kind table", () => {
     // not renders, so there is no thumbnail to act on. Every command in the
     // table has a body now, so none is hidden for want of one.
     expect(ENTRY_COMMANDS.filter((c) => c.run === null)).toEqual([]);
-    // Re-render reads the report as well, so it is asked under one that offers
-    // writes; reset framing is asked under this file's unknown default, which
-    // is the point of the case below.
+    // Both read the report as well, so they are asked under one that offers
+    // writes — the cases below are about the others.
     expect(ids(model("/m/a.stl"), READY, OFFERED)).toContain(
       "reRenderThumbnail",
     );
-    expect(ids(model("/m/a.stl"), READY)).toContain("resetFraming");
+    expect(ids(model("/m/a.stl"), READY, OFFERED)).toContain("resetFraming");
     for (const id of ["reRenderThumbnail", "resetFraming"]) {
       expect(ids(dir("/m/d"), READY, OFFERED)).not.toContain(id);
       expect(ids(zip("/m/z.zip"), READY, OFFERED)).not.toContain(id);
@@ -168,44 +167,44 @@ describe("D6's per-kind table", () => {
     ]);
   });
 
-  it("withholds re-render where the pixels would be dropped, and keeps reset", () => {
+  it("withholds both where the pixels would be dropped", () => {
     // The whole of re-render's product is an image, and the orientation is left
     // as found by design — so where the deployment would not store that image
-    // the press does nothing a reload does not undo. Reset framing gives up an
-    // orientation, which moves the model whoever ends up keeping it, so it
-    // stays. Absent rather than present and inert, as every gated row is.
+    // the press does nothing a reload does not undo. Reset framing goes with
+    // it: where the deployment keeps no framing, nothing a visitor turns
+    // outlives the viewer, so closing the view is the reset (issue #23).
+    // Absent rather than present and inert, as every gated row is.
     const noWrites = { ...OFFERED, thumbWrites: false };
     expect(ids(model("/m/a.stl"), READY, noWrites)).not.toContain(
       "reRenderThumbnail",
     );
-    expect(ids(model("/m/a.stl"), READY, noWrites)).toContain("resetFraming");
+    expect(ids(model("/m/a.stl"), READY, noWrites)).not.toContain(
+      "resetFraming",
+    );
   });
 
-  it("withholds re-render until a report says writes are accepted", () => {
+  it("withholds both until a report says writes are accepted", () => {
     // `null` is *not known* — in flight, or the read failed — and reads as the
     // refusal, so nothing renders and then vanishes a round trip later. The
     // rest of the model's table is unaffected: those rows ask nothing of the
     // deployment.
-    expect(ids(model("/m/a.stl"), READY, null)).not.toContain(
-      "reRenderThumbnail",
-    );
+    for (const id of ["reRenderThumbnail", "resetFraming"]) {
+      expect(ids(model("/m/a.stl"), READY, null)).not.toContain(id);
+      expect(ids(model("/m/a.stl"), READY, OFFERED)).toContain(id);
+    }
     expect(ids(model("/m/a.stl"), READY, null)).toEqual(
-      expect.arrayContaining(["open", "reveal", "copyPath", "resetFraming"]),
-    );
-    expect(ids(model("/m/a.stl"), READY, OFFERED)).toContain(
-      "reRenderThumbnail",
+      expect.arrayContaining(["open", "reveal", "copyPath"]),
     );
   });
 
-  it("leaves the rows that write an orientation alone where writes are refused", () => {
-    // The boundary of the rule re-render is withheld under: it is about an
-    // offer whose *only* product is pixels. The axis picker and both resets
-    // draw pixels too, but each writes an orientation beside them, so none of
-    // them is a press that did nothing. Asserted rather than re-derived from
-    // the requirement's wording the next time a row is added.
+  it("leaves the axis picker and the bulk reset alone where writes are refused", () => {
+    // The boundary of the rule the two thumbnail rows are withheld under,
+    // asserted rather than re-derived from the requirement's wording the next
+    // time a row is added: the axis picker is offered on a model whatever the
+    // report says.
     const noWrites = { ...OFFERED, thumbWrites: false };
     const entry = model("/m/a.stl");
-    expect(ids(entry, READY, noWrites)).toContain("resetFraming");
+    expect(ids(entry, READY, noWrites)).not.toContain("resetFraming");
     expect(orbitAxisApplies(entry)).toBe(true);
     // And the container half of the same boundary: a bulk framing reset is a
     // loop over the write a single reset makes, so `maintenance` governs it and
@@ -333,7 +332,7 @@ describe("D6's per-kind table", () => {
       commandsFor(entry, { index: READY, apps: null, features: null }).find(
         (c) => c.id === "open",
       )!.label;
-    expect(label(model("/m/a.stl"))).toBe("Open lightbox");
+    expect(label(model("/m/a.stl"))).toBe("View model");
     expect(label(dir("/m/d"))).toBe("Open folder");
     expect(label(zip("/m/z.zip"))).toBe("Open archive");
     // Every other command's label is one string for every entry.

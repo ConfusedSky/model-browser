@@ -14,6 +14,8 @@ import {
   click,
   container,
   dir,
+  dismissButton,
+  flatButton,
   getThumb,
   indexAvailability,
   labels,
@@ -21,13 +23,19 @@ import {
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  nameMatchCount,
+  offerNameProbe,
+  openPanel,
   pathInput,
   pressEnter,
   putThumb,
+  resultsLabel,
+  showMatchScores,
   renderThumbnail,
   searchInput,
   semanticSearch,
   settle,
+  similar,
   tiles,
   type,
   unmountApp,
@@ -37,6 +45,7 @@ import {
   setSearchTuning,
   TUNING_DEFAULTS,
 } from "../src/lib/searchOptions";
+import { showScoresStore } from "../src/lib/scoreScale";
 import { DEFAULT_CAMERA } from "../src/three/camera";
 import { cameraForPose, POSE_VERSION, poseKeyOf } from "../src/three/pose";
 import { RIG_VERSION, THUMB_LIGHTING } from "../src/three/renderer";
@@ -97,13 +106,20 @@ const POSE: IndexPose = {
 
 function modeButton(name: string): HTMLButtonElement | undefined {
   return Array.from(
-    container.querySelectorAll<HTMLButtonElement>("aside button"),
+    container.querySelectorAll<HTMLButtonElement>(
+      '[role="group"][aria-label="Search by"] button',
+    ),
   ).find((b) => b.textContent?.trim().toLowerCase() === name);
 }
 function searchTab(): HTMLButtonElement {
   return Array.from(
     container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]'),
   ).find((b) => b.textContent?.toLowerCase().startsWith("search"))!;
+}
+/** The panel starts closed for a fresh profile, so open it before the tab. */
+async function openSearchTab(): Promise<void> {
+  await openPanel();
+  await click(searchTab());
 }
 
 beforeEach(() => {
@@ -124,7 +140,7 @@ afterEach(() => unmountApp());
 describe("meaning search", () => {
   it("is not offered at all when the index is not running", async () => {
     await mountApp("/models", NESTED);
-    await click(searchTab());
+    await openSearchTab();
     expect(modeButton("meaning")).toBeUndefined();
   });
 
@@ -137,7 +153,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
 
     await type(searchInput(), "a winged demon");
@@ -161,9 +177,7 @@ describe("meaning search", () => {
     // None of the results contain the phrase — the whole point, and the case
     // that would have been hidden if the search input still filtered.
     expect(labels()).toEqual(["hero.stl", "base.stl"]);
-    expect(container.textContent).toContain(
-      'Meaning matches for "a winged demon".',
-    );
+    expect(resultsLabel()).toBe("2 closest matches “a winged demon”");
     expect(location.search).toContain("mode=meaning");
   });
 
@@ -176,7 +190,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     // After mount: the harness points listDir at the initial listing, so a
     // no-match name search has to be configured once that is out of the way.
     listDir.mockImplementation(() =>
@@ -207,9 +221,10 @@ describe("meaning search", () => {
       covers: ["stl"],
     });
     semanticSearch.mockResolvedValue({ ...MEANING, weak: true });
+    showScoresStore.write(true); // the numbers are drawn only under this option
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "zzz");
     await pressEnter(searchInput());
@@ -229,7 +244,9 @@ describe("meaning search", () => {
     // The numbers the index computed and this app used to discard. Three places
     // for the cosine because text-query values cluster near 0.1 and these two
     // hits differ in the third — at two places both would print `0.11`,
-    // asserting a tie that does not exist (D4).
+    // asserting a tie that does not exist (D4). Drawn only under "Show match
+    // scores", which this profile has turned on.
+    showScoresStore.write(true);
     indexAvailability.mockResolvedValue({
       state: "ready",
       collectionRoot: "/models",
@@ -238,7 +255,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -258,7 +275,7 @@ describe("meaning search", () => {
 
     // Leaving the search returns to a listing nobody scored: no badge, and
     // nothing held in reserve for one.
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("name")!);
     await mountApp("/models", NESTED);
     await settle();
@@ -278,7 +295,9 @@ describe("meaning search", () => {
     // The paint order itself is not observable here — happy-dom lays nothing
     // out — so this asserts the two things that are: the tile does not yield
     // its badges, and they carry a z above the overlay's. The stacking-context
-    // walk that licenses the second is recorded in `BADGE_CLASS`.
+    // walk that licenses the second is recorded in `BADGE_CLASS`. The badges
+    // exist only under "Show match scores".
+    showScoresStore.write(true);
     indexAvailability.mockResolvedValue({
       state: "ready",
       collectionRoot: "/models",
@@ -287,14 +306,17 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
     await settle();
 
+    // The relevance bar is aria-hidden too, and is not one of the numbers.
+    const BADGE =
+      "span[aria-hidden]:not([data-relevance-bar]):not([data-orbit-zone])";
     const [hero] = tiles();
-    expect(hero!.querySelectorAll("span[aria-hidden]").length).toBe(2);
+    expect(hero!.querySelectorAll(BADGE).length).toBe(2);
 
     // Promote it to an orbit overlay: pointerdown on the tile is what mounts it.
     await act(async () => {
@@ -313,7 +335,7 @@ describe("meaning search", () => {
     expect(overlay).not.toBeNull();
     // Still drawn by the tile — one pair, the same element, never moved or
     // re-created by the press.
-    const badges = hero!.querySelectorAll("span[aria-hidden]");
+    const badges = hero!.querySelectorAll(BADGE);
     expect(badges.length).toBe(2);
     for (const badge of badges)
       expect(badge.className).toContain("z-tile-badge");
@@ -335,7 +357,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "dragon");
     await pressEnter(searchInput());
@@ -356,7 +378,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     const before = history.length;
 
@@ -387,7 +409,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("name")!);
 
     await type(searchInput(), "widget");
@@ -431,7 +453,7 @@ describe("meaning search", () => {
       NESTED,
     );
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain("not running");
@@ -458,7 +480,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain("does not cover this folder");
@@ -480,7 +502,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain("It covers /kits.");
@@ -498,7 +520,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain(
@@ -523,7 +545,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models/kit.zip!/parts", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain(
@@ -542,7 +564,7 @@ describe("meaning search", () => {
       NESTED,
     );
     await settle();
-    await click(searchTab());
+    await openSearchTab();
 
     const panel = container.querySelector("aside")!;
     expect(panel.textContent).toContain("starting up");
@@ -569,7 +591,7 @@ describe("meaning search", () => {
     getThumb.mockResolvedValue({ status: "miss" });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -605,7 +627,7 @@ describe("meaning search", () => {
     indexAvailability.mockResolvedValue({ state: "warming", elapsed: 2 });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     expect(modeButton("meaning")).toBeUndefined();
 
     indexAvailability.mockResolvedValue({
@@ -629,7 +651,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     // Ready, but this directory is not one the index covers: offering the mode
     // here promises an answer the server will refuse with a 400.
     expect(modeButton("meaning")).toBeUndefined();
@@ -642,7 +664,7 @@ describe("meaning search", () => {
     });
     await mountApp("/library/kit.zip!/parts", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     expect(modeButton("meaning")).toBeUndefined();
   });
 
@@ -673,7 +695,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -712,7 +734,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -750,7 +772,7 @@ describe("meaning search", () => {
     });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -806,7 +828,7 @@ describe("meaning search", () => {
     );
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "hero");
     await pressEnter(searchInput());
@@ -847,7 +869,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -855,7 +877,7 @@ describe("meaning search", () => {
 
     const scoreBtn = Array.from(
       container.querySelectorAll<HTMLButtonElement>("aside button"),
-    ).find((b) => b.textContent?.trim().startsWith("score"))!;
+    ).find((b) => b.textContent?.trim() === "Minimum match")!;
     await click(scoreBtn);
     await settle();
     const firstSignal = semanticSearch.mock.calls.at(-1)?.[3] as AbortSignal;
@@ -907,7 +929,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -975,15 +997,15 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
     await settle();
 
-    const maxBtn = Array.from(
-      container.querySelectorAll<HTMLButtonElement>("aside button"),
-    ).find((b) => b.textContent?.trim() === "max")!;
+    const maxBtn = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Pool views by"] button[data-pool="max"]',
+    )!;
     await click(maxBtn);
     await settle();
 
@@ -1014,7 +1036,7 @@ describe("meaning search", () => {
     setSearchTuning({ ...TUNING_DEFAULTS, top: 42 });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1023,11 +1045,11 @@ describe("meaning search", () => {
     const topBtn = () =>
       Array.from(
         container.querySelectorAll<HTMLButtonElement>("aside button"),
-      ).find((b) => b.textContent?.trim() === "top")!;
+      ).find((b) => b.textContent?.trim() === "Show up to")!;
     const scoreBtn = () =>
       Array.from(
         container.querySelectorAll<HTMLButtonElement>("aside button"),
-      ).find((b) => b.textContent?.trim().startsWith("score"))!;
+      ).find((b) => b.textContent?.trim() === "Minimum match")!;
     const topField = () =>
       container.querySelector<HTMLInputElement>(
         'input[aria-label="Number of results"]',
@@ -1038,8 +1060,8 @@ describe("meaning search", () => {
       )!;
 
     // Resting state: both in force, both fields live.
-    expect(topBtn().getAttribute("aria-pressed")).toBe("true");
-    expect(scoreBtn().getAttribute("aria-pressed")).toBe("true");
+    expect(topBtn().getAttribute("aria-checked")).toBe("true");
+    expect(scoreBtn().getAttribute("aria-checked")).toBe("true");
     expect(topField().disabled).toBe(false);
     expect(scoreField().disabled).toBe(false);
 
@@ -1093,11 +1115,15 @@ describe("meaning search", () => {
     // focus ring left on the just-clicked button read as the selection. The
     // in-force button must carry the on-state and never the dimming, whether
     // or not it is inert.
-    expect(topBtn().className).toContain("bg-zinc-800");
-    expect(topBtn().className).toContain("text-zinc-100");
-    expect(topBtn().className).not.toContain("opacity-60");
-    expect(scoreBtn().className).not.toContain("bg-zinc-800");
-    expect(scoreBtn().className).toContain("text-zinc-500");
+    // The on-state is the label at full strength and the switch's knob lit.
+    const knobLit = (b: HTMLButtonElement): boolean =>
+      b.querySelector("span")!.classList.contains("bg-accent");
+    expect(topBtn().classList.contains("text-ink")).toBe(true);
+    expect(knobLit(topBtn())).toBe(true);
+    expect(topBtn().className).not.toContain("opacity");
+    expect(scoreBtn().classList.contains("text-ink")).toBe(false);
+    expect(scoreBtn().classList.contains("text-ink-3")).toBe(true);
+    expect(knobLit(scoreBtn())).toBe(false);
   });
 
   it("a typed bound reaches the URL, once, when the typing stops", async () => {
@@ -1119,7 +1145,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1164,7 +1190,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1213,7 +1239,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1231,7 +1257,7 @@ describe("meaning search", () => {
     // remains still sits at its own default value.
     const topBtn = Array.from(
       container.querySelectorAll<HTMLButtonElement>("aside button"),
-    ).find((b) => b.textContent?.trim() === "top")!;
+    ).find((b) => b.textContent?.trim() === "Show up to")!;
     await click(topBtn);
     await settle();
     expect(resetLink()).toBeDefined();
@@ -1257,7 +1283,7 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue(MEANING);
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
@@ -1292,14 +1318,12 @@ describe("meaning search", () => {
     semanticSearch.mockResolvedValue({ ...MEANING, matched: 875 });
     await mountApp("/models", NESTED);
     await settle();
-    await click(searchTab());
+    await openSearchTab();
     await click(modeButton("meaning")!);
     await type(searchInput(), "winged demon");
     await pressEnter(searchInput());
     await settle();
-    expect(container.textContent).toContain(
-      `Showing ${MEANING.entries.length} of 875`,
-    );
+    expect(resultsLabel()).toBe("Top 2 of 875 matches “winged demon”");
 
     // Absent `matched` is the index not saying, which is not a zero and not a
     // number this app may compute: what arrived has already been cut.
@@ -1307,7 +1331,7 @@ describe("meaning search", () => {
     await type(searchInput(), "winged demon two");
     await pressEnter(searchInput());
     await settle();
-    expect(container.textContent).not.toContain("above the floor");
+    expect(resultsLabel()).toBe("2 closest matches “winged demon two”");
 
     // And with no count in force it stays silent even though `matched` exceeds
     // what came back: in the floor-only state the set is short because the
@@ -1323,12 +1347,12 @@ describe("meaning search", () => {
       Array.from(
         container.querySelectorAll<HTMLButtonElement>("aside button"),
       ).find((b) => b.textContent?.trim().startsWith(label))!;
-    await click(boundBtn("top"));
+    await click(boundBtn("Show up to"));
     await settle();
     expect(container.textContent).toContain(
       "The index returned fewer than asked for",
     );
-    expect(container.textContent).not.toContain("above the floor");
+    expect(resultsLabel()).toBe("2 closest matches “winged demon two”");
 
     // The other single-bound state, and the cell this test used to leave out.
     // With the count in force and no floor, `matched` is not a floor set at
@@ -1340,17 +1364,19 @@ describe("meaning search", () => {
     // a response staged afterwards is never fetched and the assertion below
     // would be checking the previous landing — true, and vacuously so.
     semanticSearch.mockResolvedValue({ ...MEANING, matched: 2165 });
-    await click(boundBtn("top"));
+    await click(boundBtn("Show up to"));
     await settle();
-    await click(boundBtn("score"));
+    await click(boundBtn("Minimum match"));
     await settle();
     // Count-only reached, asserted off the controls rather than off the last
     // request: the re-ask is issued a tick later than the state change, so
     // reading `mock.calls` here races it (it passed only while a `console.log`
     // sat in front of it, which is the tell).
-    expect(boundBtn("top").getAttribute("aria-pressed")).toBe("true");
-    expect(boundBtn("score").getAttribute("aria-pressed")).toBe("false");
-    expect(container.textContent).not.toContain("above the floor");
+    expect(boundBtn("Show up to").getAttribute("aria-checked")).toBe("true");
+    expect(boundBtn("Minimum match").getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(resultsLabel()).toBe("2 closest matches “winged demon two”");
     expect(container.textContent).not.toContain("2165");
   });
 
@@ -1436,9 +1462,7 @@ describe("meaning search", () => {
       TUNING_DEFAULTS,
       expect.any(AbortSignal),
     );
-    expect(container.textContent).toContain(
-      'Meaning matches for "a winged demon".',
-    );
+    expect(resultsLabel()).toBe("2 closest matches “a winged demon”");
     vi.useRealTimers();
   });
 
@@ -1464,5 +1488,406 @@ describe("meaning search", () => {
       expect.any(AbortSignal),
     );
     expect(location.search).not.toContain("mode=meaning");
+  });
+});
+
+/** `n` models whose best z is `top`, each place 0.05 below the one before. */
+function scoredSet(
+  n: number,
+  top: number,
+  over: Partial<SemanticListing> = {},
+): SemanticListing {
+  const entries = Array.from({ length: n }, (_, i) =>
+    model(`Kits/g${String(i).padStart(2, "0")}.stl`),
+  );
+  return {
+    path: "/models",
+    entries,
+    poses: {},
+    scores: Object.fromEntries(
+      entries.map((e, i) => [
+        e.path,
+        { score: 0.1 - i / 1000, z: top - i / 20 },
+      ]),
+    ),
+    scope: scope(),
+    weak: false,
+    capped: false,
+    ...over,
+  };
+}
+/** A button in the results line's notes, by what it says. */
+const noteButton = (text: string): HTMLButtonElement | undefined =>
+  Array.from(container.querySelectorAll<HTMLButtonElement>("main button")).find(
+    (b) => b.textContent === text,
+  );
+
+describe("a file name asked of the names", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("is that one search: leaving it puts the profile's meaning mode back for the next phrase", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("meaning")!);
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("abc_1.stl")],
+    });
+    await type(searchInput(), "abc_1");
+    await pressEnter(searchInput());
+    await settle();
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+
+    await click(dismissButton()!);
+    await settle();
+    expect(modeButton("meaning")!.getAttribute("aria-pressed")).toBe("true");
+    // The box stops naming a search that is no longer on screen.
+    expect(searchInput().value).toBe("");
+
+    semanticSearch.mockClear();
+    await type(searchInput(), "a stone golem");
+    await pressEnter(searchInput());
+    await settle();
+    expect(semanticSearch).toHaveBeenCalledTimes(1);
+    expect(semanticSearch.mock.calls[0]![0]).toBe("a stone golem");
+  });
+});
+
+describe("a file name asked of the names, left by the flat toggle", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("puts the profile's meaning mode back, as dismissing does", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("meaning")!);
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("abc_1.stl")],
+    });
+    await type(searchInput(), "abc_1");
+    await pressEnter(searchInput());
+    await settle();
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+
+    await click(flatButton());
+    await settle();
+    expect(modeButton("meaning")!.getAttribute("aria-pressed")).toBe("true");
+
+    semanticSearch.mockClear();
+    await type(searchInput(), "a stone golem");
+    await pressEnter(searchInput());
+    await settle();
+    expect(semanticSearch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a file name asked of the names, left by finding similar", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("puts the profile's meaning mode back over the neighbours", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+    similar.mockResolvedValue({
+      path: "/models",
+      entries: [model("Kits/other.stl")],
+      poses: {},
+    });
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("meaning")!);
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("abc_1.stl")],
+    });
+    await type(searchInput(), "abc_1");
+    await pressEnter(searchInput());
+    await settle();
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+
+    const tile = tiles()[0]!;
+    await act(async () => {
+      tile.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 2,
+          buttons: 2,
+        }),
+      );
+      tile.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    });
+    await settle();
+    await click(
+      document.querySelector<HTMLButtonElement>(
+        '[role="menu"] [data-command="findSimilar"]',
+      )!,
+    );
+    await settle();
+    expect(similar).toHaveBeenCalledTimes(1);
+    expect(modeButton("meaning")!.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("what a scored tile draws by default", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("a bar and a word, and the numbers only once asked for", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(1, 4.2));
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("meaning")!);
+    await type(searchInput(), "a stone golem");
+    await pressEnter(searchInput());
+    await settle();
+
+    const tile = (): HTMLElement => tiles()[0]!;
+    expect(tile().querySelector("[data-relevance-bar]")).not.toBeNull();
+    expect(tile().title).toContain("Strong match");
+    expect(tile().textContent).not.toContain("z 4.20");
+
+    await showMatchScores();
+    expect(tile().textContent).toContain("z 4.20");
+    expect(tile().querySelector("[data-relevance-bar]")).not.toBeNull();
+  });
+});
+
+describe("the search field names what and where it searches", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("puts the folder in the placeholder and the mode in the accessible name", async () => {
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("name")!);
+    expect(searchInput().placeholder).toBe("Search names in models…");
+    expect(searchInput().getAttribute("aria-label")).toBe(
+      "Search file and folder names",
+    );
+
+    await click(modeButton("meaning")!);
+    expect(searchInput().placeholder).toBe("Describe a model in models…");
+    expect(searchInput().getAttribute("aria-label")).toBe("Search by meaning");
+  });
+});
+
+describe("a description asked of the names", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("runs by meaning, says so, and offers the names back for that search", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("name")!);
+    await type(searchInput(), "a stone golem");
+    await pressEnter(searchInput());
+    await settle();
+
+    expect(semanticSearch).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain(
+      "Searched by meaning — “a stone golem” reads like a description.",
+    );
+    // The profile chose names; the one search does not rewrite that.
+    expect(localStorage.getItem("model-browser:search-mode")).toBe("name");
+  });
+});
+
+describe("a weak set, and the names beside a meaning search", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+  async function meaningSearch(phrase: string): Promise<void> {
+    await click(modeButton("meaning")!);
+    await type(searchInput(), phrase);
+    await pressEnter(searchInput());
+    await settle();
+  }
+
+  it("says nothing stood out, shows a row of guesses, and gives the rest on asking", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(15, 2.3, { weak: true }));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    expect(resultsLabel()).toBe("No strong matches “winged demon”");
+    expect(container.textContent).toContain(
+      "Nothing stood out — here are the closest guesses.",
+    );
+    // The best twelve, in the index's order — not twelve of them.
+    expect(labels()).toEqual(
+      Array.from(
+        { length: 12 },
+        (_, i) => `g${String(i).padStart(2, "0")}.stl`,
+      ),
+    );
+
+    await click(noteButton("Show all 15")!);
+    expect(tiles()).toHaveLength(15);
+    expect(container.textContent).toContain(
+      "Nothing stood out — these are the closest guesses.",
+    );
+    expect(noteButton("Show all 15")).toBeUndefined();
+  });
+
+  it("reads a set as weak from its best z too, when the index does not flag it", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 2.3));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    expect(resultsLabel()).toBe("No strong matches “winged demon”");
+    // Nothing held back from a set that fits in the row already.
+    expect(tiles()).toHaveLength(3);
+    expect(noteButton("Show all 3")).toBeUndefined();
+  });
+
+  it("offers the same words to the names instead, which re-runs them there", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 2.3, { weak: true }));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("winged-demon.stl")],
+    });
+
+    await click(noteButton("Search names instead")!);
+    await settle();
+
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+    expect(listDir).toHaveBeenLastCalledWith(
+      "/models",
+      expect.objectContaining({ q: "winged demon" }),
+      expect.anything(),
+    );
+    expect(labels()).toEqual(["winged-demon.stl"]);
+  });
+
+  it("says how many names match beside a set that is not weak, and shows them on asking", async () => {
+    offerNameProbe();
+    nameMatchCount.mockResolvedValue(3);
+    semanticSearch.mockResolvedValue(scoredSet(3, 3.9));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    // Asked where the meaning search ran, under the name options in force.
+    expect(nameMatchCount).toHaveBeenCalledWith(
+      "/models",
+      "winged demon",
+      true,
+      expect.any(AbortSignal),
+    );
+    expect(container.textContent).toContain(
+      "3 names match “winged demon” too. Show them",
+    );
+
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("winged-demon.stl")],
+    });
+    await click(noteButton("Show them")!);
+    await settle();
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("puts the count on a weak set's own way out, instead of a second note", async () => {
+    offerNameProbe();
+    nameMatchCount.mockResolvedValue(4);
+    semanticSearch.mockResolvedValue(scoredSet(3, 2.3, { weak: true }));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    expect(noteButton("See the 4 name matches")).toBeDefined();
+    expect(noteButton("Search names instead")).toBeUndefined();
+    expect(container.textContent).not.toContain("names match");
+  });
+
+  it("says nothing about names where the client cannot count them", async () => {
+    // The harness client carries no `nameMatchCount` unless a cell offers it,
+    // so the count is refused — and a refused count says nothing.
+    semanticSearch.mockResolvedValue(scoredSet(3, 3.9));
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    expect(resultsLabel()).toBe("3 closest matches “winged demon”");
+    expect(container.textContent).not.toContain("names match");
+    expect(container.textContent).not.toContain("name matches");
+  });
+
+  it("calls no result better than fair when the set's best is only middling", async () => {
+    // z 3.2 alone reads "Good"; beside a best of 3.2 it is capped, since a set
+    // whose top is middling has no good match in it to point at.
+    const MODEST = scoredSet(2, 3.2);
+    const STRONGER: SemanticListing = {
+      ...MODEST,
+      scores: {
+        [MODEST.entries[0]!.path]: { score: 0.12, z: 3.9 },
+        [MODEST.entries[1]!.path]: { score: 0.11, z: 3.2 },
+      },
+    };
+    semanticSearch.mockResolvedValueOnce(MODEST);
+    semanticSearch.mockResolvedValueOnce(STRONGER);
+    await mountApp("/models", NESTED);
+    await settle();
+    await meaningSearch("winged demon");
+
+    const named = (): string[] =>
+      tiles().map((t) => t.getAttribute("aria-label") ?? "");
+    expect(named()).toEqual([
+      "Kits/g00.stl — fair match",
+      "Kits/g01.stl — fair match",
+    ]);
+
+    // The control: the same z of 3.2 under a set whose best is higher.
+    await type(searchInput(), "winged demon rising");
+    await pressEnter(searchInput());
+    await settle();
+    expect(named()).toEqual([
+      "Kits/g00.stl — good match",
+      "Kits/g01.stl — good match",
+    ]);
   });
 });

@@ -6,17 +6,16 @@
 // have seen it, and the orbit one keeps sitting there invisibly through the
 // persist hold after a release.
 //
-// What these pin is the surface half: that the press arrives, that the browser's
-// own menu does not, that the **lightbox** offers only the commands it can
-// honestly perform while the orbit overlay offers the whole tile menu (6.8,
-// from a screenshot of the three-item menu on a tile just orbited), that Escape
-// dismisses one thing at a time, and that a command which changes the view
-// takes the open lightbox with it through the persisting close.
+// What these pin is the surface half: that the press arrives on the orbit
+// overlay, that the browser's own menu does not, that the overlay offers the
+// whole tile menu (6.8, from a screenshot of the three-item menu on a tile just
+// orbited), and that the **lightbox** raises no menu of the app's at all — its
+// panel carries the same actions beside the model, so a press there is left to
+// the browser and Escape still closes the lightbox first time.
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DirListing, IndexPose } from "../../shared/types";
+import type { DirListing } from "../../shared/types";
 import {
-  click,
   container,
   dir,
   getThumb,
@@ -24,15 +23,12 @@ import {
   listDir,
   model,
   mountApp,
-  putThumb,
   semanticPosesFor,
   settle,
-  similar,
   tiles,
   unmountApp,
   wait,
 } from "./appHarness";
-import { RIG_VERSION, THUMB_LIGHTING } from "../src/three/renderer";
 
 import { ViewerSession } from "../src/viewer/session";
 
@@ -47,29 +43,6 @@ const NESTED: DirListing = {
   path: "/models",
   entries: [dir("Alpha"), model("widget.stl")],
 };
-/** A `-y` pose for the widget: its spindle is not the STL default, so a live
- *  re-frame to it is visible on the lightbox's axis control. */
-const POSE: IndexPose = {
-  up: [0, -1, 0],
-  azimuth_zero: [1, 0, 0],
-  source: "test",
-  confidence: 1,
-  front: { view: 0, azimuth_deg: 40, elevation_deg: 20 },
-};
-/** The lightbox axis control's marked letters — `['Y', 'flip']` for `-y`. */
-const markedAxes = (): string[] =>
-  Array.from(
-    dialog()?.querySelectorAll<HTMLButtonElement>(
-      '[aria-label="Orbit axis"] button',
-    ) ?? [],
-  )
-    .filter((b) => b.getAttribute("aria-pressed") === "true")
-    .map((b) => b.textContent ?? "");
-const NEIGHBOURS = {
-  path: "/models",
-  entries: [model("Alpha/near.stl")],
-  poses: {},
-};
 
 const menu = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[role="menu"]');
@@ -77,8 +50,6 @@ const items = (): string[] =>
   Array.from(
     menu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
   ).map((b) => b.dataset.command ?? "");
-const item = (id: string): HTMLButtonElement =>
-  menu()!.querySelector<HTMLButtonElement>(`[data-command="${id}"]`)!;
 const axes = (): string[] =>
   Array.from(
     menu()?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [],
@@ -90,12 +61,6 @@ const flip = (): HTMLElement | null =>
   ) ?? null;
 const dialog = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[role="dialog"]');
-/** The panel's transient line, in whichever tone it is wearing. */
-const panelNote = (): string | null =>
-  dialog()?.querySelector('p[role="status"]')?.textContent ?? null;
-/** The path bar's transient line — the surface the lightbox covers. */
-const headerNote = (): string | null =>
-  container.querySelector("header p.text-zinc-400")?.textContent ?? null;
 /** Every item a model tile offers when the index is answering — the whole of
  *  D6's table, which is also what the orbit overlay offers since 6.8. */
 const WHOLE_TABLE = [
@@ -225,43 +190,6 @@ afterEach(async () => {
   await unmountApp();
 });
 
-/** Drag on the open lightbox's canvas — the manipulation an untouched close
- *  lacks, since `pose-rerender` D4 made such a close write nothing. */
-async function orbitInLightbox(): Promise<void> {
-  const canvas = dialog()!.querySelector<HTMLElement>(".cursor-grab")!;
-  await act(async () => {
-    canvas.dispatchEvent(
-      new PointerEvent("pointerdown", {
-        bubbles: true,
-        button: 0,
-        clientX: 100,
-        clientY: 100,
-      }),
-    );
-  });
-  await act(async () => {
-    const move = (x: number, y: number): void => {
-      window.dispatchEvent(
-        new PointerEvent("pointermove", {
-          bubbles: true,
-          clientX: x,
-          clientY: y,
-        }),
-      );
-    };
-    move(160, 100); // beyond the drag threshold
-    move(200, 120);
-    window.dispatchEvent(
-      new PointerEvent("pointerup", {
-        bubbles: true,
-        clientX: 200,
-        clientY: 120,
-      }),
-    );
-  });
-  await settle();
-}
-
 describe("the menu on a viewer surface", () => {
   it("a secondary press on the orbiting model raises the tile’s whole menu", async () => {
     await startOrbit();
@@ -319,105 +247,14 @@ describe("the menu on a viewer surface", () => {
     expect(flip()).not.toBeNull();
   });
 
-  it("a secondary press on the lightbox raises the menu an open view can honestly run", async () => {
+  it("a secondary press on the lightbox raises no menu, and leaves the press to the browser", async () => {
     await openLightbox();
     expect(dialog()).not.toBeNull();
 
     const taken = await secondaryPress(dialog()!);
-    // Reset framing joined 2026-09-01 (a user-reported screenshot: the panel
-    // offered it, the menu did not) — offered because its press is live-routed
-    // through resetFramingLive, not because the queued body became honest here.
-    expect(items()).toEqual([
-      "reveal",
-      "copyPath",
-      "findSimilar",
-      "resetFraming",
-    ]);
-    expect(taken).toBe(true);
-    expect(dialog()).not.toBeNull(); // still open behind its own menu
-  });
-
-  it("the lightbox menu's Reset framing runs the live body, not the queued one", async () => {
-    // The live body re-frames the open view *now*; the queued body (the tile
-    // menu's) would sit behind the suspension the open view holds and move
-    // nothing until close. Read off the lightbox's axis control: the widget is
-    // stored about `z` and the index holds a `-y` pose, so a live reset flips
-    // the marked spindle while the dialog is still open. Its store half is the
-    // png-less discard, sent now; the pixels follow after the close
-    // (`resetFramingLive`, since `pose-rerender` D4), so no render lands while
-    // the dialog is up.
-    await unmountApp();
-    getThumb.mockResolvedValue({
-      status: "hit",
-      camera: { az: 1.25, el: -0.4, distR: 4.5, target: [0, 0, 0] },
-      axis: "z",
-      pngUrl: "blob:stored",
-      lighting: THUMB_LIGHTING,
-      rig: RIG_VERSION,
-    });
-    semanticPosesFor.mockResolvedValue({
-      poses: { "/models/widget.stl": POSE },
-    });
-    indexAvailability.mockResolvedValue({
-      state: "ready",
-      collectionRoot: "/models",
-    });
-    await mountApp("/models", NESTED);
-    listDir.mockResolvedValue(NESTED);
-    await settle();
-    await openLightbox();
-    expect(markedAxes()).toEqual(["Z"]);
-    await secondaryPress(dialog()!);
-    putThumb.mockClear();
-    const reset = Array.from(menu()!.querySelectorAll("button")).find(
-      (b) => b.textContent === "Reset framing",
-    )!;
-    await click(reset as HTMLElement);
-    await settle();
-
+    expect(menu()).toBeNull();
+    expect(taken).toBe(false); // not prevented: the platform's menu appears
     expect(dialog()).not.toBeNull();
-    expect(markedAxes()).toEqual(["Y", "flip"]);
-    const discard = putThumb.mock.calls.find((c) => c[0].camera === null);
-    expect(discard).toBeDefined();
-    expect(discard![0].png).toBeUndefined();
-    expect(putThumb.mock.calls.filter((c) => c[0].png !== undefined)).toEqual(
-      [],
-    );
-  });
-
-  it("confirms a copy in the panel, not on the bar it is covering", async () => {
-    // *Copy path* is the one command on this surface that owes the user a word
-    // — entry-actions requires a brief confirmation — and it was the one that
-    // could not give one: the host's routing sat on `report` alone, so the
-    // "copied" line went to the path bar under a 70% scrim, in the far corner,
-    // behind the dialog being looked at. Success is not silent here, so the
-    // absence read as a copy that did not happen.
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      value: { writeText },
-      configurable: true,
-    });
-    try {
-      await openLightbox();
-      await secondaryPress(dialog()!);
-      await click(item("copyPath"));
-      await settle();
-
-      // The same body as everywhere else: the filesystem path, expanded from
-      // the harness library's `/lib` top (library R2).
-      expect(writeText).toHaveBeenCalledWith("/lib/models/widget.stl");
-      expect(panelNote()).toBe("Path copied.");
-      // In the confirming tone, not the failure one — a success painted red
-      // would be the other half of this bug.
-      expect(
-        dialog()!.querySelector('p[role="status"].text-zinc-400'),
-      ).not.toBeNull();
-      expect(dialog()!.querySelector("p.text-red-400")).toBeNull();
-      // And it did not also go to the covered bar: one sentence, one surface.
-      expect(headerNote()).toBeNull();
-    } finally {
-      Reflect.deleteProperty(navigator, "clipboard");
-    }
   });
 
   it("still offers the whole table on a tile — the filter is the surface, not the app", async () => {
@@ -427,7 +264,7 @@ describe("the menu on a viewer surface", () => {
 
   // 6.7's half of the same filter, **narrowed to the lightbox by 6.8**: the
   // group is withheld on the one surface that already carries the live picker.
-  it("withholds the orbit-axis group on the lightbox, and offers it on the tile and the overlay", async () => {
+  it("offers the orbit-axis group on the tile and the overlay, and no menu on the lightbox", async () => {
     const roles = (): (string | null)[] =>
       Array.from(menu()?.querySelectorAll<HTMLElement>("button") ?? []).map(
         (b) => b.getAttribute("role"),
@@ -435,10 +272,10 @@ describe("the menu on a viewer surface", () => {
 
     // The tile first, while nothing is open: this is not a rule about the
     // entry, so the same model has to offer the group here — as the picker's
-    // own `axis X Y Z | flip` row at the top of the menu (6.8, second look).
+    // own `X Y Z | flip` row, at the foot of the menu.
     await secondaryPress(modelTile());
     expect(axes()).toEqual(AXIS_LETTERS);
-    expect(roles().slice(0, 4)).toEqual(GROUP_ROLES);
+    expect(roles().slice(-4)).toEqual(GROUP_ROLES);
     await escape();
 
     // The overlay carries no picker of its own — the live one belongs to the
@@ -447,7 +284,7 @@ describe("the menu on a viewer surface", () => {
     await startOrbit();
     await secondaryPress(overlay()!);
     expect(axes()).toEqual(AXIS_LETTERS);
-    expect(roles().slice(0, 4)).toEqual(GROUP_ROLES);
+    expect(roles().slice(-4)).toEqual(GROUP_ROLES);
     await escape();
 
     // The same gesture's release promotes the overlay to the lightbox — a
@@ -466,13 +303,12 @@ describe("the menu on a viewer surface", () => {
     await wait(150);
     expect(dialog()).not.toBeNull();
     await secondaryPress(dialog()!);
-    // Here, and only here, the picker is a few pixels away — the row this
-    // menu's group is a copy of.
-    expect(axes()).toHaveLength(0);
-    expect(flip()).toBeNull();
+    // Here the live picker and the panel's actions are a few pixels away, so
+    // the lightbox raises nothing of its own.
+    expect(menu()).toBeNull();
   });
 
-  it("gives Escape to the menu first and to the lightbox second", async () => {
+  it("leaves Escape to the lightbox after a secondary press, which raised nothing", async () => {
     // Deep-linked rather than pointer-opened: this one closes without
     // history.back, which the suite plays by hand rather than through the
     // browser (client/test/CLAUDE.md).
@@ -491,48 +327,13 @@ describe("the menu on a viewer surface", () => {
     expect(dialog()).not.toBeNull();
 
     await secondaryPress(dialog()!);
-    expect(menu()).not.toBeNull();
-
-    await escape();
     expect(menu()).toBeNull();
-    expect(dialog()).not.toBeNull(); // one press dismissed one thing
 
+    // One press, and the thing it dismisses is the lightbox: no menu of the
+    // app's is standing invisibly in front of it.
     await escape();
     await wait(200);
     expect(dialog()).toBeNull();
-  });
-
-  it("takes the lightbox with it when a command changes the view", async () => {
-    similar.mockResolvedValue(NEIGHBOURS);
-    await openLightbox();
-    expect(dialog()).not.toBeNull();
-    putThumb.mockClear();
-
-    // Orbited first, and the release's own write cleared: an untouched close
-    // writes nothing (`pose-rerender` D4), so it is the close after a
-    // manipulation whose camera write says the close ran.
-    await orbitInLightbox();
-    putThumb.mockClear();
-    await secondaryPress(dialog()!);
-    await click(item("findSimilar"));
-    await wait(250);
-
-    // The model left the view, so App signalled the persisting close and the
-    // session wrote its camera on the way out — not a bare unmount. The camera
-    // is what says which write this was: the background sweep PUTs pixels and
-    // labels and never a viewpoint (useThumbnails' sweep PUT), so `putThumb`
-    // having been called at all proves nothing here.
-    expect(dialog()).toBeNull();
-    const closeWrites = putThumb.mock.calls
-      .map(([body]) => body as { path: string; camera?: unknown })
-      .filter((b) => b.path === "/models/widget.stl" && b.camera !== undefined);
-    expect(closeWrites.length).toBeGreaterThan(0);
-    // And the similarity view actually landed.
-    expect(similar).toHaveBeenCalled();
-    expect(window.location.search).toContain("similar=%2Fmodels%2Fwidget.stl");
-    expect(tiles().map((t) => t.getAttribute("title"))).toContain(
-      "Alpha/near.stl",
-    );
   });
 });
 

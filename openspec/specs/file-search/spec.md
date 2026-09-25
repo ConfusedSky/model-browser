@@ -2,11 +2,13 @@
 
 ## Purpose
 TBD - created by archiving change file-name-search. Update Purpose after archive.
-## Requirements
-### Requirement: Live name filter
-The client SHALL offer a name filter that narrows the tiles currently on screen as the user types, matching case-insensitively on each entry's **full name** as a substring, across every entry kind (directories, zips, models) and in nested, flat, and deep-search views alike. The filter SHALL be typed in a dedicated find control that the user summons — by the platform's find shortcut, or by an equivalent visible control offered with the results — and dismisses, rather than in the input used to submit searches. That input SHALL NOT filter: the text that produced the current results SHALL remain in it, editable and re-submittable.
 
-Filtering SHALL be pure view state layered over the current listing: while no deep-search query is committed, it SHALL issue no requests; it SHALL NOT disturb already-loaded thumbnails for entries it hides; and it SHALL be cleared by emptying or dismissing the find control, or by navigating. Note the filter matches the entry's full name, which in flat and deep-search views is its relative path: folder fragments match here, and tiles in those views are *labeled* by file name alone (the path shows in the tooltip). The truncation notice, when present, SHALL keep describing the underlying listing rather than the filtered view. When the filter hides every tile, the UI SHALL say that the filter is hiding the listing rather than presenting an empty grid. A whitespace-only filter SHALL be treated as no filter, and whitespace surrounding the typed text SHALL be ignored when matching.
+## Requirements
+
+### Requirement: Live name filter
+The client SHALL offer a name filter that narrows the tiles currently on screen as the user types, matching case-insensitively on each entry's **full name** as a substring, across every entry kind (directories, zips, models) and in nested, flat, and deep-search views alike. The filter SHALL be typed in a dedicated find control that the user summons — by the platform's find shortcut, pressed outside a text field or in the search input while it is empty, or by an equivalent visible control, a *Narrow* toggle in the toolbar that is shown whatever the grid holds and marked pressed while the find control is open — and dismisses, rather than in the input used to submit searches. That input SHALL NOT filter: the text that produced the current results SHALL remain in it, editable and re-submittable, for as long as those results are on screen.
+
+Filtering SHALL be pure view state layered over the current listing: while no deep-search query is committed, it SHALL issue no requests; it SHALL NOT disturb already-loaded thumbnails for entries it hides; and it SHALL be cleared by emptying or dismissing the find control, or by navigating. Note the filter matches the entry's full name, which in flat and deep-search views is its relative path: folder fragments match here, and tiles in those views are *labeled* by file name alone (the path shows in the tooltip, and the containing folders on a line beneath the name). The truncation notice, when present, SHALL keep describing the underlying listing rather than the filtered view. When the filter hides every tile, the UI SHALL say that the filter is hiding the listing rather than presenting an empty grid. A whitespace-only filter SHALL be treated as no filter, and whitespace surrounding the typed text SHALL be ignored when matching.
 
 #### Scenario: Typing narrows the grid
 - **WHEN** the user opens the find control over a listing and types a fragment
@@ -42,10 +44,14 @@ Filtering SHALL be pure view state layered over the current listing: while no de
 
 #### Scenario: The filter is discoverable without the shortcut
 - **WHEN** the user has never pressed the find shortcut
-- **THEN** a visible control offered with the results opens the same find control
+- **THEN** the toolbar's Narrow toggle opens the same find control, and pressing it again closes it
+
+#### Scenario: The shortcut from an empty search box
+- **WHEN** the search input has focus and is empty, and the user presses the find shortcut
+- **THEN** the find control opens rather than the browser's own find; with a draft in the input, the browser's find is left alone
 
 ### Requirement: Deep name search
-On an explicit submit action, the client SHALL commit the input text as a search query and run the search selected by the search mode in force, targeted at the user's newest requested directory (the in-flight navigation target when one exists, the committed path otherwise). **In name mode** — the default, and the only mode when no other corpus is available — the server SHALL reuse the flat walk for it: the same recursive descent, zip-entry handling, hidden/unreadable-directory skipping, symlink visited-set, step budget, and result cap, returning the models under the root whose **root-relative path** contains the query (case-insensitive) — matching a containing folder's name, a containing archive's name, or the file's own — each named by that path, plus every directory and archive under the root whose **own** name matches, likewise named by its root-relative path and navigable like any container tile. Matched containers SHALL be bounded independently of the model cap, so neither kind can crowd out the other, and either bound dropping entries SHALL set the truncation flag. Matching containers SHALL lead the response as a group, ahead of the models, ordered directories before archives as every other listing orders them and by root-relative path within a kind; the models SHALL follow in root-relative-path order, so a folder's contents stay contiguous. A folder SHALL appear exactly once however it was matched. A plain flat listing without a query keeps its file-name ordering. When the root is a zip or a directory inside one, the same rules apply within the archive. The cap SHALL bound matching models, not raw walk output, and the response SHALL carry the truncation flag under the same rules as a flat listing. The search walk SHALL run on its own step budget, independently configurable and larger by default than the browse walk's, since a search returns matches rather than everything it visits.
+On an explicit submit action, the client SHALL commit the input text as a search query and run the search selected by the search mode in force — or by the corpus the query's shape belongs to, where `semantic-search` routes it (*A query that plainly belongs to the other corpus is asked of it until its results are left*) — targeted at the user's newest requested directory (the in-flight navigation target when one exists, the committed path otherwise). **In name mode** — the default, and the only mode when no other corpus is available — the server SHALL reuse the flat walk for it: the same recursive descent, zip-entry handling, hidden/unreadable-directory skipping, symlink visited-set, step budget, and result cap, returning the models under the root whose **root-relative path** contains the query (case-insensitive) — matching a containing folder's name, a containing archive's name, or the file's own — each named by that path, plus every directory and archive under the root whose **own** name matches, likewise named by its root-relative path and navigable like any container tile. Matched containers SHALL be bounded independently of the model cap, so neither kind can crowd out the other, and either bound dropping entries SHALL set the truncation flag. Matching containers SHALL lead the response as a group, ahead of the models, ordered directories before archives as every other listing orders them and by root-relative path within a kind; the models SHALL follow in root-relative-path order, so a folder's contents stay contiguous. The client SHALL **present** the models first and the matched containers after them, in the response's order within each group: a name search is asked in order to find models, and the containers it also finds are a way onward that SHALL NOT bury the first model. A folder SHALL appear exactly once however it was matched. A plain flat listing without a query keeps its file-name ordering. When the root is a zip or a directory inside one, the same rules apply within the archive. The cap SHALL bound matching models, not raw walk output, and the response SHALL carry the truncation flag under the same rules as a flat listing. The search walk SHALL run on its own step budget, independently configurable and larger by default than the browse walk's, since a search returns matches rather than everything it visits.
 
 When a name search returns no matches AND the walk was truncated, the UI SHALL say the search ran out before covering the tree — suggesting a narrower root — rather than claiming nothing matched; the plain no-match message is reserved for searches that completed. A blank or whitespace-only query SHALL be treated as no query. A non-blank query SHALL only be honored together with the flat listing flag; one without it SHALL be rejected.
 
@@ -57,7 +63,7 @@ Results of any mode SHALL render as an ordinary listing — thumbnails, orbit, l
 
 #### Scenario: Matching is on the file name
 - **WHEN** a model's own file name contains the query while nothing in its path does
-- **THEN** it is in the results, as it was before folders could match — widening the predicate adds matches rather than replacing them
+- **THEN** it is in the results — matching the whole relative path adds matches to the file name's own rather than replacing them
 
 #### Scenario: Matching includes containing folders
 - **WHEN** a model's containing folder matches the query but its own file name does not
@@ -85,14 +91,18 @@ Results of any mode SHALL render as an ordinary listing — thumbnails, orbit, l
 
 #### Scenario: Matching containers keep the listing's kind order
 - **WHEN** a search matches both directories and archives
-- **THEN** they lead the results as one group, directories before archives, exactly as an ordinary listing orders them — the query changes which containers appear, not how kinds are ranked
+- **THEN** the response leads with them as one group, directories before archives, exactly as an ordinary listing orders them, and the grid presents that group after the matching models, in the same order — the query changes which containers appear, not how kinds are ranked among themselves
+
+#### Scenario: Models come first on screen
+- **WHEN** a name search matches both folders and models
+- **THEN** the first tiles in the grid are the matching models and the matching folders follow them
 
 #### Scenario: Folders cannot crowd out models
 - **WHEN** a name search matches far more folders than the container bound allows
 - **THEN** the response still carries its full share of matching models, and the truncation flag reports that entries were dropped
 
 #### Scenario: Submit runs the mode in force
-- **WHEN** the user submits the same text under each available search mode
+- **WHEN** the user submits the same text under each available search mode, the text being of neither shape the other corpus claims
 - **THEN** each submit runs that mode's search, and the results label says which one produced the grid
 
 #### Scenario: Cap bounds matches
@@ -178,3 +188,63 @@ While a query is committed, changing an option SHALL take effect immediately rat
 - **WHEN** the user turns folder matching off and searches a fragment that appears in folder names but not in any file name
 - **THEN** no models are returned on the strength of their folders, and the empty state says nothing matched rather than implying the search was incomplete
 
+### Requirement: Leaving a search puts the profile's own options back
+A committed search can run under options that are not the profile's own — a link's, or a
+corpus the query's shape chose (see `semantic-search`). Leaving it — by the results line's
+dismissal, by emptying the search input, by navigating, by pressing the flat toggle, which
+supersedes a committed search with an ordinary listing, or by finding models similar to one of
+its results, which supersedes it with a similarity view — SHALL put the profile's own stored
+options back in force, the search mode among them, so that the next phrase typed is read under
+the profile's choices rather than under the ones the departed search ran with. The view that
+dismissal returns to SHALL be named and retraced with those options (see `url-navigation`, *The
+URL names the committed view*; `directory-browsing`, *Retracing restores the grid's place*).
+
+#### Scenario: A link's options end with the link's search
+- **WHEN** a profile opens a search link carrying options different from its stored ones, dismisses the search, and submits a new query without navigating
+- **THEN** the new query runs under the profile's stored options
+
+#### Scenario: A routed search does not leave its corpus behind
+- **WHEN** a query was asked of the names because it looked like a file name, under a profile whose mode is meaning, and the user empties the search input
+- **THEN** meaning mode is in force again, and the next phrase submitted runs by meaning
+
+#### Scenario: The flat toggle leaves a routed search too
+- **WHEN** a query was asked of the names because it looked like a file name, under a profile whose mode is meaning, and the user presses the flat toggle over its results
+- **THEN** the flat listing replaces the results, meaning mode is in force again, and the next phrase submitted runs by meaning
+
+#### Scenario: Finding similar leaves a routed search too
+- **WHEN** a query was asked of the names because it looked like a file name, under a profile whose mode is meaning, and the user finds models similar to one of its results
+- **THEN** the neighbours replace the results and meaning mode is in force again over them
+
+### Requirement: An empty search offers a way onward
+A committed search that completed with nothing to show SHALL say where it looked — naming the
+folder it ran from where that is not the library's top — and SHALL offer the likeliest repairs
+as controls rather than leave a dead end. From a folder below the top it SHALL offer to run the
+same text over the whole library in the same corpus, where that corpus can run at the top. It
+SHALL offer to run the same text against the other corpus — names from an empty meaning search,
+meaning from an empty name search where meaning search can run at the location — without storing that corpus as the profile's mode (see `semantic-search`). The messages that already distinguish a truncated name
+search and an unindexed location keep their own wording and are not given these offers.
+
+#### Scenario: Nothing in this folder
+- **WHEN** a name search for "dragon" from the folder `Battletech` completes with no matches, and meaning search can run there
+- **THEN** the page says nothing matched “dragon” in Battletech, and offers "Search the whole library" and "Search by meaning instead"
+
+#### Scenario: Nothing by meaning
+- **WHEN** a meaning search from the library's top returns nothing
+- **THEN** the page says nothing matched and offers "Search names instead", and no whole-library offer, since it already covered the library
+
+### Requirement: The search field says what and where it searches
+The search input SHALL carry, inside it, the control that selects its mode wherever meaning
+search can run at the location or is in force (see `semantic-search`, *Meaning search is a mode
+of the search input*), and its placeholder SHALL say what a search will match and where it
+starts: file and folder names or a description of a model, at the library's top or in the
+current folder by name — except where the introduction offers an example phrase in its place
+(see `visitor-intro`, *Example queries reach a visitor who no longer sees the banner*). Its accessible name, and the submit control's description, SHALL follow
+the mode in force — and SHALL change only when the mode does, never with the placeholder.
+
+#### Scenario: The placeholder names the folder
+- **WHEN** the user is in the folder `Battletech` with name mode in force and the input empty
+- **THEN** the placeholder reads "Search names in Battletech…"
+
+#### Scenario: The accessible name follows the mode
+- **WHEN** the user switches the input's mode from Name to Meaning
+- **THEN** its accessible name changes from searching file and folder names to searching by meaning

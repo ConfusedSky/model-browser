@@ -330,7 +330,13 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
     or serve them over localhost with a CORS header
   - Model tiles respond only to PointerEvents: dispatch pointerdown on the tile, wait
     ~300ms for the overlay to mount its window listeners, then pointerup on window —
-    same-tick release is silently missed. Dir/zip tiles take normal clicks.
+    same-tick release is silently missed. Dir/zip tiles take normal clicks. **Touch is
+    the exception**: a `pointerType: "touch"` press outside the picture's middle
+    (`[data-orbit-zone]`) starts no orbit — that band scrolls the grid — and the tile's
+    own `click` opens the lightbox. Each tile's `⋯` (`[data-tile-actions]`) opens the
+    menu with a plain click. For touch in headless Chromium, `Input.dispatchTouchEvent`
+    over CDP (after `Emulation.setTouchEmulationEnabled`) scrolls and orbits;
+    `Input.synthesizeScrollGesture` with a touch source does not
   - Grant clipboard upfront via `context.grantPermissions(['clipboard-read',
     'clipboard-write'])` — clipboard calls otherwise hang forever on a permission
     prompt in the headed MCP browser

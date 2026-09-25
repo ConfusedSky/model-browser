@@ -26,7 +26,6 @@ import { HttpError } from "../src/api/client";
 import {
   CHOOSER_FAILED,
   LAUNCH_FAILED,
-  OPEN_IN_PILL_CLASS,
   RESET_FAILED,
   resetFramingLive,
   type ActionHost,
@@ -55,6 +54,7 @@ import {
   renderThumbnail,
   semanticPosesFor,
   settle,
+  showMatchScores,
   similar,
   tiles,
   tinyStl,
@@ -140,19 +140,21 @@ const actionRow = (): HTMLElement | null =>
  *  (same accessible name) can never answer for it. */
 const openInRow = (): HTMLElement | null =>
   dialog()?.querySelector<HTMLElement>('[aria-label="Open in"]') ?? null;
-const panelPills = (): HTMLButtonElement[] =>
+const appButtons = (): HTMLButtonElement[] =>
   Array.from(
     openInRow()?.querySelectorAll<HTMLButtonElement>("[data-app-id]") ?? [],
   );
 /** The path bar's transient line, where a failure raised from a *tile* lands. */
 const pathError = (): string | null =>
-  container.querySelector("header p.text-red-400")?.textContent ?? null;
-/** The panel's own failure lines. `copyError` shares the class, so these read
- *  the text rather than counting nodes. */
+  container.querySelector('header [data-header-message="error"]')
+    ?.textContent ?? null;
+/** The panel's own failure lines, told apart from its confirmations by the
+ *  error tone. `copyError` shares it, so these read the text rather than
+ *  counting nodes. */
 const panelErrors = (): string[] =>
-  Array.from(dialog()?.querySelectorAll("p.text-red-400") ?? []).map(
-    (p) => p.textContent ?? "",
-  );
+  Array.from(
+    dialog()?.querySelectorAll('p[role="status"].text-danger') ?? [],
+  ).map((p) => p.textContent ?? "");
 const actions = (): string[] =>
   Array.from(
     actionRow()?.querySelectorAll<HTMLButtonElement>("button") ?? [],
@@ -165,8 +167,9 @@ const closeButton = (): HTMLButtonElement =>
   document.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!;
 const marked = (): HTMLElement | null =>
   container.querySelector<HTMLElement>(".animate-reveal-mark");
+/** By the title's first line: a scored tile adds its strength under the name. */
 const tile = (name: string): HTMLElement =>
-  tiles().find((t) => t.getAttribute("title") === name)!;
+  tiles().find((t) => t.getAttribute("title")?.split("\n")[0] === name)!;
 
 /** Writes to the cache for one path — the shape a PUT's body has. */
 interface Body {
@@ -278,25 +281,21 @@ describe("the info panel offers the entry actions", () => {
     await openLightbox("Alpha/found.stl");
     expect(dialog()).not.toBeNull();
 
-    // *Reset framing* is here and not in this surface's menu: only this press
-    // carries the live-session semantics that make it honest. *Re-render* is in
-    // neither — the closing persist is the re-render. *Copy path* is not
-    // duplicated: the panel already has it, beside the path it copies.
+    // *Reset framing* is here because this press carries the live-session
+    // semantics that make it honest on an open view. *Re-render* is not — the
+    // closing persist is the re-render. *Copy path* is not duplicated: the
+    // panel already has it, beside the path it copies.
     expect(actions()).toEqual(["reveal", "findSimilar", "resetFraming"]);
     expect(
       document.querySelector('button[aria-label="Copy path"]'),
     ).not.toBeNull();
   });
 
-  it("keeps reset framing where the deployment would not store the pixels", async () => {
-    // **What this pins is that `resetFraming` is not gated**, and the list is
-    // deliberately the same one the case above asserts: `reRenderThumbnail` is
-    // already absent here for the surface's own reason, so nothing in this row
-    // moves with the report. Give `resetFraming` the predicate that takes
-    // re-render off a *tile* menu on such a deployment and this fails — which
-    // is the whole point, because the panel is where the live body lives and a
-    // gate copied across would take a visitor's only way to hand a badly framed
-    // model back.
+  it("withholds reset framing where the deployment would not store the pixels", async () => {
+    // Gated like the re-render, on the panel as on the tile: where the
+    // deployment keeps no framing, nothing a visitor turns outlives the viewer,
+    // so closing the view is the reset and a "Reset framing" row promises a
+    // persistence the tile does not have (issue #23).
     await unmountApp();
     features.mockResolvedValue({ ...DEFAULT_REPORT, thumbWrites: false });
     // Both re-stated because the unmount clears them: without the index there
@@ -309,7 +308,7 @@ describe("the info panel offers the entry actions", () => {
     listDir.mockResolvedValue(NESTED);
     await openLightbox("Alpha/found.stl");
 
-    expect(actions()).toEqual(["reveal", "findSimilar", "resetFraming"]);
+    expect(actions()).toEqual(["reveal", "findSimilar"]);
   });
 
   it("puts the row after the metadata, drawn as the context menu’s own items", async () => {
@@ -329,24 +328,25 @@ describe("the info panel offers the entry actions", () => {
     // One style source, imported rather than copied — `EntryMenu` owns it.
     expect(action("reveal").className).toBe(MENU_ITEM_CLASS);
     expect(action("resetFraming").className).toBe(MENU_ITEM_CLASS);
-    // And the copy affordance is exactly as it was: the pill on the path line,
-    // which is part of that line rather than one of these.
+    // And the copy affordance stays on the path line, part of that line rather
+    // than one of these.
     const copy = document.querySelector<HTMLButtonElement>(
       'button[aria-label="Copy path"]',
     )!;
-    expect(copy.className).toContain("rounded-full");
+    expect(row.contains(copy)).toBe(false);
     expect(copy.className).not.toBe(MENU_ITEM_CLASS);
   });
 
-  it("offers the launch actions, exactly as the same surface’s menu does", async () => {
+  it("offers the launch actions, exactly as the same model’s menu does", async () => {
     // INVERTED 2026-08-25, and the semantics are the point: this test used to
     // pin that the panel *withholds* the launch actions (the L10 exclusion as
     // first written), and the user reversed that decision judging 4.3 on the
     // live app — the expanded viewer is exactly where someone decides a model
     // is the one to print, and the panel is the surface they read while
     // deciding. So what was pinned as a scope is now pinned as an offer: the
-    // pill row above the strip, *Open with…* in it, on the panel and the menu
-    // alike.
+    // application row above the strip, *Open with…* in it, on the panel and the
+    // menu alike. The lightbox raises no menu of its own, so the menu the panel
+    // has to agree with is the one on the model's tile.
     await unmountApp();
     apps.mockResolvedValue({
       chooser: true,
@@ -364,37 +364,8 @@ describe("the info panel offers the entry actions", () => {
     await mountApp("/models", NESTED);
     listDir.mockResolvedValue(NESTED);
 
-    await openLightbox("Alpha/found.stl");
-    // The strip gains *Open with…* and nothing else — `open` stays excluded
-    // (the model is already open), so the kind-aware label never shows here.
-    expect(actions()).toEqual([
-      "reveal",
-      "findSimilar",
-      "resetFraming",
-      "openWith",
-    ]);
-    // The pill row, above the strip: ids and names, default first, wearing the
-    // exported pill class so the panel's row and the menu's cannot drift.
-    expect(panelPills().map((b) => b.dataset.appId)).toEqual([
-      "f3d.desktop",
-      "lycheeslicer.desktop",
-    ]);
-    expect(panelPills().map((b) => b.textContent)).toEqual([
-      "F3D",
-      "LycheeSlicer",
-    ]);
-    expect(panelPills()[0]!.className).toContain(OPEN_IN_PILL_CLASS);
-    expect(openInRow()!.compareDocumentPosition(actionRow()!) & 4).toBe(4);
-    // The panel is not a menu: its pills are plain buttons in a labelled
-    // group, with `data-app-id` and no `data-command`, exactly as the menu's.
-    expect(openInRow()!.querySelector('[role="menuitem"]')).toBeNull();
-    expect(panelPills().every((p) => p.dataset.command === undefined)).toBe(
-      true,
-    );
-
-    // The menu on that same lightbox offers the same choices.
     await act(async () => {
-      dialog()!.dispatchEvent(
+      tile("Alpha/found.stl").dispatchEvent(
         new PointerEvent("pointerdown", {
           bubbles: true,
           button: 2,
@@ -403,7 +374,7 @@ describe("the info panel offers the entry actions", () => {
           clientY: 30,
         }),
       );
-      dialog()!.dispatchEvent(
+      tile("Alpha/found.stl").dispatchEvent(
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
@@ -413,12 +384,51 @@ describe("the info panel offers the entry actions", () => {
       );
     });
     const raised = document.querySelector<HTMLElement>('[role="menu"]')!;
-    expect(
-      Array.from(raised.querySelectorAll("[data-app-id]")).map(
-        (b) => b.textContent,
-      ),
-    ).toEqual(["F3D", "LycheeSlicer"]);
+    const menuApps = Array.from(
+      raised.querySelectorAll<HTMLElement>("[data-app-id]"),
+    ).map((b) => b.dataset.appId);
     expect(raised.querySelector('[data-command="openWith"]')).not.toBeNull();
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+
+    await openLightbox("Alpha/found.stl");
+    // The strip gains *Open with…* and nothing else — `open` stays excluded
+    // (the model is already open), so the kind-aware label never shows here.
+    // Everyday first, maintenance after, in the menu's order.
+    expect(actions()).toEqual([
+      "reveal",
+      "findSimilar",
+      "openWith",
+      "resetFraming",
+    ]);
+    // The row, right under the model's name and above the strip: ids and names,
+    // default first. The default is the panel's primary action, so it says
+    // what it does and is drawn apart from the rest rather than as one pill
+    // among equals.
+    expect(appButtons().map((b) => b.dataset.appId)).toEqual([
+      "f3d.desktop",
+      "lycheeslicer.desktop",
+    ]);
+    expect(appButtons().map((b) => b.dataset.appId)).toEqual(menuApps);
+    expect(appButtons().map((b) => b.textContent)).toEqual([
+      "Open in F3D",
+      "LycheeSlicer",
+    ]);
+    expect(appButtons()[0]!.className).not.toBe(appButtons()[1]!.className);
+    expect(openInRow()!.previousElementSibling?.textContent).toMatch(
+      /^found\.stl/,
+    );
+    expect(openInRow()!.compareDocumentPosition(actionRow()!) & 4).toBe(4);
+    // The panel is not a menu: its applications are plain buttons in a
+    // labelled group, with `data-app-id` and no `data-command`, exactly as the
+    // menu's rows.
+    expect(openInRow()!.querySelector('[role="menuitem"]')).toBeNull();
+    expect(appButtons().every((p) => p.dataset.command === undefined)).toBe(
+      true,
+    );
   });
 
   it("withholds find similar when the index is not answering", async () => {
@@ -446,26 +456,26 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     listDir.mockResolvedValue(NESTED);
   }
 
-  it("renders the pill row for a model whose type has applications, default first", async () => {
+  it("renders the application row for a model whose type has applications, default first", async () => {
     await remountWithApps(REPORT);
     await openLightbox("Alpha/found.stl");
 
     // Ids launch and names render — and the order is the assertion: the
     // default leads, the associations follow in the registry's order.
-    expect(panelPills().map((b) => b.dataset.appId)).toEqual([
+    expect(appButtons().map((b) => b.dataset.appId)).toEqual([
       F3D.id,
       LYCHEE.id,
       PHOTON.id,
     ]);
-    expect(panelPills().map((b) => b.textContent)).toEqual([
-      "F3D",
+    expect(appButtons().map((b) => b.textContent)).toEqual([
+      `Open in ${F3D.name}`,
       "LycheeSlicer",
       "Photon Workshop",
     ]);
   });
 
   it("renders no row when the type maps to no applications, keeping Open with…", async () => {
-    // Absent rather than present and inert — a caption with no pills is an
+    // Absent rather than present and inert — a row with no applications is an
     // affordance that does nothing. *Open with…* does not go with it: it
     // follows the chooser flag alone, exactly as the spec pairs them.
     await remountWithApps({ chooser: true, types: {} });
@@ -475,12 +485,12 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     expect(actions()).toContain("openWith");
   });
 
-  it("withholds Open with… when no chooser is configured, keeping the pill row", async () => {
+  it("withholds Open with… when no chooser is configured, keeping the application row", async () => {
     await remountWithApps({ ...REPORT, chooser: false });
     await openLightbox("Alpha/found.stl");
 
     expect(actions()).toEqual(["reveal", "findSimilar", "resetFraming"]);
-    expect(panelPills().map((b) => b.dataset.appId)).toEqual([
+    expect(appButtons().map((b) => b.dataset.appId)).toEqual([
       F3D.id,
       LYCHEE.id,
       PHOTON.id,
@@ -491,7 +501,7 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     await remountWithApps(REPORT);
     await openLightbox("Alpha/found.stl");
 
-    await click(panelPills()[1]!); // LycheeSlicer
+    await click(appButtons()[1]!); // LycheeSlicer
     await settle();
 
     expect(openApp).toHaveBeenCalledTimes(1);
@@ -503,8 +513,8 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
 
   it("reports a failed launch with the sentence for a named application, in the panel", async () => {
     // *In the panel*, not under the path bar: the lightbox is `fixed inset-0
-    // z-lightbox` over that bar behind a 70% scrim, so a sentence sent there is
-    // dimmed, parked in the far corner away from the pill just pressed, and
+    // z-lightbox` over that bar behind a scrim, so a sentence sent there is
+    // dimmed, parked in the far corner away from the button just pressed, and
     // gone in 2.5s. Success is silent, so this is the only feedback the press
     // gives. The sentence is still the shared one — only where it lands is
     // per-surface.
@@ -512,7 +522,7 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     await openLightbox("Alpha/found.stl");
 
     openApp.mockRejectedValueOnce(new Error("gtk-launch exited 1"));
-    await click(panelPills()[0]!);
+    await click(appButtons()[0]!);
     await settle();
 
     expect(panelErrors()).toContain(LAUNCH_FAILED);
@@ -526,7 +536,7 @@ describe("the panel’s launch actions (the 4.3 reversal, open-in-slicer L10)", 
     await openLightbox("Alpha/found.stl");
 
     openApp.mockRejectedValueOnce(new Error("gtk-launch exited 1"));
-    await click(panelPills()[0]!);
+    await click(appButtons()[0]!);
     await settle();
     expect(panelErrors()).toContain(LAUNCH_FAILED);
 
@@ -585,7 +595,9 @@ describe("a panel action that changes the view", () => {
     // D7: the panel says what the tile said, from the same derivation, so one
     // number cannot appear under two names across the two surfaces. Reached by
     // opening a neighbour from a similarity view, which is the only way a
-    // lightbox has a scored entry to describe.
+    // lightbox has a scored entry to describe. The numbers are shown only under
+    // "Show match scores"; the strength word always is.
+    await showMatchScores();
     similar.mockResolvedValue(NEIGHBOURS);
     await openLightbox("Alpha/found.stl");
     await click(action("findSimilar"));
@@ -599,6 +611,7 @@ describe("a panel action that changes the view", () => {
     expect(meta.textContent).toContain("0.912");
     expect(meta.textContent).toContain("4.03");
     expect(meta.textContent).not.toContain("k 0.912");
+    expect(meta.textContent).toContain("Strong"); // z 4.03, as the tile says
     // Among the metadata and before the actions: the panel describes the model
     // first. The action row still follows everything in the `<dl>`.
     const row = actionRow()!;
@@ -609,7 +622,9 @@ describe("a panel action that changes the view", () => {
     // Two surfaces, one guard. `Grid` withholds a badge from the anchor; a
     // panel without the same test would report the numbers the tile beneath it
     // refused, which is exactly what D7 says cannot happen — and the anchor
-    // requirement is not written per surface.
+    // requirement is not written per surface. Under "Show match scores", or
+    // there would be no numbers to withhold.
+    await showMatchScores();
     similar.mockResolvedValue(ANCHORED);
     await openLightbox("Alpha/found.stl");
     await click(action("findSimilar"));
@@ -623,13 +638,15 @@ describe("a panel action that changes the view", () => {
     expect(meta.textContent).not.toContain("1.000");
     expect(meta.textContent).not.toContain("9.99");
     expect(meta.textContent).not.toMatch(/\bsim\b/);
+    expect(meta.textContent).not.toContain("match");
     // Still a description of the model, just without a score it never had.
     expect(meta.textContent).toContain("format");
   });
 
   it("shows no such rows for a model opened from an ordinary listing", async () => {
     // Nothing scored this one, so there is no number to report and no row held
-    // in reserve for one.
+    // in reserve for one — even with the numbers asked for.
+    await showMatchScores();
     await openLightbox("Alpha/found.stl");
 
     const meta = document.querySelector("dl")!;
@@ -637,6 +654,7 @@ describe("a panel action that changes the view", () => {
     expect(meta.textContent).not.toMatch(/\bsim\b/);
     expect(meta.textContent).not.toMatch(/\bk\b/);
     expect(meta.textContent).not.toMatch(/\bz\b/);
+    expect(meta.textContent).not.toContain("match");
   });
 
   it("find similar lands the similarity view and leaves the same way", async () => {
@@ -653,7 +671,9 @@ describe("a panel action that changes the view", () => {
     expect(window.location.search).toContain(
       "similar=%2Fmodels%2FAlpha%2Ffound.stl",
     );
-    expect(tiles().map((t) => t.getAttribute("title"))).toContain("near.stl");
+    expect(
+      tiles().map((t) => t.getAttribute("title")?.split("\n")[0]),
+    ).toContain("near.stl");
     expect(
       writesFor(FOUND).filter((b) => b.camera !== undefined).length,
     ).toBeGreaterThan(0);

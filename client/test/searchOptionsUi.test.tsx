@@ -18,6 +18,7 @@ import {
   model,
   mountApp,
   mountAppAtCurrentUrl,
+  openPanel,
   pressEnter,
   searchInput,
   settle,
@@ -69,6 +70,11 @@ function searchTab(): HTMLButtonElement {
     container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]'),
   ).find((b) => b.textContent?.toLowerCase().startsWith("search"))!;
 }
+/** The panel starts closed for a fresh profile, so open it before the tab. */
+async function openSearchTab(): Promise<void> {
+  await openPanel();
+  await click(searchTab());
+}
 
 beforeEach(async () => {
   localStorage.clear();
@@ -83,7 +89,7 @@ beforeEach(async () => {
   listDir.mockImplementation((_t: string, opts?: { q?: string }) =>
     Promise.resolve(opts?.q === "sandy" ? RESULTS : NESTED),
   );
-  await click(searchTab());
+  await openSearchTab();
 });
 
 afterEach(() => unmountApp());
@@ -316,7 +322,7 @@ describe("search options", () => {
     );
     await settle();
     // unmountApp cleared storage, so the panel is back on its default tab.
-    await click(searchTab());
+    await openSearchTab();
     expect(panelButton("Match folder names").getAttribute("aria-checked")).toBe(
       "false",
     );

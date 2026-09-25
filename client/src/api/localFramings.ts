@@ -256,6 +256,13 @@ class LocalFramingClient implements ApiClient {
   listDir(...args: Parameters<ApiClient["listDir"]>): Promise<DirListing> {
     return this.inner.listDir(...args);
   }
+  nameMatchCount(
+    ...args: Parameters<NonNullable<ApiClient["nameMatchCount"]>>
+  ): Promise<number> {
+    return this.inner.nameMatchCount === undefined
+      ? Promise.reject(new Error("name counts unsupported"))
+      : this.inner.nameMatchCount(...args);
+  }
   models(...args: Parameters<ApiClient["models"]>): Promise<ModelsListing> {
     return this.inner.models(...args);
   }

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import Icon from "./Icon";
 
 /**
  * Summoned rather than permanent, because filtering is ephemeral view state —
@@ -11,6 +12,7 @@ export default function FindBar({
   focusSignal,
   onChange,
   onClose,
+  onDown,
 }: {
   value: string;
   /** `null` while a listing is in flight, when the count would describe the
@@ -19,6 +21,8 @@ export default function FindBar({
   focusSignal: number;
   onChange: (value: string) => void;
   onClose: () => void;
+  /** ↓ leaves the box for the narrowed grid, as it does from search. */
+  onDown?: () => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
 
@@ -32,11 +36,9 @@ export default function FindBar({
   return (
     <div
       data-find-bar
-      className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-4 py-2"
+      className="mx-4 mt-3 flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-3"
     >
-      <span aria-hidden="true" className="text-xs text-zinc-500">
-        ⌕
-      </span>
+      <Icon name="filter" className="size-3.5 text-ink-3" />
       <input
         ref={ref}
         value={value}
@@ -46,22 +48,29 @@ export default function FindBar({
             e.stopPropagation();
             onClose();
           }
+          if (e.key === "ArrowDown" && onDown !== undefined) {
+            e.preventDefault();
+            onDown();
+          }
         }}
         placeholder="Narrow these by name…"
         aria-label="Narrow these by name"
         spellCheck={false}
-        className="min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none"
+        className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-3"
       />
       {count !== null && (
-        <span className="shrink-0 text-xs text-zinc-500">{count} shown</span>
+        <span className="shrink-0 text-xs tabular-nums text-ink-3">
+          {count} shown
+        </span>
       )}
       <button
         type="button"
         onClick={onClose}
         aria-label="Close find"
-        className="shrink-0 rounded px-2 text-sm text-zinc-400 hover:text-zinc-100"
+        title="Close (Esc)"
+        className="flex size-6 shrink-0 items-center justify-center rounded text-ink-3 hover:bg-white/5 hover:text-ink touch:size-11"
       >
-        ✕
+        <Icon name="x" className="size-3.5" />
       </button>
     </div>
   );

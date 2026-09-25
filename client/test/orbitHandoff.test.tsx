@@ -164,6 +164,43 @@ describe("orbit → thumbnail handoff", () => {
     expect(props.onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it("a finger's release inside the tile ends the overlay too, where a mouse's waits for it to leave", async () => {
+    // happy-dom lays nothing out, so the overlay's rect is all zeros and a
+    // release at (0, 0) is the one that lands "inside" it.
+    async function dragAndReleaseInside(pointerType: string): Promise<void> {
+      await act(async () => {
+        pointer("pointermove", 80, 50);
+        pointer("pointermove", 90, 60);
+        window.dispatchEvent(
+          new PointerEvent("pointerup", {
+            bubbles: true,
+            clientX: 0,
+            clientY: 0,
+            pointerType,
+          }),
+        );
+      });
+    }
+
+    const mouse = makeProps();
+    await render(mouse.props);
+    await dragAndReleaseInside("mouse");
+    mouse.resolvePersist();
+    await settle();
+    expect(mouse.props.onDismiss).not.toHaveBeenCalled();
+    await act(async () => root?.unmount());
+    container?.remove();
+
+    // A touch stays captured by the tile it pressed, so no pointerleave ever
+    // reaches the overlay: without this the overlay floats on over the grid.
+    const touch = makeProps();
+    await render(touch.props);
+    await dragAndReleaseInside("touch");
+    touch.resolvePersist();
+    await settle();
+    expect(touch.props.onDismiss).toHaveBeenCalledTimes(1);
+  });
+
   it("a held dismissal yields to a new gesture on the tile", async () => {
     const { props, resolvePersist } = makeProps();
     await render(props);
@@ -495,6 +532,61 @@ describe("the orbit baseline tracks the pointer", () => {
         [0, 0],
         [5, 5],
       ]);
+    } finally {
+      orbit.mockRestore();
+    }
+  });
+});
+
+describe("the lightbox stage", () => {
+  /** A press on `el` and a drag past the threshold, released on the window. */
+  async function dragFrom(el: Element): Promise<void> {
+    await act(async () => {
+      el.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 0,
+          clientX: 50,
+          clientY: 50,
+        }),
+      );
+      pointer("pointermove", 80, 50);
+      pointer("pointermove", 90, 60);
+      pointer("pointerup", 90, 60);
+    });
+  }
+
+  it("turns the model from the gutter beside the square, not only from the square", async () => {
+    // The gutters are drawn as the same surface as the canvas; a press there
+    // that did nothing read as a broken drag.
+    const { props } = makeProps();
+    const orbit = vi.spyOn(ViewerSession.prototype, "orbit");
+    try {
+      await render({
+        ...props,
+        viewer: { ...props.viewer, mode: "lightbox" as const },
+      });
+      const stage = container!.querySelector("[data-lightbox-stage]")!;
+      await dragFrom(stage);
+      expect(orbit).toHaveBeenCalled();
+    } finally {
+      orbit.mockRestore();
+    }
+  });
+
+  it("leaves a press on the stage's own controls to them", async () => {
+    const { props } = makeProps();
+    const orbit = vi.spyOn(ViewerSession.prototype, "orbit");
+    try {
+      await render({
+        ...props,
+        viewer: { ...props.viewer, mode: "lightbox" as const },
+      });
+      const pill = container!.querySelector(
+        "[data-lightbox-stage] [data-stage-control] button",
+      )!;
+      await dragFrom(pill);
+      expect(orbit).not.toHaveBeenCalled();
     } finally {
       orbit.mockRestore();
     }

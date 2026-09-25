@@ -16,6 +16,7 @@ import {
   container,
   DEFAULT_REPORT,
   dir,
+  dismissButton,
   features,
   findInput,
   indexAvailability,
@@ -23,9 +24,9 @@ import {
   listDir,
   model,
   mountAppAtCurrentUrl,
-  openFind,
   pathInput,
   pressEnter,
+  resultsLabel,
   searchInput,
   settle,
   similar,
@@ -39,6 +40,7 @@ import {
   setSearchTuning,
   TUNING_DEFAULTS,
 } from "../src/lib/searchOptions";
+import { showScoresStore } from "../src/lib/scoreScale";
 import { SIMILAR_K } from "../src/state/view";
 
 vi.mock("../src/api/client", async () =>
@@ -93,18 +95,11 @@ const ANCHORED = {
 
 const READY = { state: "ready", collectionRoot: "/models", covers: ["stl"] };
 
-/** The one dismiss control, wherever the view is about something (D9). */
-function dismissButton(): HTMLButtonElement | undefined {
-  return Array.from(
-    container.querySelectorAll<HTMLButtonElement>("main button"),
-  ).find((b) => b.textContent?.includes("Dismiss"));
-}
-/** The offer to narrow the results by name — rendered only where there ARE
- *  results, so it is also a reading of what the view counts as one. */
-function narrowButton(): HTMLButtonElement | undefined {
-  return Array.from(
-    container.querySelectorAll<HTMLButtonElement>("main button"),
-  ).find((b) => b.textContent?.includes("Narrow"));
+/** The toolbar's offer to narrow what is on screen by name. */
+function narrowButton(): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    "button[data-narrow-toggle]",
+  );
 }
 function nameButton(): HTMLButtonElement | undefined {
   return Array.from(
@@ -176,7 +171,8 @@ describe("a similarity view", () => {
     // No listing was walked for its sake: the neighbours ARE the grid.
     expect(listDir).not.toHaveBeenCalled();
     expect(labels()).toEqual(["base.stl", "wing.stl"]);
-    expect(container.textContent).toContain('Models similar to "hero.stl"');
+    expect(resultsLabel()).toBe("2 similar models “hero.stl”");
+    expect(container.textContent).toContain("From across the collection.");
   });
 
   it("carries none of the meaning query’s residue", async () => {
@@ -199,7 +195,7 @@ describe("a similarity view", () => {
     expect(container.textContent).not.toContain(
       "returned fewer than asked for",
     );
-    expect(container.textContent).not.toContain("Meaning matches");
+    expect(resultsLabel()).not.toMatch(/match/);
   });
 
   it("names the model, the place and the toggle in the URL — and, when it advances, drops what it never read", async () => {
@@ -256,14 +252,14 @@ describe("a similarity view", () => {
     similar.mockResolvedValue(NEIGHBOURS);
     await mountAppAtCurrentUrl(LINK, NESTED);
     await settle();
-    expect(dismissButton()).toBeDefined();
+    expect(dismissButton()).not.toBeNull();
 
     listDir.mockResolvedValue({ path: "/models", entries: [dir("Alpha")] });
     await click(dismissButton()!);
     await settle();
     expect(labels()).toEqual(["Alpha"]);
     // Gone, because there is nothing left to dismiss.
-    expect(dismissButton()).toBeUndefined();
+    expect(dismissButton()).toBeNull();
 
     // The same control, over a committed query — the model case is not a
     // second affordance beside a text one.
@@ -274,20 +270,20 @@ describe("a similarity view", () => {
     await type(searchInput(), "widget");
     await pressEnter(searchInput());
     await settle();
-    expect(dismissButton()).toBeDefined();
+    expect(dismissButton()).not.toBeNull();
     expect(location.search).toContain("q=widget");
 
     listDir.mockResolvedValue({ path: "/models", entries: [dir("Alpha")] });
     await click(dismissButton()!);
     await settle();
     expect(location.search).not.toContain("q=");
-    expect(dismissButton()).toBeUndefined();
+    expect(dismissButton()).toBeNull();
   });
 
   it("an empty answer says what it is, in terms of the model it came from", async () => {
     // 4.6b. Two failures at once before the subject reached these places: a
-    // blank label, and an empty result falling through to Grid's bare "Nothing
-    // to show here" as though the folder were the empty thing.
+    // blank label, and an empty result falling through to Grid's empty-listing
+    // line as though the folder were the empty thing.
     indexAvailability.mockResolvedValue(READY);
     similar.mockResolvedValue({ ...NEIGHBOURS, entries: [] });
     await mountAppAtCurrentUrl(LINK, NESTED);
@@ -296,11 +292,11 @@ describe("a similarity view", () => {
     expect(container.textContent).toContain(
       'Nothing in the collection is similar to "hero.stl"',
     );
-    expect(container.textContent).not.toContain("Nothing to show here");
+    expect(container.textContent).not.toContain("Nothing here.");
     // Not the phrase sentence with an empty phrase in it, either.
-    expect(container.textContent).not.toContain('Nothing matched ""');
+    expect(container.textContent).not.toContain("Nothing matched “”");
     // And still leaveable — an empty view is the one that most needs a way out.
-    expect(dismissButton()).toBeDefined();
+    expect(dismissButton()).not.toBeNull();
   });
 
   it("shows the model the neighbours were computed from, first and marked as the subject", async () => {
@@ -330,7 +326,8 @@ describe("a similarity view", () => {
     // A neighbour cosine of 0.912 sits beside a meaning search's 0.107 in the
     // same grid affordance, and only the label keeps the first from reading as
     // eight times the match — so the label is what this asserts, not just the
-    // digits.
+    // digits. The numbers are drawn only under "Show match scores".
+    showScoresStore.write(true);
     indexAvailability.mockResolvedValue(READY);
     similar.mockResolvedValue(ANCHORED);
     await mountAppAtCurrentUrl(LINK, NESTED);
@@ -358,7 +355,9 @@ describe("a similarity view", () => {
     // contents — the thumbnail is `alt=""` for exactly that reason — so a badge
     // drawn inside the button reaches a screen reader only if the label says
     // it. Spelled out because `sim` read aloud is not a word, and `k` is a
-    // letter this app already spends on the neighbour count.
+    // letter this app already spends on the neighbour count. Under "Show match
+    // scores", which is what draws the numbers.
+    showScoresStore.write(true);
     indexAvailability.mockResolvedValue(READY);
     similar.mockResolvedValue(ANCHORED);
     await mountAppAtCurrentUrl(LINK, NESTED);
@@ -389,9 +388,7 @@ describe("a similarity view", () => {
     );
     // Said with the model on screen above it, not instead of it.
     expect(labels()).toEqual(["hero.stl"]);
-    expect(container.textContent).not.toContain("Nothing to show here");
-    // The offer to narrow the results reads the neighbours, and there are none.
-    expect(narrowButton()).toBeUndefined();
+    expect(container.textContent).not.toContain("Nothing here.");
   });
 
   it("asking for the reference’s own neighbours re-asks the same question, and needs no special case", async () => {
@@ -433,9 +430,10 @@ describe("a similarity view", () => {
     similar.mockResolvedValue(ANCHORED);
     await mountAppAtCurrentUrl(LINK, NESTED);
     await settle();
-    expect(narrowButton()).toBeDefined();
 
-    await openFind();
+    // Through the visible control rather than the shortcut, which is the one
+    // way in that nothing else here exercises.
+    await click(narrowButton()!);
     await type(findInput()!, "wing");
     await settle();
     expect(labels()).toEqual(["hero.stl", "wing.stl"]);
@@ -466,7 +464,7 @@ describe("a similarity view", () => {
     expect(nameButton()).toBeUndefined();
     // The one control serves the banner too: the view is still about the model
     // even though the grid on screen is the folder standing in for it.
-    expect(dismissButton()).toBeDefined();
+    expect(dismissButton()).not.toBeNull();
     // The link keeps naming what it named while it waits.
     expect(location.search).toContain("similar=");
   });

@@ -7,6 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { baseName } from "../../../shared/names";
+import Icon from "./Icon";
 import type { DirEntry, IndexScore } from "../../../shared/types";
 import type { ThumbState } from "../hooks/useThumbnails";
 import { formatCosine, formatZ } from "../lib/format";
@@ -16,6 +17,7 @@ import {
   SCALE_BADGE,
   SCALE_SPOKEN,
   Z_LABEL,
+  strengthOf,
   type ScoreScale,
 } from "../lib/scoreScale";
 import type { Band } from "../three/queue";
@@ -33,6 +35,14 @@ const CELL_BAND: Record<Band, Band> = {
   visible: "near",
   near: "far",
   far: "far",
+};
+
+export type TileSize = "s" | "m" | "l";
+/** Whole literals, one per size, so each reaches the stylesheet. */
+const GRID_CLASS: Record<TileSize, string> = {
+  s: "grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-2 px-3 pt-1 pb-6 sm:px-4",
+  m: "grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-3 px-3 pt-1 pb-6 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] sm:px-4",
+  l: "grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-4 px-3 pt-1 pb-6 sm:px-4",
 };
 
 const ARROWS = new Set(["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"]);
@@ -95,6 +105,11 @@ interface Props {
    *  against the default viewport root is inert (D2). A `RefObject` so it is
    *  stable in deps and populated during commit. */
   scrollRoot: RefObject<HTMLElement | null>;
+  size?: TileSize;
+  /** The raw score pair on each result, rather than the strength alone. */
+  showScores?: boolean;
+  /** The set's best is middling; strength words stop at "Fair". */
+  modestSet?: boolean;
 }
 
 function menuAt(
@@ -128,6 +143,9 @@ function Grid({
   onPeek,
   onBands,
   scrollRoot,
+  size = "m",
+  showScores = false,
+  modestSet = false,
 }: Props) {
   const gridRef = useRef<HTMLDivElement>(null);
   /** Each observed tile's last record from each observer. A tile heard by one
@@ -304,17 +322,14 @@ function Grid({
   // conditional.
   if (entries.length === 0) {
     return (
-      <p className="mt-16 text-center text-sm text-zinc-600">
-        Nothing to show here.
-      </p>
+      <div className="mt-20 flex flex-col items-center gap-2 text-center">
+        <Icon name="folder" className="size-8 text-ink-3" strokeWidth={1.5} />
+        <p className="text-sm text-ink-2">Nothing here.</p>
+      </div>
     );
   }
   return (
-    <div
-      ref={gridRef}
-      className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 p-4"
-      onKeyDown={onKeyDown}
-    >
+    <div ref={gridRef} className={GRID_CLASS[size]} onKeyDown={onKeyDown}>
       {entries.map((entry) => {
         // The map's own array, so the memo sees an unchanged preview list as
         // unchanged. Folders only — a zip is never peeked.
@@ -344,6 +359,8 @@ function Grid({
             // object so the memo sees an unchanged answer as unchanged.
             score={scoreScale === null ? undefined : scoreFor(entry.path)}
             scale={scoreScale}
+            showScores={showScores}
+            modest={modestSet}
           />
         );
       })}
@@ -353,14 +370,94 @@ function Grid({
 
 export default memo(Grid);
 
+/** How far a z-score stands out, as a share of the bar: z≈5 is about as far
+ *  above the collection as any result gets, and a sliver always shows. */
+function relevanceWidth(z: number): number {
+  return Math.min(100, Math.max(6, (z / 5) * 100));
+}
+
 /**
- * A corner badge. `pointer-events-none` so it is never the target of the press
+ * Where a result lives, under its name. A deep search or a flat view carries
+ * the path relative to where it ran; without this line two same-named files
+ * from different kits look like duplicates.
+ */
+function ParentLine({ name }: { name: string }) {
+  const slash = name.lastIndexOf("/");
+  if (slash <= 0) return null;
+  const inArchive = name.includes("!/");
+  const raw = name.slice(0, slash).split("/");
+  // Inside an archive the archive is what tells the copy apart from its
+  // extracted twin, so its name is the part kept whole.
+  const zipAt = raw.findIndex((p) => p.endsWith("!"));
+  const keep = inArchive && zipAt >= 0 ? zipAt : raw.length - 1;
+  const clean = raw.map((p) => p.replace(/!$/, ""));
+  const last =
+    keep === raw.length - 1
+      ? clean[keep]!
+      : `${clean[keep]} › ${clean[clean.length - 1]}`;
+  const head = clean.slice(0, keep).join("/");
+  // Otherwise the nearest folder is kept whole, and the rest gives way from
+  // its end.
+  return (
+    <span
+      data-tile-parent
+      className="-mt-1.5 flex w-full min-w-0 items-center gap-1 px-2.5 pb-2 text-xs leading-tight text-ink-3"
+    >
+      {inArchive && <Icon name="archive" className="size-3 text-accent/70" />}
+      <span className="flex min-w-0">
+        {head !== "" && <span className="min-w-[2ch] truncate">{head}/</span>}
+        <span className="max-w-[80%] shrink-0 truncate">{last}</span>
+      </span>
+    </span>
+  );
+}
+
+/** A model's name with its extension quieted: the stem is what tells two
+ *  models apart, the format is the same across a folder. */
+function TileName({ name }: { name: string }) {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || name.length - dot > 6) return <>{name}</>;
+  return (
+    <>
+      {name.slice(0, dot)}
+      <span className="text-ink-3">{name.slice(dot)}</span>
+    </>
+  );
+}
+
+/** Placeholder tiles shaped like the real ones, so the grid does not jump when
+ *  the listing lands. */
+export function SkeletonGrid({ size = "m" }: { size?: TileSize }) {
+  return (
+    <div aria-hidden="true" className={GRID_CLASS[size]}>
+      {Array.from({ length: 12 }, (_, i) => (
+        <div
+          key={i}
+          className="animate-pulse overflow-hidden rounded-xl border border-line bg-surface"
+        >
+          <div className="aspect-square w-full bg-sunken" />
+          <div className="px-2.5 py-2.5">
+            <div className="h-2.5 w-2/3 rounded-full bg-white/5" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Two card edges peeking above a folder: a collection, not an item. Drawn in
+ *  the row gap, so it costs the grid nothing. */
+const STACK_CLASS =
+  " shadow-[0_-7px_0_-3px_rgb(255_255_255/0.09),0_-13px_0_-7px_rgb(255_255_255/0.045)]";
+
+/**
+ * A score badge. `pointer-events-none` so it is never the target of the press
  * that orbits the tile, and `z-tile-badge` so the opaque orbit overlay does not
  * cover it — no ancestor of a tile makes a stacking context, so the two resolve
  * against the same root. index.css orders the five z layers.
  */
 const BADGE_CLASS =
-  "pointer-events-none absolute top-0 z-tile-badge rounded bg-zinc-950/80 px-1 py-px text-[0.625rem] font-medium tabular-nums leading-tight text-zinc-300 ring-1 ring-zinc-800/60";
+  "pointer-events-none absolute bottom-2 z-tile-badge rounded-full bg-canvas/85 px-1.5 py-0.5 text-[11px] font-medium tabular-nums leading-none text-ink-2 ring-1 ring-line-strong backdrop-blur-sm";
 
 /**
  * What one thumbnail looks like at any moment, for a model tile and a sheet
@@ -372,12 +469,16 @@ function ThumbView({
   thumb,
   path,
   onImageError,
+  quiet = false,
 }: {
   thumb: ThumbState | undefined;
   /** The cell's own path in a folder sheet, not the folder's, so a failed
    *  image is reported for the entry it belongs to (D3). */
   path: string;
   onImageError?: (path: string) => void;
+  /** A sheet cell: four spinners to a folder is a wall of them, so a cell
+   *  waits as a faint block and its picture fades in. */
+  quiet?: boolean;
 }) {
   // Only until the *first* picture: a later URL replaces it on arrival while
   // the browser keeps the old pixels up, so spinning over them would discard a
@@ -385,8 +486,12 @@ function ThumbView({
   const [everLoaded, setEverLoaded] = useState(false);
   if (thumb?.status === "error") {
     return (
-      <span className="text-2xl" title="Failed to load model">
-        ⚠️
+      <span
+        className="flex flex-col items-center gap-1.5 text-ink-3"
+        title="Failed to load model"
+      >
+        <Icon name="warning" className="size-5" strokeWidth={1.5} />
+        <span className="text-xs">Couldn't render</span>
       </span>
     );
   }
@@ -415,14 +520,16 @@ function ThumbView({
               : "h-full w-full object-contain"
           }
         />
-        {pending ? (
-          <span className="absolute size-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
+        {pending && !quiet ? (
+          <span className="absolute size-5 animate-spin rounded-full border-2 border-white/10 border-t-white/40" />
         ) : null}
       </span>
     );
   }
-  return (
-    <span className="size-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-400" />
+  return quiet ? (
+    <span className="size-3/5 animate-[pulse_2.4s_ease-in-out_infinite] rounded-md bg-white/[0.035]" />
+  ) : (
+    <span className="size-5 animate-spin rounded-full border-2 border-white/10 border-t-white/40" />
   );
 }
 
@@ -444,7 +551,7 @@ function ContactSheet({
   return (
     <div
       data-preview-sheet={preview.length}
-      className={`grid min-h-0 w-full flex-1 gap-1 ${preview.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}
+      className={`grid h-full min-h-0 w-full gap-1 ${preview.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}
     >
       {preview.map((entry, i) => (
         <div
@@ -458,8 +565,8 @@ function ContactSheet({
           className={
             // The odd one out of three, given the full width below the pair.
             preview.length === 3 && i === 2
-              ? "flex min-h-0 items-center justify-center overflow-hidden rounded [container-type:size] col-span-2"
-              : "flex min-h-0 items-center justify-center overflow-hidden rounded [container-type:size]"
+              ? "flex min-h-0 items-center justify-center overflow-hidden rounded-md bg-stage [container-type:size] col-span-2"
+              : "flex min-h-0 items-center justify-center overflow-hidden rounded-md bg-stage [container-type:size]"
           }
         >
           <ThumbView
@@ -469,6 +576,7 @@ function ContactSheet({
             thumb={thumbs?.[i]}
             path={entry.path}
             onImageError={onImageError}
+            quiet
           />
         </div>
       ))}
@@ -497,6 +605,8 @@ interface TileProps {
   anchor: boolean;
   score: IndexScore | undefined;
   scale: ScoreScale | null;
+  showScores: boolean;
+  modest: boolean;
   /** The map's own array (see `Grid`), so compared by identity. */
   preview: DirEntry[] | undefined;
   /** Rebuilt every render, so `tilePropsEqual` compares it elementwise. */
@@ -538,18 +648,22 @@ const Tile = memo(function Tile({
   anchor,
   score,
   scale,
+  showScores,
+  modest,
   preview,
   previewThumbs,
 }: TileProps) {
   const ref = useRef<HTMLButtonElement>(null);
+  /** A touch press that began outside the orbit zone: its click is a tap. */
+  const edgeTapRef = useRef(false);
   const base =
-    "group flex aspect-square w-full flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 p-2 text-zinc-300 transition-colors hover:border-zinc-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500";
+    "group flex h-full w-full flex-col overflow-hidden rounded-xl border border-line bg-surface text-left text-ink-2 transition-colors hover:border-line-strong hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
   // A CSS animation (index.css), not a class swap, so the fade is the
   // browser's and App only drops the state that applied it.
   const markClass = marked ? " animate-reveal-mark" : "";
   // Deliberately a quiet ring: anything louder reads as "this one matched
   // hardest", the opposite of what the subject is.
-  const anchorClass = anchor ? " border-sky-800 ring-1 ring-sky-800" : "";
+  const anchorClass = anchor ? " border-accent/40 ring-1 ring-accent/40" : "";
   // Both or neither: the two scoring routes run on different distributions, so
   // an unlabelled cosine invites a comparison it cannot support (D2).
   const badges =
@@ -568,164 +682,257 @@ const Tile = memo(function Tile({
     return true;
   };
 
+  // A sibling of the tile, never inside it: a button may not hold another,
+  // and a press here must not start the tile's orbit. Out of the tab order —
+  // the tile itself takes Shift+F10 and the Menu key — and drawn on hover,
+  // focus, or always where there is no hover to reveal it.
+  const actions = (
+    <button
+      type="button"
+      tabIndex={-1}
+      data-tile-actions
+      aria-label={`Actions for ${entry.name}`}
+      title="Actions"
+      onClick={(e) => {
+        const tile = ref.current;
+        if (tile === null) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        onEntryMenu(entry, tile, { x: r.left, y: r.bottom + 4 });
+      }}
+      className="absolute top-1.5 right-1.5 z-tile-badge flex size-8 items-center touch:size-10 justify-center rounded-md bg-black/45 text-ink-2 opacity-0 ring-1 ring-white/10 backdrop-blur-sm transition-opacity group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 hover:text-ink [@media(hover:none)]:opacity-100"
+    >
+      <Icon name="more" className="size-4" strokeWidth={2.5} />
+    </button>
+  );
+
   if (entry.kind !== "model") {
     return (
-      <button
-        ref={ref}
-        type="button"
-        data-entry-tile={entry.path}
-        title={entry.name}
-        // Set only where a stored name is drawn below, or the stored name would
-        // *become* the accessible name — the real one has to stay there
-        // (`library-overrides` D7). That puts label and name deliberately out of
-        // step (WCAG 2.5.3) on exactly those tiles: a knowing trade, since the
-        // real name is what a reader acts on outside this app. Kind-split
-        // because a named zip must not announce "folder".
-        aria-label={
-          entry.displayName !== undefined
-            ? entry.kind === "dir"
-              ? `folder ${entry.name}`
-              : entry.name
-            : undefined
-        }
-        className={base + markClass + anchorClass}
-        onClick={() => onEnter(entry)}
-        onContextMenu={(e) => {
-          if (nativeMenuRequested(e)) return;
-          e.preventDefault();
-          onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e));
-        }}
-        onKeyDown={onMenuKey}
-        // What the observer watches. Folders only — a zip is not peeked, and an
-        // absent attribute cannot be picked up by mistake.
-        data-dir-tile={entry.kind === "dir" ? entry.path : undefined}
-      >
-        {/* The folder chrome — a tab and a framed body — IS the directory
-            tile's icon, drawn whether or not anything previews: the resting
-            look and the filled look are one shape, so a peek landing fills the
-            folder rather than replacing an emoji with chrome — no pop-in, and
-            an empty folder still reads as a folder.
-            The sheet, when there is one, sits inside: the images are *inside*
-            the folder, the way every desktop draws it, which is what keeps a
-            one-preview sheet from reading as a model tile. Only zips keep the
-            emoji — they are never previewed and are not folders. */}
-        {entry.kind === "dir" ? (
-          // The chrome carries the type signal a glyph would otherwise leak
-          // into the content-derived accessible name. A named tile's
-          // button-level label takes over whole.
-          <div
-            data-folder-chrome
-            role="img"
-            aria-label="folder"
-            className="flex min-h-0 w-full flex-1 flex-col px-1 pt-1"
-          >
-            <div className="h-2.5 w-1/2 shrink-0 rounded-t-md bg-amber-400/40" />
-            <div className="flex min-h-0 w-full flex-1 rounded-b-md rounded-tr-md bg-amber-400/40 p-1">
-              {preview !== undefined && preview.length > 0 && (
+      <div className="group/tile relative h-full">
+        <button
+          ref={ref}
+          type="button"
+          data-entry-tile={entry.path}
+          title={entry.name}
+          // Set only where a stored name is drawn below, or the stored name would
+          // *become* the accessible name — the real one has to stay there
+          // (`library-overrides` D7). That puts label and name deliberately out of
+          // step (WCAG 2.5.3) on exactly those tiles: a knowing trade, since the
+          // real name is what a reader acts on outside this app. Kind-split
+          // because a named zip must not announce "folder".
+          aria-label={
+            entry.displayName !== undefined
+              ? entry.kind === "dir"
+                ? `folder ${entry.name}`
+                : entry.name
+              : undefined
+          }
+          className={
+            (entry.kind === "dir" ? base + STACK_CLASS : base) +
+            markClass +
+            anchorClass
+          }
+          onClick={() => onEnter(entry)}
+          onContextMenu={(e) => {
+            if (nativeMenuRequested(e)) return;
+            e.preventDefault();
+            onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e));
+          }}
+          onKeyDown={onMenuKey}
+          // What the observer watches. Folders only — a zip is not peeked, and an
+          // absent attribute cannot be picked up by mistake.
+          data-dir-tile={entry.kind === "dir" ? entry.path : undefined}
+        >
+          {/* The folder chrome — a tab and a framed body — IS the directory
+              tile's icon, drawn whether or not anything previews: the resting
+              look and the filled look are one shape, so a peek landing fills the
+              folder rather than replacing an emoji with chrome — no pop-in, and
+              an empty folder still reads as a folder.
+              The sheet, when there is one, sits inside: the images are *inside*
+              the folder, the way every desktop draws it, which is what keeps a
+              one-preview sheet from reading as a model tile. Only zips keep the
+              emoji — they are never previewed and are not folders. */}
+          {entry.kind === "dir" ? (
+            // The chrome carries the type signal a glyph would otherwise leak
+            // into the content-derived accessible name. A named tile's
+            // button-level label takes over whole.
+            <div
+              data-folder-chrome
+              role="img"
+              aria-label="folder"
+              className="relative aspect-square w-full bg-sunken p-1.5"
+            >
+              {preview !== undefined && preview.length > 0 ? (
                 <ContactSheet
                   preview={preview}
                   thumbs={previewThumbs}
                   onImageError={onImageError}
                 />
+              ) : (
+                <span className="flex h-full items-center justify-center text-ink-3/60">
+                  <Icon name="folder" className="size-10" strokeWidth={1.25} />
+                </span>
               )}
             </div>
-          </div>
-        ) : (
-          // A bare emoji leaks into the accessible name as whatever the
-          // reader's symbol dictionary says.
-          <span role="img" aria-label="zip archive" className="text-4xl">
-            🗜️
+          ) : (
+            // A bare glyph leaks into the accessible name as whatever the
+            // reader's symbol dictionary says.
+            <span
+              role="img"
+              aria-label="zip archive"
+              className="flex aspect-square w-full items-center justify-center bg-stage text-ink-3"
+            >
+              <Icon name="archive" className="size-10" strokeWidth={1.25} />
+            </span>
+          )}
+          {/* The leaf, not the relative path a deep search carries — truncating
+              that shows the head of the path rather than the folder searched for.
+              A stored name displaces it, for display only: the title, the
+              accessible name and every matcher still read `entry.name` (D7). */}
+          <span
+            data-tile-name
+            className="flex w-full min-w-0 items-center gap-1.5 px-2.5 py-2 text-[13px] leading-tight"
+          >
+            <Icon
+              name={entry.kind === "dir" ? "folder" : "archive"}
+              className="size-3.5 text-accent/80"
+            />
+            <span className="min-w-0 truncate">
+              {entry.displayName ?? baseName(entry.name)}
+            </span>
           </span>
-        )}
-        {/* The leaf, not the relative path a deep search carries — truncating
-            that shows the head of the path rather than the folder searched for.
-            A stored name displaces it, for display only: the title, the
-            accessible name and every matcher still read `entry.name` (D7). */}
-        <span className="w-full truncate text-center text-xs">
-          {entry.displayName ?? baseName(entry.name)}
-        </span>
-      </button>
+          <ParentLine name={entry.name} />
+        </button>
+        {actions}
+      </div>
     );
   }
 
   return (
-    <button
-      ref={ref}
-      type="button"
-      data-model-tile={entry.path}
-      data-entry-tile={entry.path}
-      title={entry.name}
-      // An accessible name *replaces* the contents rather than joining them, so
-      // the full path, the anchor and the badge numbers are only announced if
-      // they are stated here (D8). The scales are spelled out for reading aloud.
-      aria-label={
-        (thumb?.status === "error"
-          ? `${entry.name} — failed to load`
-          : entry.name) +
-        (anchor ? " — the model these are compared against" : "") +
-        (badges === null
-          ? ""
-          : ` — ${SCALE_SPOKEN[badges.scale]} ${formatCosine(badges.score.score)}, ${Z_LABEL} ${formatZ(badges.score.z)}`)
-      }
-      className={`${base} touch-none select-none${markClass}${anchorClass}`}
-      onPointerDown={(e) => onModelPointerDown(e, entry, e.currentTarget)}
-      // A shifted secondary press is the one exception: not prevented, not
-      // raised, so the browser's own menu appears.
-      onContextMenu={(e) => {
-        if (nativeMenuRequested(e)) return;
-        e.preventDefault();
-        onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e));
-      }}
-      onKeyDown={(e) => {
-        if (onMenuKey(e)) return;
-        // Keyboard activation fires click, not pointerdown.
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onModelOpen(entry, e.currentTarget);
+    <div className="group/tile relative h-full">
+      <button
+        ref={ref}
+        type="button"
+        data-model-tile={entry.path}
+        data-entry-tile={entry.path}
+        title={
+          badges === null
+            ? entry.name
+            : `${entry.name}\n${strengthOf(badges.score.z, modest)} match`
         }
-      }}
-      onPointerEnter={() => onModelHover(entry.path, entry.mtime)}
-      onPointerLeave={() => onModelHover(null)}
-    >
-      <div
-        data-tile-content
-        // A size container for the same reason as a sheet cell (`ThumbView`).
-        className="relative flex min-h-0 w-full flex-1 items-center justify-center [container-type:size]"
+        // An accessible name *replaces* the contents rather than joining them, so
+        // the full path, the anchor and the badge numbers are only announced if
+        // they are stated here (D8). The scales are spelled out for reading aloud.
+        aria-label={
+          (thumb?.status === "error"
+            ? `${entry.name} — failed to load`
+            : entry.name) +
+          (anchor ? " — the model these are compared against" : "") +
+          (badges === null
+            ? ""
+            : showScores
+              ? ` — ${SCALE_SPOKEN[badges.scale]} ${formatCosine(badges.score.score)}, ${Z_LABEL} ${formatZ(badges.score.z)}`
+              : ` — ${strengthOf(badges.score.z, modest).toLowerCase()} match`)
+        }
+        className={`${base} cursor-grab touch-pan-y select-none active:cursor-grabbing ${markClass} ${anchorClass}`}
+        onPointerDown={(e) => {
+          // A finger turns the model only from the middle of its picture;
+          // the band around it scrolls the grid, and a tap there opens it.
+          const edge =
+            e.pointerType === "touch" &&
+            (e.target as Element).closest("[data-orbit-zone]") === null;
+          edgeTapRef.current = edge;
+          if (!edge) onModelPointerDown(e, entry, e.currentTarget);
+        }}
+        onClick={(e) => {
+          if (!edgeTapRef.current) return;
+          edgeTapRef.current = false;
+          onModelOpen(entry, e.currentTarget);
+        }}
+        // A shifted secondary press is the one exception: not prevented, not
+        // raised, so the browser's own menu appears.
+        onContextMenu={(e) => {
+          if (nativeMenuRequested(e)) return;
+          e.preventDefault();
+          onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e));
+        }}
+        onKeyDown={(e) => {
+          if (onMenuKey(e)) return;
+          // Keyboard activation fires click, not pointerdown.
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onModelOpen(entry, e.currentTarget);
+          }
+        }}
+        onPointerEnter={() => onModelHover(entry.path, entry.mtime)}
+        onPointerLeave={() => onModelHover(null)}
       >
-        <ThumbView
-          key={`${entry.path}:${entry.mtime}`}
-          thumb={thumb}
-          path={entry.path}
-          onImageError={onImageError}
-        />
-        {/* Never composited into the render: a painted badge would make the
-            score part of the thumbnail's cache key, and every query change
-            would re-render the grid (D5). `aria-hidden` because the button
-            states these numbers in its own name. */}
-        {badges !== null && (
-          <>
-            <span aria-hidden className={`${BADGE_CLASS} left-0`}>
-              {SCALE_BADGE[badges.scale]} {formatCosine(badges.score.score)}
+        <div
+          data-tile-content
+          // A size container for the same reason as a sheet cell (`ThumbView`).
+          className="relative flex aspect-square w-full items-center justify-center bg-stage [container-type:size]"
+        >
+          <ThumbView
+            key={`${entry.path}:${entry.mtime}`}
+            thumb={thumb}
+            path={entry.path}
+            onImageError={onImageError}
+          />
+          {/* The touch orbit zone: the middle of the picture, over it so a finger
+              lands here, where a drag is meant for the model; everything
+              outside it pans the page. */}
+          <span
+            aria-hidden="true"
+            data-orbit-zone
+            className="absolute inset-[17.5%] touch-none"
+          />
+          {/* Never composited into the render: a painted badge would make the
+              score part of the thumbnail's cache key, and every query change
+              would re-render the grid (D5). `aria-hidden` because the button
+              states these numbers in its own name. */}
+          {badges !== null && (
+            <>
+              {/* The strength at a glance, the numbers on hover: a bar reads
+                  without a legend, a raw cosine does not. */}
+              <span
+                aria-hidden
+                data-relevance-bar
+                className="pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-r-full bg-accent/70"
+                style={{ width: `${relevanceWidth(badges.score.z)}%` }}
+              />
+              {showScores && (
+                <>
+                  <span aria-hidden className={`${BADGE_CLASS} left-1.5`}>
+                    {SCALE_BADGE[badges.scale]}{" "}
+                    {formatCosine(badges.score.score)}
+                  </span>
+                  <span aria-hidden className={`${BADGE_CLASS} right-1.5`}>
+                    {Z_LABEL} {formatZ(badges.score.z)}
+                  </span>
+                </>
+              )}
+            </>
+          )}
+          {/* Over the picture's foot, above the name: the last line is what a
+              label is read from. */}
+          {anchor && (
+            <span className="absolute inset-x-0 bottom-1.5 text-center text-[11px] font-medium uppercase tracking-wide text-accent">
+              Compared against
             </span>
-            <span aria-hidden className={`${BADGE_CLASS} right-0`}>
-              {Z_LABEL} {formatZ(badges.score.z)}
-            </span>
-          </>
-        )}
-      </div>
-      {/* Above the name: the last line is what a label is read from. */}
-      {anchor && (
-        <span className="w-full truncate text-center text-[0.625rem] uppercase tracking-wide text-sky-500">
-          Compared against
+          )}
+        </div>
+        {/* The file name; the flat-view path is in the title and aria-label. A
+            stored name displaces it as on the container tile — and needs no
+            aria-label help here, since this button already states the real
+            name (D7). */}
+        <span
+          data-tile-name
+          className="w-full truncate px-2.5 py-2 text-[13px] leading-tight"
+        >
+          <TileName name={entry.displayName ?? baseName(entry.name)} />
         </span>
-      )}
-      {/* The file name; the flat-view path is in the title and aria-label. A
-          stored name displaces it as on the container tile — and needs no
-          aria-label help here, since this button already states the real
-          name (D7). */}
-      <span className="w-full truncate text-center text-xs">
-        {entry.displayName ?? baseName(entry.name)}
-      </span>
-    </button>
+        <ParentLine name={entry.name} />
+      </button>
+      {actions}
+    </div>
   );
 }, tilePropsEqual);

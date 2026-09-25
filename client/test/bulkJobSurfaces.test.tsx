@@ -29,6 +29,7 @@ import {
   model,
   models,
   mountApp,
+  openPanel,
   putThumb,
   renderThumbnail,
   semanticPosesFor,
@@ -180,8 +181,13 @@ async function launchFrom(name: string, command: string): Promise<void> {
   await settle();
 }
 
-const chip = (): HTMLElement | null =>
-  container.querySelector<HTMLElement>('[role="status"]');
+/** The header's transient line is a status too, so the chip is the one outside
+ *  the header. */
+const chips = (): HTMLElement[] =>
+  Array.from(container.querySelectorAll<HTMLElement>('[role="status"]')).filter(
+    (el) => el.closest("header") === null,
+  );
+const chip = (): HTMLElement | null => chips()[0] ?? null;
 const chipText = (): string => chip()?.querySelector("p")?.textContent ?? "";
 /** A chip button by its accessible name — the three names the chip promises. */
 function chipButton(name: string): HTMLButtonElement | null {
@@ -196,14 +202,8 @@ function chipButton(name: string): HTMLButtonElement | null {
 }
 /** The path bar's transient line — where a command's sentence lands. */
 const headerLine = (): string =>
-  container.querySelector("header p")?.textContent ?? "";
+  container.querySelector("header [data-header-message]")?.textContent ?? "";
 
-async function expandPanel(): Promise<void> {
-  const expand = container.querySelector<HTMLButtonElement>(
-    'aside button[aria-label="Expand side panel"]',
-  );
-  if (expand !== null) await click(expand);
-}
 const tabButtons = (): HTMLButtonElement[] =>
   Array.from(
     container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]'),
@@ -402,7 +402,7 @@ describe("the chip is the job, and outlives the folder that launched it", () => 
     await launchFrom("Beta", "resetBeneath");
     // One job, and it is still the first one: the scope, the operation and the
     // counters all belong to the launch that got there first (D2).
-    expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+    expect(chips()).toHaveLength(1);
     expect(chipText()).toBe("Generating thumbnails beneath Alpha: 0 of 2");
     // The second scope was never even enumerated.
     expect(models).toHaveBeenCalledTimes(1);
@@ -421,7 +421,7 @@ describe("the library tab", () => {
     // this moment, and stays absent once the report lands saying off (D4).
     features.mockImplementation(() => new Promise(() => {}));
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     expect(tabNames()).toEqual(["search"]);
     await unmountApp();
 
@@ -431,7 +431,7 @@ describe("the library tab", () => {
     // `bulk-thumbnail-jobs` waited for this field). An empty tab is not shown.
     features.mockResolvedValue({ ...DEFAULT_REPORT, maintenance: false });
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     expect(tabNames()).toEqual(["search"]);
     await unmountApp();
 
@@ -445,7 +445,7 @@ describe("the library tab", () => {
     // drift.
     features.mockResolvedValue({ ...DEFAULT_REPORT, thumbWrites: false });
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     expect(tabNames()).toEqual(["search", "library"]);
     await click(tabButton("library")!);
     await settle();
@@ -463,7 +463,7 @@ describe("the library tab", () => {
     // The control: the maintained configuration offers both, so the assertion
     // above is about `thumbWrites` and not about an empty library.
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(libraryButtons().map((b) => b.textContent)).toEqual([
@@ -493,7 +493,7 @@ describe("the library tab", () => {
     });
     models.mockImplementation(() => held.then(() => answer));
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
 
     // "Counting…" until it lands, and the panel never blocks on it (D5).
@@ -535,7 +535,7 @@ describe("the library tab", () => {
       rig: RIG_VERSION,
     });
     await mountApp("/models", withModel);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(libraryButtons()[1]!.textContent).toBe("Reset 1 framings");
@@ -575,7 +575,7 @@ describe("the library tab", () => {
         rig: RIG_VERSION,
       });
     await mountApp("/models", withModel);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(libraryButtons()[1]!.textContent).toBe("Reset 1 framings");
@@ -603,7 +603,7 @@ describe("the library tab", () => {
       rig: RIG_VERSION,
     });
     await mountApp("/models", withModel);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(libraryButtons()[1]!.textContent).toBe("Reset 0 framings");
@@ -645,7 +645,7 @@ describe("the library tab", () => {
       }),
     );
     await mountApp("/models", withModel);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(libraryButtons()[1]!.textContent).toBe("Reset 0 framings");
@@ -683,7 +683,7 @@ describe("the library tab", () => {
       rig: RIG_VERSION,
     });
     await mountApp("/models", withModel);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(libraryButtons().map((b) => b.textContent)).toEqual([
@@ -711,7 +711,7 @@ describe("the library tab", () => {
         }),
     );
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(models).toHaveBeenCalledTimes(1);
@@ -734,7 +734,7 @@ describe("the library tab", () => {
     // finding); keyed on the run it fires once.
     enumerated("/", [beneath("/models/Alpha", "a.stl", framed())]);
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     await launchFrom("Alpha", "resetBeneath");
@@ -765,7 +765,7 @@ describe("the library tab", () => {
       rig: RIG_VERSION,
     });
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     await launchFrom("Alpha", "generateBeneath");
@@ -783,7 +783,7 @@ describe("the library tab", () => {
     // buttons keep their numbers rather than re-deriving them (Masa, 2026-09-02).
     enumerated("/", [beneath("", "/c.stl", framed())]);
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(models).toHaveBeenCalledTimes(1);
@@ -822,7 +822,7 @@ describe("the library tab", () => {
     listDir.mockImplementation((p: string) =>
       Promise.resolve(p === "/models/Beta" ? withModel : NESTED),
     );
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(models).toHaveBeenCalledTimes(1);
@@ -835,7 +835,7 @@ describe("the library tab", () => {
   it("says the count failed rather than counting forever", async () => {
     models.mockRejectedValue(new Error("enumeration refused"));
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     await settle();
     expect(libraryButtons().map((b) => b.textContent)).toEqual([
@@ -847,7 +847,7 @@ describe("the library tab", () => {
 
   it("is never what the profile records, and a stored one opens on a tab there is", async () => {
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     await click(tabButton("library")!);
     expect(selectedTab()).toBe("library");
     // A tab the feature report can empty is a tab that can be absent, which is
@@ -863,7 +863,7 @@ describe("the library tab", () => {
     // a landing on `chat` that the maintained configuration does not offer.
     localStorage.setItem(TAB_KEY, "library");
     await mountApp("/models", NESTED);
-    await expandPanel();
+    await openPanel();
     expect(selectedTab()).toBe("search");
   });
 });

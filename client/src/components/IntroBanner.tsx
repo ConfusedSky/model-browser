@@ -3,20 +3,25 @@
  * Mounted **outside the scroller**: inside `<main>` it would scroll away with
  * the grid, and the tiles would jump by its height when the listing landed.
  *
- * Sentence and chips share one wrapping row so a chip may sit on the sentence's
- * own line; the dismiss control is that row's sibling, not its last item, so it
- * cannot be carried onto a line of its own by the chips ahead of it. That costs
- * the row two utilities that read as one: `flex-1` is what fills the width the
- * dismiss control does not take, pinning it to the right edge, and `min-w-0`
- * lets the row shrink under its longest chip rather than push past the strip.
- * `min-h-7` is the dismiss control's own height, so a row of bare text still
- * centres against it.
+ * Sentence, chips and hint stack in one column; the dismiss control is that
+ * column's sibling, not its last item, so it stays at the strip's end however
+ * the chips wrap. That costs
+ * the column two utilities that read as one: `flex-1` is what fills the width
+ * the dismiss control does not take, pinning it to the right edge, and
+ * `min-w-0` lets the chips' row scroll rather than push past the strip.
  */
+
+import Icon from "./Icon";
 
 /** Never glued to a `${`: Tailwind's scanner reads source text, so a computed
  *  candidate never reaches the stylesheet. */
 const CHIP_CLASS =
-  "rounded-full border border-zinc-700 px-3 py-1 text-zinc-300 hover:border-zinc-500";
+  "shrink-0 rounded-full border border-line-strong bg-surface px-3 py-1 text-[13px] whitespace-nowrap text-ink-2 transition-colors hover:border-accent/50 hover:bg-accent-soft hover:text-ink touch:py-2.5";
+
+/** Read once: a device does not change what its pointer is mid-session. */
+const COARSE_POINTER =
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(pointer: coarse)").matches === true;
 
 /** An invitation to describe something is an offer nothing can take up once
  *  the chips are withheld. */
@@ -40,33 +45,60 @@ export default function IntroBanner({
     <div
       role="region"
       aria-label="Introduction"
-      className="flex items-start gap-2 border-b border-zinc-800 bg-zinc-900/60 p-3 text-sm text-zinc-300"
+      className="relative flex items-start gap-3 border-b border-line bg-[radial-gradient(ellipse_60%_120%_at_0%_0%,rgb(242_181_68/0.08),transparent_70%)] px-4 py-4 sm:px-5"
     >
-      <div
-        data-intro-flow
-        className="flex min-h-7 min-w-0 flex-1 flex-wrap items-center gap-2"
+      <span
+        aria-hidden="true"
+        className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent sm:flex"
       >
-        <span>{meaningRunnable ? SENTENCE_WITH_SEARCH : SENTENCE_PLAIN}</span>
-        {meaningRunnable &&
-          queries.map((q) => (
-            <button
-              key={q}
-              type="button"
-              data-example-query={q}
-              onClick={() => onRun(q)}
-              className={CHIP_CLASS}
-            >
-              {q}
-            </button>
-          ))}
+        <Icon name="sparkles" />
+      </span>
+      <div data-intro-flow className="min-w-0 flex-1 space-y-2.5">
+        <p className="pr-10 text-sm font-medium text-ink sm:pr-0">
+          {meaningRunnable ? SENTENCE_WITH_SEARCH : SENTENCE_PLAIN}
+        </p>
+        {/* One swipeable row on a phone, so the strip never buries the grid
+            it introduces; every chip, wrapped, wider. */}
+        {meaningRunnable && (
+          <div
+            data-intro-chips
+            className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
+          >
+            {queries.map((q) => (
+              <button
+                key={q}
+                type="button"
+                data-example-query={q}
+                onClick={() => onRun(q)}
+                className={CHIP_CLASS}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-ink-3">
+          {/* Tap wording wherever the layout is a phone's or the pointer is a
+              finger; a mouse on a wide screen gets the right-click route. */}
+          <span className={COARSE_POINTER ? "" : "sm:hidden"}>
+            Drag any model to turn it · tap it to open · ⋯ for more
+          </span>
+          <span className={COARSE_POINTER ? "hidden" : "hidden sm:inline"}>
+            Drag any model to turn it · click it to open · right-click or ⋯ for
+            more
+          </span>
+        </p>
       </div>
       <button
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss introduction"
-        className="shrink-0 rounded-lg px-2 py-1 text-zinc-400 hover:text-zinc-200"
+        title="Hide this introduction"
+        // On a phone it sits in the corner over the strip rather than in a
+        // column beside it, so the chips' row can run the full width.
+        className="absolute top-2.5 right-2 flex size-8 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-surface hover:text-ink touch:size-11 sm:static"
       >
-        ×
+        <Icon name="x" />
       </button>
     </div>
   );

@@ -7,15 +7,34 @@ import {
 } from "../../../shared/types";
 import type { JobOperation } from "../jobs/bulkJobs";
 import type { SearchKinds, SearchMode, Tuning } from "../lib/searchOptions";
-import { clampCount, POOLS, TUNING_DEFAULTS } from "../lib/searchOptions";
+import {
+  clampCount,
+  optionsOffDefault,
+  POOLS,
+  TUNING_DEFAULTS,
+} from "../lib/searchOptions";
 import { stored } from "../lib/stored";
 import { meaningRunnableAt } from "../state/selectors";
+import Icon from "./Icon";
 
 /** Renaming these drops every profile's state. */
 const COLLAPSE_KEY = "model-browser:chat-collapsed";
 const TAB_KEY = "model-browser:panel-tab";
 
 type Tab = "chat" | "search" | "similar" | "library";
+
+/** The index's pooling names, said as what they do to a model's views. */
+const POOL_LABEL: Record<(typeof POOLS)[number], string> = {
+  mean: "Average",
+  max: "Best view",
+  softmax: "Weighted",
+};
+
+const KIND_LABEL = { both: "Both", folders: "Folders", models: "Models" };
+
+const SECTION_LABEL = "text-xs font-medium uppercase tracking-wider text-ink-3";
+const NUMBER_CLASS =
+  "w-16 rounded-md border border-line bg-surface px-2 py-1 text-ink tabular-nums outline-none focus:border-line-strong disabled:opacity-40 touch:h-11";
 
 /**
  * What to say about an index that cannot serve *this path* — not the same
@@ -92,9 +111,11 @@ const SIMILAR_DEBOUNCE_MS = 300;
 const K_MIN = 1;
 const K_MAX = 1000;
 
-const collapseStore = stored(
+/** Collapsed until a profile opens it: the grid is what a visitor came for.
+ *  App reads and writes it, since the control that opens the panel is App's. */
+export const collapseStore = stored(
   COLLAPSE_KEY,
-  (raw) => raw === "1",
+  (raw) => raw !== "0",
   (v) => (v ? "1" : "0"),
 );
 /** Anything that is not `search` reads as `chat`, even though `chat` is
@@ -140,9 +161,14 @@ export default function SidePanel({
   features,
   onFolderMatching,
   onKinds,
-  onMode,
   onTuning,
   onSimilarTuning,
+  showScores,
+  onShowScores,
+  ao,
+  onAo,
+  open,
+  onClose,
 }: {
   query: string | null;
   /** The Similar tab is offered from it by the panel's rule throughout: what
@@ -183,12 +209,22 @@ export default function SidePanel({
   features: FeatureReport | null;
   onFolderMatching: (on: boolean) => void;
   onKinds: (kinds: SearchKinds) => void;
-  onMode: (mode: SearchMode) => void;
   /** `defer` asks the caller to wait out a typing run before re-querying. */
   onTuning: (tuning: Tuning, opts?: { defer?: boolean }) => void;
   /** The whole set, never a delta; called only with a finished count, since the
    *  debounce is this component's. */
   onSimilarTuning: (k: number, pool?: Tuning["pool"]) => void;
+  /** Absent where a caller offers no display options. */
+  showScores?: boolean;
+  onShowScores?: (on: boolean) => void;
+  /** The occlusion switch, repeated here for a phone's toolbar, which has no
+   *  room for it. */
+  ao?: boolean;
+  onAo?: (on: boolean) => void;
+  /** Mounted while closed, so the tab and the Similar/Library lifecycles
+   *  below carry on across a close. */
+  open: boolean;
+  onClose: () => void;
 }) {
   // Derived before the state below, because the opening tab resolves against
   // this list on the first render. Library goes last: it is maintenance, not
@@ -202,7 +238,6 @@ export default function SidePanel({
     ...(hasSimilar ? (["similar"] as const) : []),
     ...(hasLibrary ? (["library"] as const) : []),
   ];
-  const [collapsed, setCollapsed] = useState(() => collapseStore.read());
   /** The report is unknown on the first render, so a profile recording `chat`
    *  always opens on search and moves once the report says the tab is
    *  offered — the effect below. */
@@ -231,12 +266,6 @@ export default function SidePanel({
     undefined,
   );
   useEffect(() => () => clearTimeout(countTimerRef.current), []);
-
-  function toggle(): void {
-    const next = !collapsed;
-    setCollapsed(next);
-    collapseStore.write(next);
-  }
 
   function selectTab(next: Tab): void {
     setTab(next);
@@ -318,16 +347,12 @@ export default function SidePanel({
   }, [showLibrary, countFn, recountKey]);
 
   // Answers "why are my results strange?" without opening the panel (D5).
-  const nonDefault = !folderMatching || kinds !== "both";
+  const nonDefault = optionsOffDefault(folderMatching, kinds, tuning);
 
   // Ready is necessary and not sufficient: the index covers one collection and
   // no archive interiors. The shared rule, not a copy — two affordances over
   // one index must not disagree about what it covers.
   const meaningRunnable = meaningRunnableAt(index, path);
-  // Also whenever meaning is *in force*, however it got there: a link can put
-  // this app in meaning mode on a machine with no index, and a mode you cannot
-  // see or leave is a trap.
-  const showMode = meaningRunnable || mode === "meaning";
   // A submit under an unservable meaning mode defers rather than falling back
   // to names, so showing these there states a contradiction.
   const nameOptionsApply = mode === "name";
@@ -347,75 +372,133 @@ export default function SidePanel({
   const libraryOps: readonly JobOperation[] =
     features?.thumbWrites === true ? ["generate", "reset"] : ["reset"];
 
+  /** Opened from the toolbar, the panel takes the keyboard with it: it sits
+   *  after the grid in the document, a whole grid of Tabs away. */
+  const tablistRef = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    // An opening, not a page that loads with the panel open.
+    const opened = open && !wasOpen.current;
+    wasOpen.current = open;
+    if (!opened) return;
+    tablistRef.current
+      ?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+      ?.focus();
+  }, [open]);
+
+  /** Arrows move between tabs, as a tablist's do. */
+  function onTabKey(e: React.KeyboardEvent<HTMLDivElement>): void {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (step === 0) return;
+    e.preventDefault();
+    const next = tabs[(tabs.indexOf(tab) + step + tabs.length) % tabs.length]!;
+    selectTab(next);
+    requestAnimationFrame(() =>
+      tablistRef.current
+        ?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
+        ?.focus(),
+    );
+  }
+
+  const segmentClass = (on: boolean): string =>
+    on
+      ? "flex-1 rounded-md bg-raised px-2 py-1.5 font-medium text-ink ring-1 ring-line-strong touch:py-3"
+      : "flex-1 rounded-md px-2 py-1.5 text-ink-3 hover:text-ink-2 touch:py-3";
+  const boundClass = (on: boolean): string =>
+    on
+      ? "flex items-center gap-2 py-1.5 text-left text-ink disabled:cursor-default touch:py-3"
+      : "flex items-center gap-2 py-1.5 text-left text-ink-3 hover:text-ink-2 touch:py-3";
+
+  if (!open) return null;
   return (
-    <aside
-      className={`flex h-full shrink-0 flex-col border-l border-zinc-800 bg-zinc-950 transition-all ${collapsed ? "w-10" : "w-80"}`}
-    >
-      <button
-        type="button"
-        onClick={toggle}
-        aria-label={collapsed ? "Expand side panel" : "Collapse side panel"}
-        className="flex h-10 items-center justify-center text-zinc-400 hover:text-zinc-100"
+    <>
+      {/* Below a wide screen the panel floats over the grid — a sheet on a
+          phone, a drawer beside — and a press outside it puts it away. Wide,
+          it docks and the grid makes room. */}
+      <div
+        aria-hidden="true"
+        onClick={onClose}
+        className="fixed inset-0 z-lightbox bg-black/50 xl:hidden"
+      />
+      <aside
+        aria-label="Side panel"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onClose();
+          }
+        }}
+        className="fixed inset-x-0 bottom-0 z-lightbox flex max-h-[78dvh] flex-col rounded-t-2xl border-t border-line-strong bg-canvas shadow-2xl sm:inset-y-0 sm:right-0 sm:left-auto sm:max-h-none sm:w-80 sm:rounded-none sm:border-t-0 sm:border-l xl:static xl:z-auto xl:h-full xl:shrink-0 xl:border-line xl:shadow-none"
       >
-        {collapsed ? (nonDefault ? "•" : "\u2039") : "\u203a"}
-      </button>
-      {!collapsed && (
-        <>
-          <div className="flex border-b border-zinc-800 text-xs" role="tablist">
+        {/* A phone's sheet says it is one: a grab handle over its top edge. */}
+        <div
+          aria-hidden="true"
+          className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/20 sm:hidden"
+        />
+        <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line pr-1.5 pl-2 touch:h-14">
+          <div
+            ref={tablistRef}
+            role="tablist"
+            onKeyDown={onTabKey}
+            className="flex min-w-0 flex-1 items-center gap-0.5 text-[13px]"
+          >
             {tabs.map((t) => (
               <button
                 key={t}
                 type="button"
                 role="tab"
                 aria-selected={tab === t}
+                tabIndex={tab === t ? 0 : -1}
                 onClick={() => selectTab(t)}
-                className={`flex-1 px-3 py-2 capitalize ${tab === t ? "border-b border-zinc-300 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
+                className={
+                  tab === t
+                    ? "relative rounded-md bg-surface px-2.5 py-1 font-medium capitalize text-ink touch:py-3"
+                    : "relative rounded-md px-2.5 py-1 capitalize text-ink-3 hover:text-ink-2 touch:py-3"
+                }
               >
                 {t}
                 {t === "search" && nonDefault && (
-                  <span className="ml-1 text-amber-400">•</span>
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-1 right-0.5 size-1.5 rounded-full bg-accent"
+                  />
                 )}
               </button>
             ))}
           </div>
-          {tab === "search" ? (
-            <div className="flex-1 space-y-4 overflow-auto p-3 text-xs">
-              <div>
-                <p className="mb-2 text-zinc-500">Search</p>
-                {query === null ? (
-                  <p className="text-zinc-600">
-                    No search committed. These apply to the next one.
-                  </p>
-                ) : (
-                  <p className="break-all text-zinc-300">
-                    Results for &ldquo;{query}&rdquo;
-                  </p>
-                )}
-              </div>
-              {showMode && (
-                <div className="flex gap-1" role="group" aria-label="Search by">
-                  {(["name", "meaning"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      aria-pressed={mode === m}
-                      onClick={() => onMode(m)}
-                      className={`flex-1 rounded-lg border px-2 py-1.5 capitalize ${mode === m ? "border-zinc-500 text-zinc-100" : "border-zinc-800 text-zinc-500"}`}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Done, hide the side panel"
+            title="Hide the side panel"
+            className="flex h-8 min-w-8 shrink-0 items-center justify-center rounded-md px-1 text-ink-3 hover:bg-surface hover:text-ink touch:h-11 touch:min-w-11 max-sm:px-3 max-sm:text-[13px] max-sm:font-medium max-sm:text-accent"
+          >
+            <Icon name="chevronRight" className="size-4 max-sm:hidden" />
+            <span className="sm:hidden">Done</span>
+          </button>
+        </div>
+        {tab === "search" ? (
+          <div className="flex-1 space-y-5 overflow-auto p-4 text-xs">
+            <section className="space-y-1.5">
+              <h2 className={SECTION_LABEL}>Current search</h2>
+              {query === null ? (
+                <p className="text-ink-3">
+                  None yet. These options apply to the next one.
+                </p>
+              ) : (
+                <p className="text-[13px] [overflow-wrap:anywhere] text-ink">
+                  Results for &ldquo;{query}&rdquo;
+                </p>
               )}
               {/* Sentence and detail from one call, because a deployment that
-                  collapses the states withholds both together. */}
+                    collapses the states withholds both together. */}
               {showIndexState && (
-                <p className="text-zinc-500">
+                <p className="text-ink-3">
                   {indexAccount(index, path, features?.hostDetails !== false)}
                 </p>
               )}
               {scope !== null && (
-                <p className="text-zinc-500">
+                <p className="text-ink-3">
                   {scope.status === "unindexed"
                     ? "Nothing here has been indexed yet."
                     : scope.status === "partial"
@@ -424,24 +507,31 @@ export default function SidePanel({
                   Covers {scope.covers.join(", ")}.
                 </p>
               )}
-              {mode === "meaning" && meaningRunnable && (
-                <div className="space-y-2 border-t border-zinc-800 pt-3">
-                  <p className="text-zinc-500">Tuning</p>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={tuning.raw}
-                    aria-label="Read the phrase as written"
-                    onClick={() => onTuning({ ...tuning, raw: !tuning.raw })}
-                    className={`w-full rounded-lg border px-3 py-2 text-left ${tuning.raw ? "border-zinc-500 text-zinc-100" : "border-zinc-800 text-zinc-500"}`}
-                  >
+            </section>
+            {mode === "meaning" && meaningRunnable && (
+              <section className="space-y-3 border-t border-line pt-4">
+                <h2 className={SECTION_LABEL}>Meaning tuning</h2>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={tuning.raw}
+                  aria-label="Read the phrase as written"
+                  onClick={() => onTuning({ ...tuning, raw: !tuning.raw })}
+                  className="flex w-full items-center justify-between gap-3 text-left text-ink-2 hover:text-ink"
+                >
+                  <span>
                     Phrase as written
-                    <span className="float-right">
-                      {tuning.raw ? "on" : "templated"}
+                    <span className="block text-ink-3">
+                      Match your words exactly, without first framing them as a
+                      description of a model
                     </span>
-                  </button>
+                  </span>
+                  <Switch on={tuning.raw} />
+                </button>
+                <div className="space-y-1.5">
+                  <p className="text-ink-3">Combine each model's views by</p>
                   <div
-                    className="flex gap-1"
+                    className="flex rounded-lg bg-sunken p-0.5"
                     role="group"
                     aria-label="Pool views by"
                   >
@@ -449,15 +539,17 @@ export default function SidePanel({
                       <button
                         key={p}
                         type="button"
+                        data-pool={p}
                         aria-pressed={tuning.pool === p}
                         onClick={() => onTuning({ ...tuning, pool: p })}
-                        className={`flex-1 rounded-lg border px-2 py-1.5 ${tuning.pool === p ? "border-zinc-500 text-zinc-100" : "border-zinc-800 text-zinc-500"}`}
+                        className={segmentClass(tuning.pool === p)}
                       >
-                        {p}
+                        {POOL_LABEL[p]}
                       </button>
                     ))}
                   </div>
-                  {/* The bounds compose, so each button toggles its own: count
+                </div>
+                {/* The bounds compose, so each button toggles its own: count
                       only, floor only, or both (D6). At least one must stay in
                       force — unbounded is the whole collection — so a sole
                       survivor's button is inert and says so in its title.
@@ -466,10 +558,13 @@ export default function SidePanel({
                       bound actually in force, and this is the panel's only row
                       of independent toggles, where which one is lit is the
                       whole message. Hence the filled on-state. */}
-                  <div className="flex items-center gap-2">
+                <div className="space-y-1.5">
+                  <p className="text-ink-3">Limit the results</p>
+                  <div className="grid grid-cols-[auto_4.5rem] items-center gap-x-2 gap-y-1.5">
                     <button
                       type="button"
-                      aria-pressed={tuning.top !== undefined}
+                      role="switch"
+                      aria-checked={tuning.top !== undefined}
                       disabled={
                         tuning.top !== undefined &&
                         tuning.minScore === undefined
@@ -487,9 +582,10 @@ export default function SidePanel({
                           ? "The only bound in force — a search has to stop somewhere"
                           : undefined
                       }
-                      className={`rounded-lg border px-2 py-1.5 disabled:cursor-default ${tuning.top !== undefined ? "border-zinc-500 bg-zinc-800 text-zinc-100" : "border-zinc-800 text-zinc-500"}`}
+                      className={boundClass(tuning.top !== undefined)}
                     >
-                      top
+                      <Switch on={tuning.top !== undefined} />
+                      Show up to
                     </button>
                     <input
                       type="number"
@@ -514,11 +610,12 @@ export default function SidePanel({
                         );
                       }}
                       onBlur={() => setTopText(null)}
-                      className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100 disabled:opacity-40"
+                      className={NUMBER_CLASS}
                     />
                     <button
                       type="button"
-                      aria-pressed={tuning.minScore !== undefined}
+                      role="switch"
+                      aria-checked={tuning.minScore !== undefined}
                       disabled={
                         tuning.minScore !== undefined &&
                         tuning.top === undefined
@@ -539,9 +636,10 @@ export default function SidePanel({
                           ? "The only bound in force — a search has to stop somewhere"
                           : undefined
                       }
-                      className={`rounded-lg border px-2 py-1.5 disabled:cursor-default ${tuning.minScore !== undefined ? "border-zinc-500 bg-zinc-800 text-zinc-100" : "border-zinc-800 text-zinc-500"}`}
+                      className={boundClass(tuning.minScore !== undefined)}
                     >
-                      score ≥
+                      <Switch on={tuning.minScore !== undefined} />
+                      Minimum match
                     </button>
                     <input
                       type="number"
@@ -559,114 +657,191 @@ export default function SidePanel({
                         onTuning({ ...tuning, minScore: n }, { defer: true });
                       }}
                       onBlur={() => setScoreText(null)}
-                      className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100 disabled:opacity-40"
+                      className={NUMBER_CLASS}
                     />
                   </div>
-                  {(tuning.raw !== TUNING_DEFAULTS.raw ||
-                    tuning.pool !== TUNING_DEFAULTS.pool ||
-                    tuning.top !== TUNING_DEFAULTS.top ||
-                    tuning.minScore !== TUNING_DEFAULTS.minScore) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTopText(null);
-                        setScoreText(null);
-                        onTuning({ ...TUNING_DEFAULTS });
-                      }}
-                      className="text-zinc-500 underline hover:text-zinc-300"
-                    >
-                      Reset tuning
-                    </button>
-                  )}
                 </div>
-              )}
-              {/* Absent, not inert, for the mode that cannot use them (D2). */}
-              {nameOptionsApply && (
-                <div className="space-y-2">
+                {(tuning.raw !== TUNING_DEFAULTS.raw ||
+                  tuning.pool !== TUNING_DEFAULTS.pool ||
+                  tuning.top !== TUNING_DEFAULTS.top ||
+                  tuning.minScore !== TUNING_DEFAULTS.minScore) && (
                   <button
                     type="button"
-                    role="switch"
-                    aria-checked={folderMatching}
-                    aria-label="Match folder names"
-                    onClick={() => onFolderMatching(!folderMatching)}
-                    className={`w-full rounded-lg border px-3 py-2 text-left ${folderMatching ? "border-zinc-500 text-zinc-100" : "border-zinc-800 text-zinc-500"}`}
+                    onClick={() => {
+                      setTopText(null);
+                      setScoreText(null);
+                      onTuning({ ...TUNING_DEFAULTS });
+                    }}
+                    className="text-ink-3 underline underline-offset-2 hover:text-ink"
                   >
-                    Match folder names
-                    <span className="float-right">
-                      {folderMatching ? "on" : "off"}
-                    </span>
+                    Reset tuning
                   </button>
-                  <div className="flex gap-1" role="group" aria-label="Show">
+                )}
+              </section>
+            )}
+            {/* Absent, not inert, for the mode that cannot use them (D2). */}
+            {nameOptionsApply && (
+              <section className="space-y-3 border-t border-line pt-4">
+                <h2 className={SECTION_LABEL}>Name search</h2>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={folderMatching}
+                  aria-label="Match folder names"
+                  onClick={() => onFolderMatching(!folderMatching)}
+                  className="flex w-full items-center justify-between gap-3 text-left text-ink-2 hover:text-ink"
+                >
+                  <span>
+                    Match folder names
+                    <span className="block text-ink-3">
+                      {folderMatching
+                        ? "A folder's name counts for what is inside it"
+                        : "Only file names are matched"}
+                    </span>
+                  </span>
+                  <Switch on={folderMatching} />
+                </button>
+                <div className="space-y-1.5">
+                  <p className="text-ink-3">Show</p>
+                  <div
+                    className="flex rounded-lg bg-sunken p-0.5"
+                    role="group"
+                    aria-label="Show"
+                  >
                     {(["both", "folders", "models"] as const).map((k) => (
                       <button
                         key={k}
                         type="button"
                         aria-pressed={kinds === k}
                         onClick={() => onKinds(k)}
-                        className={`flex-1 rounded-lg border px-2 py-1.5 capitalize ${kinds === k ? "border-zinc-500 text-zinc-100" : "border-zinc-800 text-zinc-500"}`}
+                        className={segmentClass(kinds === k)}
                       >
-                        {k}
+                        {KIND_LABEL[k]}
                       </button>
                     ))}
                   </div>
                 </div>
-              )}
-            </div>
-          ) : /* Not only narrowing: a dismissal renders once before the effect
+              </section>
+            )}
+            {onShowScores !== undefined && (
+              <section className="space-y-3 border-t border-line pt-4">
+                <h2 className={SECTION_LABEL}>Display</h2>
+                {onAo !== undefined && (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={ao === true}
+                    aria-label="Ambient occlusion switch"
+                    onClick={() => onAo(!ao)}
+                    className="flex w-full items-center justify-between gap-3 text-left text-ink-2 hover:text-ink sm:hidden"
+                  >
+                    <span>
+                      Occlusion
+                      <span className="block text-ink-3">
+                        Soft shading in creases; off turns models faster
+                      </span>
+                    </span>
+                    <Switch on={ao === true} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showScores === true}
+                  aria-label="Show match scores"
+                  onClick={() => onShowScores(!showScores)}
+                  className="flex w-full items-center justify-between gap-3 text-left text-ink-2 hover:text-ink"
+                >
+                  <span>
+                    Show match scores
+                    <span className="block text-ink-3">
+                      The index's raw cosine and z on each result, beside the
+                      strength word
+                    </span>
+                  </span>
+                  <Switch on={showScores === true} />
+                </button>
+              </section>
+            )}
+          </div>
+        ) : /* Not only narrowing: a dismissal renders once before the effect
                  above moves off this tab. */
-          tab === "similar" && similar !== null ? (
-            <div className="flex-1 space-y-2 overflow-auto p-3 text-xs">
-              {/* Nothing here is sticky: the search options describe how *you*
+        tab === "similar" && similar !== null ? (
+          <div className="flex-1 space-y-4 overflow-auto p-4 text-xs">
+            {/* Nothing here is sticky: the search options describe how *you*
                   search, these describe one neighbourhood. The URL carries
                   them, so the next find-similar starts from the defaults. */}
-              <p className="break-all text-zinc-300">
-                Similar to &ldquo;
-                {similar.model.slice(similar.model.lastIndexOf("/") + 1)}&rdquo;
+            <section className="space-y-1.5">
+              <h2 className={SECTION_LABEL}>Similar to</h2>
+              <p className="break-all text-[13px] text-ink">
+                &ldquo;
+                {similar.model.slice(similar.model.lastIndexOf("/") + 1)}
+                &rdquo;
               </p>
-              <div className="flex items-center gap-2">
-                <label className="text-zinc-500" htmlFor="similar-count">
-                  How many
-                </label>
-                <input
-                  id="similar-count"
-                  type="number"
-                  min={K_MIN}
-                  max={K_MAX}
-                  aria-label="Number of neighbours"
-                  value={countText ?? String(similar.k)}
-                  onChange={(e) => {
-                    const text = e.target.value;
-                    setCountText(text);
-                    const n = Number(text);
-                    // Held, not clamped: a field on its way to "40" is not a
-                    // request for one neighbour.
-                    if (text.trim() === "" || !Number.isFinite(n)) return;
-                    const k = Math.round(n);
-                    if (k < K_MIN || k > K_MAX) return;
-                    clearTimeout(countTimerRef.current);
-                    countTimerRef.current = setTimeout(
-                      () => onSimilarTuning(k, similar.pool),
-                      SIMILAR_DEBOUNCE_MS,
-                    );
-                  }}
-                  onBlur={() => setCountText(null)}
-                  className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-zinc-100"
-                />
-              </div>
-              {/* A click runs at once — debouncing is for values that arrive a
+            </section>
+            <div className="flex items-center justify-between gap-2 border-t border-line pt-4">
+              <label className="text-ink-2" htmlFor="similar-count">
+                How many
+              </label>
+              <input
+                id="similar-count"
+                type="number"
+                min={K_MIN}
+                max={K_MAX}
+                aria-label="Number of neighbours"
+                value={countText ?? String(similar.k)}
+                onChange={(e) => {
+                  const text = e.target.value;
+                  setCountText(text);
+                  const n = Number(text);
+                  // Held, not clamped: a field on its way to "40" is not a
+                  // request for one neighbour.
+                  if (text.trim() === "" || !Number.isFinite(n)) return;
+                  const k = Math.round(n);
+                  if (k < K_MIN || k > K_MAX) return;
+                  clearTimeout(countTimerRef.current);
+                  countTimerRef.current = setTimeout(
+                    () => onSimilarTuning(k, similar.pool),
+                    SIMILAR_DEBOUNCE_MS,
+                  );
+                }}
+                onBlur={() => setCountText(null)}
+                className={NUMBER_CLASS}
+              />
+            </div>
+            {/* A click runs at once — debouncing is for values that arrive a
                   character at a time. Named apart from the meaning tuning's
                   identical trio, which is reachable under a similarity view at
                   the same time: two controls sharing a name are one control to
                   anything reading names. */}
+            <div className="space-y-1.5">
+              <p className="text-ink-3">Combine each model's views by</p>
               <div
-                className="flex gap-1"
+                className="flex rounded-lg bg-sunken p-0.5"
                 role="group"
                 aria-label="Pool neighbour views by"
               >
+                {/* Absence is the index's own pooling, and naming it would
+                    guess at another process's config — so it is a choice of
+                    its own, not a row with nothing pressed. */}
+                <button
+                  type="button"
+                  data-pool=""
+                  aria-pressed={similar.pool === undefined}
+                  onClick={() => {
+                    clearTimeout(countTimerRef.current);
+                    setCountText(null);
+                    onSimilarTuning(similar.k, undefined);
+                  }}
+                  className={segmentClass(similar.pool === undefined)}
+                >
+                  Default
+                </button>
                 {POOLS.map((p) => (
                   <button
                     key={p}
                     type="button"
+                    data-pool={p}
                     aria-pressed={similar.pool === p}
                     onClick={() => {
                       // This question carries the count in force, superseding
@@ -675,109 +850,124 @@ export default function SidePanel({
                       setCountText(null);
                       onSimilarTuning(similar.k, p);
                     }}
-                    className={`flex-1 rounded-lg border px-2 py-1.5 ${similar.pool === p ? "border-zinc-500 text-zinc-100" : "border-zinc-800 text-zinc-500"}`}
+                    className={segmentClass(similar.pool === p)}
                   >
-                    {p}
+                    {POOL_LABEL[p]}
                   </button>
                 ))}
               </div>
-              {/* None pressed is a state: absence is the index's own pooling,
-                  and naming it would guess at another process's config. */}
-              {similar.pool === undefined && (
-                <p className="text-zinc-600">
-                  Pooled however the index is configured to.
-                </p>
-              )}
             </div>
-          ) : /* The Similar branch's guard, for its reason. */
-          tab === "library" && library !== null ? (
-            <div className="flex-1 space-y-2 overflow-auto p-3 text-xs">
-              <p className="text-zinc-500">
-                Bulk thumbnail work over the whole library. Jobs run behind
-                whatever you are looking at; cancel and relaunch to pause.
-              </p>
-              {/* Counted labels, which the menu's entries deliberately are not
+          </div>
+        ) : /* The Similar branch's guard, for its reason. */
+        tab === "library" && library !== null ? (
+          <div className="flex-1 space-y-3 overflow-auto p-4 text-xs">
+            <h2 className={SECTION_LABEL}>Thumbnails</h2>
+            <p className="text-ink-3">
+              Bulk thumbnail work over the whole library. Jobs run behind
+              whatever you are looking at; cancel and relaunch to pause.
+            </p>
+            {/* Counted labels, which the menu's entries deliberately are not
                   (D5): this surface already renders asynchronously. */}
-              {libraryOps.map((op) => {
-                const n =
-                  counts === null || counts === "failed"
-                    ? null
-                    : op === "generate"
-                      ? counts.generate
-                      : Math.max(
-                          0,
-                          counts.reset + (resetAdjust - adjustBaseRef.current),
-                        );
-                return (
-                  <button
-                    key={op}
-                    type="button"
-                    disabled={n === null || n === 0}
-                    onClick={() => library.launch(op)}
-                    className="w-full rounded-lg border border-zinc-800 px-3 py-2 text-left text-zinc-300 hover:border-zinc-500 disabled:opacity-40 disabled:hover:border-zinc-800"
-                  >
-                    {counts === "failed"
-                      ? "Count failed"
-                      : n === null
-                        ? "Counting…"
-                        : op === "generate"
-                          ? `Generate ${n} missing thumbnails`
-                          : `Reset ${n} framings`}
-                  </button>
-                );
-              })}
-              {/* An enumeration cut short found *some* of the scope, so the
+            {libraryOps.map((op) => {
+              const n =
+                counts === null || counts === "failed"
+                  ? null
+                  : op === "generate"
+                    ? counts.generate
+                    : Math.max(
+                        0,
+                        counts.reset + (resetAdjust - adjustBaseRef.current),
+                      );
+              return (
+                <button
+                  key={op}
+                  type="button"
+                  disabled={n === null || n === 0}
+                  onClick={() => library.launch(op)}
+                  className="w-full rounded-lg border border-line-strong px-3 py-2 text-left text-[13px] text-ink hover:bg-surface disabled:border-line disabled:text-ink-3 disabled:hover:bg-transparent"
+                >
+                  {counts === "failed"
+                    ? "Count failed"
+                    : n === null
+                      ? "Counting…"
+                      : op === "generate"
+                        ? `Generate ${n} missing thumbnails`
+                        : `Reset ${n} framings`}
+                </button>
+              );
+            })}
+            {/* An enumeration cut short found *some* of the scope, so the
                   numbers are true as far as they go and false as a total (D8). */}
-              {counts === "failed" && (
-                <p className="text-zinc-600">
-                  The library could not be counted — reopen the tab to try
-                  again.
+            {counts === "failed" && (
+              <p className="text-ink-3">
+                The library could not be counted — reopen the tab to try again.
+              </p>
+            )}
+            {counts !== null && counts !== "failed" && counts.incomplete && (
+              <p className="text-ink-3">
+                The scope was cut short — counts are a floor.
+              </p>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 space-y-2 overflow-auto px-3 pb-2">
+              {messages.length === 0 ? (
+                <p className="mt-6 text-center text-xs text-ink-3">
+                  Chat about your models — coming soon.
                 </p>
-              )}
-              {counts !== null && counts !== "failed" && counts.incomplete && (
-                <p className="text-zinc-600">
-                  The scope was cut short — counts are a floor.
-                </p>
+              ) : (
+                messages.map((m, i) => (
+                  <p
+                    key={i}
+                    className="rounded-lg bg-surface px-3 py-2 text-sm text-ink"
+                  >
+                    {m}
+                  </p>
+                ))
               )}
             </div>
-          ) : (
-            <>
-              <div className="flex-1 space-y-2 overflow-auto px-3 pb-2">
-                {messages.length === 0 ? (
-                  <p className="mt-4 text-center text-xs text-zinc-600">
-                    Chat about your models — coming soon.
-                  </p>
-                ) : (
-                  messages.map((m, i) => (
-                    <p
-                      key={i}
-                      className="rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-200"
-                    >
-                      {m}
-                    </p>
-                  ))
-                )}
-              </div>
-              <form
-                className="border-t border-zinc-800 p-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (draft.trim() === "") return;
-                  setMessages((prev) => [...prev, draft.trim()]);
-                  setDraft("");
-                }}
-              >
-                <input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder="Message…"
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
-                />
-              </form>
-            </>
-          )}
-        </>
-      )}
-    </aside>
+            <form
+              className="border-t border-line p-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (draft.trim() === "") return;
+                setMessages((prev) => [...prev, draft.trim()]);
+                setDraft("");
+              }}
+            >
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Message…"
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-3 focus:border-line-strong"
+              />
+            </form>
+          </>
+        )}
+      </aside>
+    </>
+  );
+}
+
+/** A switch's knob, drawn inside the button that carries `role="switch"`. */
+function Switch({ on }: { on: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={
+        on
+          ? "flex h-4.5 w-8 shrink-0 items-center justify-end rounded-full bg-accent p-0.5"
+          : "flex h-4.5 w-8 shrink-0 items-center justify-start rounded-full bg-white/15 p-0.5"
+      }
+    >
+      <span
+        className={
+          on
+            ? "size-3.5 rounded-full bg-accent-ink"
+            : "size-3.5 rounded-full bg-ink-2"
+        }
+      />
+    </span>
   );
 }

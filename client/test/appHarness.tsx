@@ -113,6 +113,15 @@ export const openWith = vi.fn().mockResolvedValue(undefined);
 // default so a test that does not opt in fails loudly rather than silently
 // resolving `undefined`.
 export const similar = vi.fn();
+// The name count asked beside a meaning search. The method is optional on the
+// client, so the mock client carries it only once a cell calls
+// `offerNameProbe()` — every cell written before it existed sees no note it
+// did not choose.
+export const nameMatchCount = vi.fn();
+let nameProbeOffered = false;
+export function offerNameProbe(): void {
+  nameProbeOffered = true;
+}
 // The pose wave a plain listing fires once it has landed (pose-for-every-model
 // D3). Unlike `similar` it has a default, and the default is the answer an
 // index that is not running gives — no poses — so every test written before the
@@ -190,6 +199,9 @@ export function apiClientModule(): Record<string, unknown> {
       features = features;
       open = openApp;
       openWith = openWith;
+      get nameMatchCount(): typeof nameMatchCount | undefined {
+        return nameProbeOffered ? nameMatchCount : undefined;
+      }
     },
   };
 }
@@ -301,7 +313,9 @@ export const pressEnter = (el: HTMLElement): Promise<void> =>
   });
 
 export function flatButton(): HTMLButtonElement {
-  return container.querySelector<HTMLButtonElement>("button[aria-pressed]")!;
+  return container.querySelector<HTMLButtonElement>(
+    "button[data-flat-toggle]",
+  )!;
 }
 export function upButton(): HTMLButtonElement {
   return container.querySelector<HTMLButtonElement>(
@@ -309,19 +323,45 @@ export function upButton(): HTMLButtonElement {
   )!;
 }
 export function tiles(): HTMLButtonElement[] {
-  // The grid's buttons, not every button under `main` — the results header now
-  // carries a control of its own, and a selector that cannot tell a tile from
-  // an affordance beside it reports the affordance as an entry.
+  // The entries, not every button in the grid — each tile has an actions
+  // button beside it, and the results header carries controls too; a selector
+  // that cannot tell a tile from an affordance reports the affordance as an
+  // entry.
   return Array.from(
-    container.querySelectorAll<HTMLButtonElement>("main .grid button"),
+    container.querySelectorAll<HTMLButtonElement>(
+      "main .grid [data-entry-tile]",
+    ),
   );
 }
-/** Each tile's label is the last child of its button. */
+/** Each tile's drawn name. */
 export function labels(): string[] {
-  return tiles().map((b) => b.lastElementChild?.textContent ?? "");
+  return tiles().map(
+    (b) => b.querySelector("[data-tile-name]")?.textContent ?? "",
+  );
 }
 export function skeleton(): Element | null {
   return container.querySelector(".animate-pulse");
+}
+/**
+ * The results line as read — its count, then the query or model its chip names
+ * — e.g. `2 results “found”`; null where it names nothing, as over a plain
+ * listing. Found by the chip's shape, a lone curly-quoted span, since the line
+ * carries no attribute of its own.
+ */
+export function resultsLabel(): string | null {
+  const chip = Array.from(container.querySelectorAll("main span")).find(
+    (s) => s.childElementCount === 0 && /^“.*”$/s.test(s.textContent ?? ""),
+  );
+  if (chip === undefined) return null;
+  const count = chip.parentElement?.previousElementSibling?.textContent ?? "";
+  return `${count} ${chip.textContent}`;
+}
+/** The one control that leaves a committed view (D9) — in `main`, because the
+ *  job chip's close button shares its accessible name. */
+export function dismissButton(): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    'main button[aria-label="Dismiss"]',
+  );
 }
 export function pathInput(): HTMLInputElement {
   return container.querySelector<HTMLInputElement>(
@@ -329,9 +369,31 @@ export function pathInput(): HTMLInputElement {
   )!;
 }
 export function searchInput(): HTMLInputElement {
-  return container.querySelector<HTMLInputElement>(
-    'input[aria-label="Search names and folders"]',
+  return container.querySelector<HTMLInputElement>("input[data-search-input]")!;
+}
+/** Open the side panel from the toolbar, as a user does — it starts closed for
+ *  a fresh profile. A no-op when it is already open. */
+export async function openPanel(): Promise<void> {
+  const toggle = container.querySelector<HTMLButtonElement>(
+    "button[data-panel-toggle]",
   )!;
+  if (toggle.getAttribute("aria-expanded") !== "true") await click(toggle);
+}
+/** Turn "Show match scores" on as a user does — the switch on the Options
+ *  panel's search tab — then put the panel away again. */
+export async function showMatchScores(): Promise<void> {
+  await openPanel();
+  const tab = Array.from(
+    container.querySelectorAll<HTMLButtonElement>('aside [role="tab"]'),
+  ).find((b) => b.textContent?.trim().toLowerCase().startsWith("search"));
+  if (tab !== undefined) await click(tab);
+  const toggle = container.querySelector<HTMLButtonElement>(
+    'button[role="switch"][aria-label="Show match scores"]',
+  )!;
+  if (toggle.getAttribute("aria-checked") !== "true") await click(toggle);
+  await click(
+    container.querySelector<HTMLButtonElement>("button[data-panel-toggle]")!,
+  );
 }
 /** The summoned find control's input — absent until it is opened. */
 export function findInput(): HTMLInputElement | null {
@@ -348,9 +410,8 @@ export async function openFind(): Promise<void> {
   });
 }
 /**
- * The corner occlusion pill. Selected by its title, not by `aria-pressed`:
- * `flatButton()` claims the first `[aria-pressed]` in the container, and this
- * one carries the attribute too.
+ * The toolbar's occlusion toggle. Selected by its title, not by `aria-pressed`:
+ * Flat and Narrow carry the attribute too.
  */
 export function aoPill(): HTMLButtonElement {
   return container.querySelector<HTMLButtonElement>(
@@ -463,6 +524,8 @@ export async function unmountApp(): Promise<void> {
   // Reset on teardown, not on mount: the index's availability is read during
   // mount, so a test has to be able to configure it *before* mounting.
   indexAvailability.mockResolvedValue({ state: "absent" });
+  nameProbeOffered = false;
+  nameMatchCount.mockReset();
   // Same rule again: the state is read during mount, so a test configures it
   // before mounting and the ready default is restored on the way out.
   library.mockResolvedValue({

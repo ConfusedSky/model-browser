@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type * as THREE from "three";
 import type {
   AppRef,
@@ -17,7 +11,7 @@ import type {
 } from "../../../shared/types";
 import { renderableCredits } from "../../../shared/credits";
 import type { ApiClient } from "../api/client";
-import { MENU_ITEM_CLASS } from "../components/EntryMenu";
+import { COMMAND_ICON, MENU_ITEM_CLASS } from "../components/EntryMenu";
 import { CREDIT_LINK_CLASS, hostLabel } from "../lib/credits";
 import {
   AXIS_CAPTION_CLASS,
@@ -25,10 +19,7 @@ import {
   AXIS_GROUP_CLASS,
   AXIS_LETTERS,
   FLIP_TITLE,
-  OPEN_IN_CAPTION,
-  OPEN_IN_PANEL_CAPTION_CLASS,
-  OPEN_IN_GROUP_CLASS,
-  OPEN_IN_PILL_CLASS,
+  MAINTENANCE_COMMANDS,
   axisLetter,
   axisPillClass,
   axisWithLetter,
@@ -42,15 +33,37 @@ import {
 } from "../lib/entryActions";
 import { formatBytes, formatCosine, formatDate, formatZ } from "../lib/format";
 import { expandLibraryPath } from "../lib/libraryPath";
-import { SCALE_BADGE, Z_LABEL, type ScoreScale } from "../lib/scoreScale";
+import {
+  SCALE_BADGE,
+  Z_LABEL,
+  strengthOf,
+  type ScoreScale,
+} from "../lib/scoreScale";
 import { GestureTracker, nativeMenuRequested } from "../lib/gesture";
 import type { MeshLru } from "../three/lru";
 import { DEFAULT_CAMERA, defaultAxisFor } from "../three/camera";
 import { formatOfEntry } from "../three/models";
 import { cameraForPose } from "../three/pose";
-import { getRenderer } from "../three/renderer";
+import { getRenderer, onContextLost } from "../three/renderer";
 import { liveRenderSize } from "./renderSize";
 import { ViewerSession } from "./session";
+import Icon from "../components/Icon";
+import { baseName } from "../../../shared/names";
+
+/** What a press on the stage belongs to rather than the model. */
+const STAGE_CONTROLS = "button, [data-stage-control]";
+
+/** Read once: a device does not change what its pointer is mid-session. */
+const COARSE_POINTER =
+  typeof window !== "undefined" &&
+  window.matchMedia?.("(pointer: coarse)").matches === true;
+
+/** The panel's launch buttons: the default application is the one filled
+ *  button in the panel, so what "open" means is never a question. */
+const OPEN_IN_PRIMARY_CLASS =
+  "flex h-9 min-w-0 flex-1 basis-full items-center justify-center gap-2 truncate rounded-lg bg-accent px-3 text-[13px] font-semibold text-accent-ink hover:bg-accent-hover";
+const OPEN_IN_SECONDARY_CLASS =
+  "flex h-8 min-w-0 flex-1 items-center justify-center truncate rounded-lg px-3 text-xs text-ink-2 ring-1 ring-line-strong hover:bg-white/5 hover:text-ink";
 
 export interface ViewerState {
   mode: "orbit" | "lightbox";
@@ -70,6 +83,10 @@ interface Props {
   /** The same derivation the tile reads, so the two surfaces cannot report one
    *  number under different names (D7). */
   scoreScale: ScoreScale | null;
+  /** The raw pair beside the strength word. */
+  showScores?: boolean;
+  /** The set's best is middling; the strength word stops at "Fair". */
+  modestSet?: boolean;
   /** A prop, not a store read, so toggling repaints the live view. */
   ao: boolean;
   api: ApiClient;
@@ -83,15 +100,14 @@ interface Props {
   onDismiss: () => void;
   onPersist: (session: ViewerSession) => Promise<void>;
   onLoadError: (message: string) => void;
-  /** Both modes report it, because both swallow `contextmenu` — the orbit
-   *  overlay sits over the very tile whose handler would otherwise see the
-   *  press, and keeps sitting there through the persist hold. */
+  /** The orbit overlay reports it, because it swallows `contextmenu` for the
+   *  very tile whose handler would otherwise see the press, and keeps sitting
+   *  there through the persist hold. The lightbox raises no menu: its panel
+   *  carries every command. */
   onEntryMenu: (
     entry: DirEntry,
     el: HTMLElement | null,
     at: { x: number; y: number },
-    /** Read at press time; the session is private to this component. */
-    live?: () => LiveFramingView | null,
   ) => void;
   /** A ref, not a value: a changing prop would re-run the focus-trap effect
    *  below and pull focus out of the menu it just raised. */
@@ -136,6 +152,8 @@ export default function ViewerLayer({
   pose,
   score,
   scoreScale,
+  showScores = false,
+  modestSet = false,
   ao,
   api,
   lru,
@@ -166,6 +184,10 @@ export default function ViewerLayer({
   /** Shown instead of dismissing. */
   const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showHint, setShowHint] = useState(true);
+  // Nothing turns on a lost context, so the hint would be promising a drag
+  // that does nothing.
+  useEffect(() => onContextLost((lost) => lost && setShowHint(false)), []);
   const [copyError, setCopyError] = useState<string | null>(null);
   /** `null` for every way of having nothing to show — no store, no key, a
    *  failed read — because the panel draws them identically (D4). */
@@ -370,7 +392,7 @@ export default function ViewerLayer({
    * the old tile's path.
    */
   function endGesture(
-    at: { clientX: number; clientY: number },
+    at: { clientX: number; clientY: number; pointerType?: string },
     { promote }: { promote: boolean },
   ): void {
     if (!pointer.current.down) return;
@@ -391,7 +413,9 @@ export default function ViewerLayer({
       pendingPersistRef.current = p;
     }
     // A drag released outside the tile gets no later pointerleave, so the
-    // overlay would be stuck.
+    // overlay would be stuck. Nor does a finger: a touch stays captured by
+    // the tile it pressed and has no hover to leave, so its release is the
+    // end of the overlay.
     if (modeRef.current === "orbit") {
       const rect = containerRef.current?.getBoundingClientRect();
       const inside =
@@ -400,7 +424,7 @@ export default function ViewerLayer({
         at.clientX <= rect.right &&
         at.clientY >= rect.top &&
         at.clientY <= rect.bottom;
-      if (!inside) void dismissAfterPersist();
+      if (!inside || at.pointerType === "touch") void dismissAfterPersist();
     }
   }
   const endGestureRef = useRef(endGesture);
@@ -608,12 +632,10 @@ export default function ViewerLayer({
       return;
     }
     e.preventDefault();
-    onEntryMenu(
-      viewer.entry,
-      containerRef.current,
-      { x: e.clientX, y: e.clientY },
-      liveFramingView,
-    );
+    onEntryMenu(viewer.entry, containerRef.current, {
+      x: e.clientX,
+      y: e.clientY,
+    });
   }
 
   useEffect(() => () => clearTimeout(copyTimerRef.current), []);
@@ -689,8 +711,14 @@ export default function ViewerLayer({
     void onPersist(s);
   }
 
+  /** Everyday commands first, maintenance after the divider. */
+  const orderedPanel = [
+    ...panelCommands.filter((c) => !MAINTENANCE_COMMANDS.has(c.id)),
+    ...panelCommands.filter((c) => MAINTENANCE_COMMANDS.has(c.id)),
+  ];
+
   const spinner = (
-    <span className="absolute left-1/2 top-1/2 size-8 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-200" />
+    <span className="absolute left-1/2 top-1/2 size-7 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-2 border-white/10 border-t-white/50" />
   );
 
   if (viewer.mode === "orbit") {
@@ -698,7 +726,7 @@ export default function ViewerLayer({
     return (
       <div
         ref={containerRef}
-        className="fixed z-orbit-overlay cursor-grab touch-none rounded-lg bg-zinc-900 active:cursor-grabbing"
+        className="fixed z-orbit-overlay cursor-grab touch-none rounded-t-xl bg-stage active:cursor-grabbing"
         style={{
           left: rect.left,
           top: rect.top,
@@ -716,7 +744,7 @@ export default function ViewerLayer({
           (loadError !== null ? (
             <span
               role="alert"
-              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-zinc-800/90 px-2.5 py-1 text-xs text-red-400"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-raised/90 px-2.5 py-1 text-xs text-danger"
             >
               ⚠ failed to load
             </span>
@@ -729,11 +757,11 @@ export default function ViewerLayer({
 
   return (
     <div
-      className="fixed inset-0 z-lightbox flex items-center justify-center bg-black/70"
-      onContextMenu={raiseEntryMenu}
+      className="fixed inset-0 z-lightbox flex items-center justify-center bg-black/75 backdrop-blur-sm sm:p-4"
       onPointerDown={(e) => {
-        // Primary only: a secondary press on the backdrop raises the menu, and
-        // must not close the view out from under it.
+        // Primary only: the panel beside the model already carries every
+        // command, so the lightbox raises no menu of its own, and a secondary
+        // press must not close the view either.
         if (e.button === 0 && e.target === e.currentTarget) onCloseIntent();
       }}
     >
@@ -743,28 +771,51 @@ export default function ViewerLayer({
         aria-modal="true"
         aria-label={viewer.entry.name}
         tabIndex={-1}
-        // Declared once, on the element that owns both: spelling either number
-        // again elsewhere lets a widened panel overlap the model silently.
-        style={{ "--lb-width": "95vw", "--lb-panel": "18rem" } as CSSProperties}
-        className="relative flex max-w-[var(--lb-width)] overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 outline-none"
+        className="relative flex h-full w-full flex-col overflow-hidden bg-canvas outline-none sm:flex-row sm:rounded-2xl sm:border sm:border-line-strong sm:shadow-2xl sm:shadow-black/60"
       >
-        {/* The square is load-bearing: `snapshot()` captures at aspect 1, so a
-            squeezed live view disagrees with its thumbnail (D1). Sized against
-            the room left *after* the panel, or the panel is crushed until its
-            path text overflows; the `16rem` floor is the other direction. */}
-        <div className="relative h-[min(80vh,max(16rem,calc(var(--lb-width)_-_var(--lb-panel))))] w-[min(80vh,max(16rem,calc(var(--lb-width)_-_var(--lb-panel))))] shrink-0">
-          <div
-            ref={canvasHostRef}
-            className="h-full w-full cursor-grab touch-none active:cursor-grabbing"
-            onPointerDown={startGesture}
-            onWheel={(e) => {
-              sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9);
-              renderNow();
-            }}
-          />
-          {/* Siblings of the canvas host, not children: the host owns the
-              orbit and zoom handlers, so a press on a button never orbits.
-              Disabled rather than absent at the ends (D2). */}
+        {/* The stage takes whatever the panel leaves, and the canvas is the
+            largest square inside it. The square is load-bearing: `snapshot()`
+            captures at aspect 1, so a squeezed live view disagrees with its
+            thumbnail (D1). The stage is a size container so the square can
+            take its smaller axis.
+
+            The whole stage turns and zooms the model, not only the square: the
+            gutters beside it are drawn as the same surface, and a press there
+            that did nothing would read as a broken drag. Presses on the
+            stage's own controls are theirs. */}
+        <div
+          data-lightbox-stage
+          className="relative flex min-h-0 min-w-0 flex-1 cursor-grab touch-none items-center justify-center bg-stage [container-type:size] active:cursor-grabbing"
+          onPointerDown={(e) => {
+            if ((e.target as Element).closest(STAGE_CONTROLS) !== null) return;
+            setShowHint(false);
+            startGesture(e);
+          }}
+          onWheel={(e) => {
+            if ((e.target as Element).closest(STAGE_CONTROLS) !== null) return;
+            sessionRef.current?.zoom(e.deltaY > 0 ? 1.1 : 0.9);
+            renderNow();
+          }}
+        >
+          <div className="relative size-[min(100cqw,100cqh)]">
+            <div ref={canvasHostRef} className="h-full w-full" />
+            {session === null &&
+              (loadError !== null ? (
+                <div
+                  role="alert"
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center"
+                >
+                  <Icon name="warning" className="size-7 text-danger/80" />
+                  <p className="text-sm font-medium text-ink">
+                    {viewer.entry.name}
+                  </p>
+                  <p className="text-xs text-danger">{loadError}</p>
+                </div>
+              ) : (
+                spinner
+              ))}
+          </div>
+          {/* Disabled rather than absent at the ends (D2). */}
           <button
             type="button"
             aria-label="Previous model"
@@ -772,7 +823,8 @@ export default function ViewerLayer({
             onClick={() => {
               if (prevEntry !== null) void goTo(prevEntry);
             }}
-            className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-zinc-800/80 p-2 text-zinc-200 hover:bg-zinc-700 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-zinc-800/80"
+            title="Previous model (←)"
+            className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-raised/80 p-2.5 text-ink ring-1 ring-line-strong backdrop-blur cursor-pointer hover:bg-raised disabled:pointer-events-none disabled:opacity-0"
           >
             <svg
               aria-hidden="true"
@@ -794,7 +846,8 @@ export default function ViewerLayer({
             onClick={() => {
               if (nextEntry !== null) void goTo(nextEntry);
             }}
-            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-zinc-800/80 p-2 text-zinc-200 hover:bg-zinc-700 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-zinc-800/80"
+            title="Next model (→)"
+            className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-raised/80 p-2.5 text-ink ring-1 ring-line-strong backdrop-blur cursor-pointer hover:bg-raised disabled:pointer-events-none disabled:opacity-0"
           >
             <svg
               aria-hidden="true"
@@ -809,31 +862,39 @@ export default function ViewerLayer({
               <path d="M9 6l6 6-6 6" />
             </svg>
           </button>
-          {session === null &&
-            (loadError !== null ? (
-              <div
-                role="alert"
-                className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center"
-              >
-                <span className="text-2xl" aria-hidden="true">
-                  ⚠
-                </span>
-                <p className="text-sm font-medium text-zinc-200">
-                  {viewer.entry.name}
-                </p>
-                <p className="text-xs text-red-400">{loadError}</p>
-              </div>
-            ) : (
-              spinner
-            ))}
+          {/* On a pill, so the model cannot draw over it, and at the foot of
+              the stage, where no control lives; gone once the model has been
+              turned, since by then it has done its job. Its length follows the
+              stage's own width (the stage is a size container), so it never
+              runs into the axis bar or past the edge. */}
+          {session !== null && showHint && (
+            <p
+              aria-hidden="true"
+              className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-canvas/75 px-3 py-1 text-xs whitespace-nowrap text-ink-2 ring-1 ring-line backdrop-blur-sm"
+            >
+              {COARSE_POINTER ? (
+                "Drag to turn the model"
+              ) : (
+                <>
+                  <span className="@lg:hidden">
+                    Drag to turn · scroll to zoom
+                  </span>
+                  <span className="hidden @lg:inline">
+                    Drag to turn · scroll to zoom · ← → for the next model
+                  </span>
+                </>
+              )}
+            </p>
+          )}
           {session !== null && (
             // The tile menu draws the same four buttons from the same strings
             // in `entryActions`, so neither copy can drift.
             <div
-              className={`absolute left-3 top-3 ${AXIS_GROUP_CLASS}`}
+              data-stage-control
+              className={`absolute left-3 top-3 cursor-default ${AXIS_GROUP_CLASS}`}
               aria-label="Orbit axis"
             >
-              <span className={AXIS_CAPTION_CLASS}>axis</span>
+              <span className={AXIS_CAPTION_CLASS}>up axis</span>
               {AXIS_LETTERS.map((letter) => {
                 const active = axisLetter(sessionAxis) === letter;
                 return (
@@ -863,56 +924,99 @@ export default function ViewerLayer({
             </div>
           )}
         </div>
-        <div className="flex w-[var(--lb-panel)] min-w-0 flex-col gap-4 overflow-y-auto p-4">
+        <div className="flex max-h-[42dvh] w-full min-w-0 shrink-0 flex-col gap-5 overflow-y-auto border-t border-line p-5 sm:max-h-none sm:w-80 sm:border-t-0 sm:border-l">
           {/* pr-9 clears the dialog-anchored close button */}
-          <p className="break-all pr-9 text-sm font-medium text-zinc-200">
-            {viewer.entry.name}
-          </p>
+          {/* The file's own name; a result carries its path relative to the
+              search, whose folders go on the line under it. */}
+          <div className="pr-9">
+            <p className="text-base leading-snug font-semibold [overflow-wrap:anywhere] text-ink">
+              {baseName(viewer.entry.name)}
+            </p>
+            {viewer.entry.name.includes("/") && (
+              // The nearest two folders, which name the kit; the whole path
+              // is in the PATH row below.
+              <p className="mt-0.5 truncate text-xs text-ink-3">
+                in {nearestFolders(viewer.entry.name)}
+              </p>
+            )}
+          </div>
+          {openIn !== null && openIn.apps.length > 0 && (
+            // The panel's primary action: the default application leads as the
+            // one filled button, the rest follow as plain ones (L10). Plain
+            // buttons carrying `data-app-id` and no `data-command`, exactly as
+            // the menu's do.
+            <div
+              role="group"
+              aria-label="Open in"
+              className="flex flex-wrap gap-1.5"
+            >
+              {openIn.apps.map((app, i) => (
+                <button
+                  key={app.id}
+                  type="button"
+                  data-app-id={app.id}
+                  title={`Open in ${app.name}`}
+                  onClick={() => openIn.onChoose(app.id)}
+                  className={
+                    i === 0 ? OPEN_IN_PRIMARY_CLASS : OPEN_IN_SECONDARY_CLASS
+                  }
+                >
+                  {i === 0 && <Icon name="externalLink" className="size-3.5" />}
+                  {i === 0 ? `Open in ${app.name}` : app.name}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-500">path</span>
+              <span className="text-xs font-medium tracking-wider text-ink-3 uppercase">
+                path
+              </span>
+              <span role="status" className="sr-only">
+                {copied ? "Path copied." : ""}
+              </span>
               <button
                 type="button"
                 aria-label="Copy path"
                 onClick={copyPath}
-                className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs text-zinc-300 hover:bg-zinc-700"
+                className={
+                  copied
+                    ? "h-7 rounded-md bg-accent-soft px-2.5 text-xs text-accent touch:h-11"
+                    : "h-7 rounded-md px-2.5 text-xs text-ink-2 ring-1 ring-line-strong hover:bg-white/5 hover:text-ink touch:h-11"
+                }
               >
                 {copied ? "copied" : "copy"}
               </button>
             </div>
             {/* The filesystem path (library R2), through the one expansion the
                 copy button beside it also uses. */}
-            <p className="select-text break-all text-xs text-zinc-300">
+            <p className="font-mono text-xs leading-relaxed break-all text-ink-2 select-text">
               {expandLibraryPath(libraryTop, viewer.entry.path)}
             </p>
             {copyError !== null && (
-              <p role="status" className="text-xs text-red-400">
+              <p role="status" className="text-xs text-danger">
                 {copyError}
               </p>
             )}
           </div>
-          <dl className="flex flex-col gap-2 text-xs">
+          <dl className="flex flex-col gap-2 border-t border-line pt-4 text-xs">
             {viewer.entry.format !== undefined && (
               <div className="flex justify-between gap-2">
-                <dt className="text-zinc-500">format</dt>
-                <dd className="uppercase text-zinc-300">
-                  {viewer.entry.format}
-                </dd>
+                <dt className="text-ink-3">format</dt>
+                <dd className="uppercase text-ink-2">{viewer.entry.format}</dd>
               </div>
             )}
             <div className="flex justify-between gap-2">
-              <dt className="text-zinc-500">size</dt>
-              <dd className="text-zinc-300">
-                {formatBytes(viewer.entry.size)}
-              </dd>
+              <dt className="text-ink-3">size</dt>
+              <dd className="text-ink-2">{formatBytes(viewer.entry.size)}</dd>
             </div>
             <div className="flex justify-between gap-2">
-              <dt className="text-zinc-500">
+              <dt className="text-ink-3">
                 {viewer.entry.path.includes("!/")
                   ? "modified (zip)"
                   : "modified"}
               </dt>
-              <dd className="text-right text-zinc-300">
+              <dd className="text-right text-ink-2">
                 {formatDate(viewer.entry.mtime)}
               </dd>
             </div>
@@ -920,16 +1024,22 @@ export default function ViewerLayer({
                 describes before it offers, which appending quietly breaks. Same
                 labels as the tile's corners, from one derivation (D7). */}
             {score !== undefined && scoreScale !== null && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-ink-3">match</dt>
+                <dd className="text-ink-2">{strengthOf(score.z, modestSet)}</dd>
+              </div>
+            )}
+            {score !== undefined && scoreScale !== null && showScores && (
               <>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-zinc-500">{SCALE_BADGE[scoreScale]}</dt>
-                  <dd className="tabular-nums text-zinc-300">
+                  <dt className="text-ink-3">{SCALE_BADGE[scoreScale]}</dt>
+                  <dd className="tabular-nums text-ink-2">
                     {formatCosine(score.score)}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-zinc-500">{Z_LABEL}</dt>
-                  <dd className="tabular-nums text-zinc-300">
+                  <dt className="text-ink-3">{Z_LABEL}</dt>
+                  <dd className="tabular-nums text-ink-2">
                     {formatZ(score.z)}
                   </dd>
                 </div>
@@ -947,8 +1057,8 @@ export default function ViewerLayer({
                     data-credit="author"
                     className="flex justify-between gap-2"
                   >
-                    <dt className="text-zinc-500">author</dt>
-                    <dd className="min-w-0 text-right text-zinc-300">
+                    <dt className="text-ink-3">author</dt>
+                    <dd className="min-w-0 text-right text-ink-2">
                       {credits.authorUrl !== undefined ? (
                         <a
                           href={credits.authorUrl}
@@ -970,8 +1080,8 @@ export default function ViewerLayer({
                     data-credit="license"
                     className="flex justify-between gap-2"
                   >
-                    <dt className="text-zinc-500">license</dt>
-                    <dd className="min-w-0 break-words text-right text-zinc-300">
+                    <dt className="text-ink-3">license</dt>
+                    <dd className="min-w-0 break-words text-right text-ink-2">
                       {/* The corpus's string, linked to the stored deed URL:
                           the URL carries the version (D3). */}
                       {credits.licenseUrl !== undefined ? (
@@ -995,8 +1105,8 @@ export default function ViewerLayer({
                     data-credit="source"
                     className="flex justify-between gap-2"
                   >
-                    <dt className="text-zinc-500">source</dt>
-                    <dd className="min-w-0 text-right text-zinc-300">
+                    <dt className="text-ink-3">source</dt>
+                    <dd className="min-w-0 text-right text-ink-2">
                       <a
                         href={credits.sourceUrl}
                         target="_blank"
@@ -1018,8 +1128,8 @@ export default function ViewerLayer({
                     data-credit="modified"
                     className="flex justify-between gap-2"
                   >
-                    <dt className="text-zinc-500">this copy</dt>
-                    <dd className="min-w-0 break-words text-right text-zinc-300">
+                    <dt className="text-ink-3">this copy</dt>
+                    <dd className="min-w-0 break-words text-right text-ink-2">
                       {credits.modified}
                     </dd>
                   </div>
@@ -1031,48 +1141,35 @@ export default function ViewerLayer({
               over this very panel, and two things sharing an accessible name
               are one thing to anything reading names. They wear the menu's own
               look (`MENU_ITEM_CLASS`, owned by `EntryMenu`). */}
-          {openIn !== null && (
-            // The menu's pill row from the same exported strings (L10). Not a
-            // menu, so plain buttons carrying `data-app-id` and no
-            // `data-command`, exactly as the menu's do.
-            <div
-              role="group"
-              aria-label="Open in"
-              className={OPEN_IN_GROUP_CLASS}
-            >
-              <span className={OPEN_IN_PANEL_CAPTION_CLASS}>
-                {OPEN_IN_CAPTION}
-              </span>
-              {openIn.apps.map((app) => (
-                <button
-                  key={app.id}
-                  type="button"
-                  data-app-id={app.id}
-                  title={app.name}
-                  onClick={() => openIn.onChoose(app.id)}
-                  className={OPEN_IN_PILL_CLASS}
-                >
-                  {app.name}
-                </button>
-              ))}
-            </div>
-          )}
           {panelCommands.length > 0 && (
             <div
-              className="-mx-1 flex flex-col overflow-hidden rounded-lg border border-zinc-700 text-sm text-zinc-200"
+              className="-mx-1 flex flex-col gap-px rounded-lg border border-line bg-surface p-1 text-[13px] text-ink"
               aria-label="Model actions"
               role="group"
             >
-              {panelCommands.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  data-command={c.id}
-                  onClick={() => runPanelCommand(c.id)}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {c.label}
-                </button>
+              {orderedPanel.map((c, i) => (
+                <Fragment key={c.id}>
+                  {i > 0 &&
+                    MAINTENANCE_COMMANDS.has(c.id) &&
+                    !MAINTENANCE_COMMANDS.has(orderedPanel[i - 1]!.id) && (
+                      <div
+                        role="separator"
+                        className="mx-1 my-0.5 h-px bg-line"
+                      />
+                    )}
+                  <button
+                    type="button"
+                    data-command={c.id}
+                    onClick={() => runPanelCommand(c.id)}
+                    className={MENU_ITEM_CLASS}
+                  >
+                    <Icon
+                      name={COMMAND_ICON[c.id]}
+                      className="size-3.5 text-ink-3"
+                    />
+                    {c.label}
+                  </button>
+                </Fragment>
               ))}
             </div>
           )}
@@ -1082,7 +1179,7 @@ export default function ViewerLayer({
             <p
               role="status"
               className={`text-xs ${
-                actionNote.tone === "error" ? "text-red-400" : "text-zinc-400"
+                actionNote.tone === "error" ? "text-danger" : "text-ink-2"
               }`}
             >
               {actionNote.text}
@@ -1092,12 +1189,30 @@ export default function ViewerLayer({
         <button
           type="button"
           aria-label="Close"
-          className="absolute right-3 top-3 rounded-full bg-zinc-800 px-3 py-1 text-sm text-zinc-300 hover:bg-zinc-700"
+          title="Close (Esc)"
+          className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-white/5 hover:text-ink touch:size-11"
           onClick={() => onCloseIntent()}
         >
-          ✕
+          <Icon name="x" />
         </button>
       </div>
     </div>
   );
 }
+
+/** "in Kit › Folder": the last two folders of a result's relative path that
+ *  say something — kits nest their files under the same few generic names —
+ *  with an archive named without its `!`. */
+function nearestFolders(name: string): string {
+  const parts = name
+    .slice(0, name.lastIndexOf("/"))
+    .split("/")
+    .map((p) => p.replace(/!$/, ""));
+  const telling = parts.filter((p) => !GENERIC_FOLDER.test(p));
+  return (telling.length > 0 ? telling : parts).slice(-2).join(" › ");
+}
+
+/** Folder names that recur inside every kit and tell one from another not at
+ *  all: sizes, support states, file formats, parts. */
+const GENERIC_FOLDER =
+  /^(\d+\s?mm|(un|pre|non)?[\s_-]?supported|no[\s_-]?supports?|supports?|stls?|obj|3mf|files?|parts?|one[\s_-]?piece|split|models?|print[\s_-]?files?)$/i;

@@ -18,6 +18,7 @@ import {
   openFind,
   pathInput,
   pressEnter,
+  resultsLabel,
   searchInput,
   settle,
   skeleton,
@@ -117,7 +118,7 @@ describe("file name search", () => {
     );
     expect(labels()).toEqual(["found.stl", "foundation.stl"]);
     expect(container.textContent).toContain("omitted");
-    expect(container.textContent).toContain('Search results for "found".');
+    expect(resultsLabel()).toBe("2 results “found”");
   });
 
   it("the Deep button also submits the committed query", async () => {
@@ -189,7 +190,7 @@ describe("file name search", () => {
       expect.any(AbortSignal),
     );
     expect(labels()).toEqual(["Alpha", "Bravo", "widget.stl"]);
-    expect(container.textContent).not.toContain("Search results for");
+    expect(resultsLabel()).toBeNull();
   });
 
   it("a search submitted mid-navigation targets the in-flight destination", async () => {
@@ -217,7 +218,9 @@ describe("file name search", () => {
     );
 
     await click(
-      container.querySelector<HTMLButtonElement>("main .grid button")!,
+      container.querySelector<HTMLButtonElement>(
+        "main .grid [data-entry-tile]",
+      )!,
     ); // navigate into Alpha — left pending
     await type(searchInput(), "found");
     await pressEnter(searchInput());
@@ -264,13 +267,13 @@ describe("file name search", () => {
     await settle();
 
     expect(labels()).toEqual(["sub"]);
-    expect(container.textContent).not.toContain("Search results for");
+    expect(resultsLabel()).toBeNull();
 
     resolveSearch(SEARCH_RESULT); // the abandoned search finally lands — must not clobber the new grid
     await settle();
 
     expect(labels()).toEqual(["sub"]);
-    expect(container.textContent).not.toContain("Search results for");
+    expect(resultsLabel()).toBeNull();
   });
 
   it("a deep-search folder tile is labeled by its own name, with the path in the title", async () => {
@@ -285,10 +288,11 @@ describe("file name search", () => {
     await pressEnter(searchInput());
     await settle();
 
-    expect(labels()).toEqual(["Sandy Dunes", "base.stl"]);
+    // Models lead a name search's results, then the folders.
+    expect(labels()).toEqual(["base.stl", "Sandy Dunes"]);
     expect(tiles().map((b) => b.getAttribute("title"))).toEqual([
-      "Sets/Sandy Dunes",
       "Sets/Sandy Dunes/base.stl",
+      "Sets/Sandy Dunes",
     ]);
   });
 
@@ -320,7 +324,7 @@ describe("file name search", () => {
     await pressEnter(searchInput());
     await settle();
 
-    expect(container.textContent).toContain('Nothing matched "zzz".');
+    expect(container.textContent).toContain("Nothing matched “zzz”");
     expect(container.textContent).not.toContain("The filter is hiding");
 
     // Clear the no-match search and instead filter the original listing down
@@ -335,7 +339,7 @@ describe("file name search", () => {
     expect(container.textContent).toContain(
       "The filter is hiding everything below.",
     );
-    expect(container.textContent).not.toContain('Nothing matched "zzz".');
+    expect(container.textContent).not.toContain("Nothing matched “zzz”");
   });
 
   it("a failed search leaves no results label over the listing it never replaced", async () => {
@@ -352,7 +356,7 @@ describe("file name search", () => {
     // The grid is still the pre-search listing, whole — the search input no
     // longer narrows it, so nothing here may be called results either.
     expect(container.textContent).toContain("walk exploded");
-    expect(container.textContent).not.toContain("Search results for");
+    expect(resultsLabel()).toBeNull();
     expect(labels()).toEqual(["Alpha", "Bravo", "widget.stl"]);
   });
 
@@ -366,7 +370,7 @@ describe("file name search", () => {
     await type(searchInput(), "found");
     await pressEnter(searchInput());
     await settle();
-    expect(container.textContent).toContain('Search results for "found".');
+    expect(resultsLabel()).toBe("2 results “found”");
 
     // A second search fails: the first search's results are what remains on
     // screen, so the label goes back to naming them — not to naming nothing.
@@ -375,8 +379,8 @@ describe("file name search", () => {
     await settle();
 
     expect(container.textContent).toContain("walk exploded");
-    expect(container.textContent).toContain('Search results for "found".');
-    expect(container.textContent).not.toContain('Search results for "boom"');
+    expect(resultsLabel()).toBe("2 results “found”");
+    expect(container.textContent).not.toContain("“boom”");
   });
 
   it('a truncated empty search says it ran out, never "no models matched"', async () => {
@@ -391,9 +395,10 @@ describe("file name search", () => {
     // The walk never finished, so "no match" would be a false claim (D5) —
     // and the generic "some were omitted" notice stays out of the way too.
     expect(container.textContent).toContain("ran out of budget");
-    // Both empty states now open with "Nothing matched" — the completed-search
-    // one ends the sentence at the query, the truncated one keeps going.
-    expect(container.textContent).not.toContain('Nothing matched "buried".');
+    // Both empty states open with "Nothing matched" — the completed-search one
+    // curly-quotes the query and names the folder, the truncated one says the
+    // walk ran out.
+    expect(container.textContent).not.toContain("Nothing matched “buried”");
     expect(container.textContent).not.toContain("omitted");
   });
 
@@ -412,7 +417,7 @@ describe("file name search", () => {
     await type(searchInput(), "found");
     await pressEnter(searchInput());
     await settle();
-    expect(container.textContent).toContain('Search results for "found".');
+    expect(resultsLabel()).toBe("2 results “found”");
 
     // Two searches go up while "found"'s results are on screen; both fail.
     // The superseded first failure must be a no-op, and the second must revert
@@ -428,9 +433,9 @@ describe("file name search", () => {
     failC(new Error("c exploded"));
     await settle();
     expect(container.textContent).toContain("c exploded");
-    expect(container.textContent).toContain('Search results for "found".');
-    expect(container.textContent).not.toContain('Search results for "bee"');
-    expect(container.textContent).not.toContain('Search results for "cee"');
+    expect(resultsLabel()).toBe("2 results “found”");
+    expect(container.textContent).not.toContain("“bee”");
+    expect(container.textContent).not.toContain("“cee”");
   });
 
   it("a whitespace-only filter is no filter, not a filter that hides everything", async () => {
@@ -552,6 +557,39 @@ describe("file name search", () => {
     expect(labels()).toEqual(["Alpha", "Bravo", "widget.stl"]);
   });
 
+  it("Escape from its input gives the keyboard back to the tile it was opened from", async () => {
+    // The input unmounts under the keyboard, and focus left on <body> would
+    // make the next arrow key do nothing. The tile the user left, not the first.
+    tiles()[2]!.focus(); // widget.stl
+    await openFind();
+    expect(document.activeElement).toBe(findInput());
+
+    await act(async () => {
+      findInput()!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    await wait(50); // the hand-back waits a frame, for the input to go
+
+    expect(findInput()).toBeNull();
+    expect(document.activeElement).toBe(tiles()[2]);
+  });
+
+  it("ArrowDown from its input moves the keyboard onto the first tile it left standing", async () => {
+    await openFind();
+    await type(findInput()!, "ravo");
+
+    await act(async () => {
+      findInput()!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+
+    expect(document.activeElement).toBe(tiles()[0]);
+    expect(labels()).toEqual(["Bravo"]); // still narrowed: only the keyboard moved
+    expect(findInput()).not.toBeNull();
+  });
+
   it("the control survives a listing that outlives the reveal delay", async () => {
     // Unmounting it across the skeleton shifted the grid by its height and
     // re-stole focus when the new listing landed — the movement 27cb4df had
@@ -579,7 +617,9 @@ describe("file name search", () => {
     await openFind();
     await type(findInput()!, "ravo");
     await click(
-      container.querySelector<HTMLButtonElement>("main .grid button")!,
+      container.querySelector<HTMLButtonElement>(
+        "main .grid [data-entry-tile]",
+      )!,
     );
     await settle();
 

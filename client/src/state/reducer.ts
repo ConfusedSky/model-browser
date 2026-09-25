@@ -112,13 +112,17 @@ export interface SearchState {
 export type Action =
   /** Clears the search, the filter and the link's options in one. */
   | { type: "navigate"; path: string; prefs: Prefs }
-  /** Commit `drafts.queryText`. The corpus decides what that means. */
-  | { type: "submit" }
+  /** Commit `drafts.queryText`. The corpus decides what that means; `mode`
+   *  overrides it for this one search — a query shaped like a file name is
+   *  asked of the names whatever the switch says. */
+  | { type: "submit"; mode?: SearchMode }
   /** Run a phrase the app supplied (`landing-page` D4). One transition, mode
    *  and all, because "set the draft then submit" is two dispatches across a
    *  render. It carries no location: it runs at the library's top. */
   | { type: "runQuery"; text: string; mode: SearchMode }
-  | { type: "toggleFlat" }
+  /** `prefs` as on `clearSubject`: pressing it over a committed search leaves
+   *  that search, and the options it ran under go with it. */
+  | { type: "toggleFlat"; prefs?: Prefs }
   | { type: "setMode"; mode: SearchMode }
   /** `run: false` records a value the debounce is still holding; `run: true`
    *  is the fire (or a click, which is the finished value already). */
@@ -126,17 +130,20 @@ export type Action =
   | { type: "setKinds"; kinds: SearchKinds }
   | { type: "setFolderMatching"; on: boolean }
   /** Typing in the search input. Emptying it is how a committed subject is left. */
-  | { type: "queryText"; text: string }
+  | { type: "queryText"; text: string; prefs?: Prefs }
   /** Neighbours of a model, anchored where the user stands. Routed through the
    *  corpus decision, so it defers while the index warms exactly as a phrase
    *  does (D4). */
-  | { type: "similar"; model: string }
+  | { type: "similar"; model: string; prefs?: Prefs }
   /** The whole parameter set, never a delta: an omitted `pool` asserts the
    *  index's own default. Always asks — the debounce lives in the control, so
    *  there is no record-only phase as `setTuning` has. */
   | { type: "similarTuning"; k: number; pool?: Tuning["pool"] }
-  /** Leave whatever subject is committed, phrase or model, by one rule (D9). */
-  | { type: "clearSubject" }
+  /** Leave whatever subject is committed, phrase or model, by one rule (D9).
+   *  `prefs`, as on `navigate`, puts the profile's own options back in force:
+   *  a search can run under options that are not the profile's (a link's, or
+   *  a file name asked of the names), and browsing on must not inherit them. */
+  | { type: "clearSubject"; prefs?: Prefs }
   /** The deferred banner's offer: run the held phrase against the name corpus. */
   | { type: "deferredToName" }
   /** A history entry or a link. The caller resolves the URL into a whole View. */
@@ -332,12 +339,12 @@ function commitDraft(
 
 /** Leave the committed subject (D9) — one rule for a phrase and a model, and
  *  one implementation for the dismiss control and the emptied input. */
-function leaveSubject(state: SearchState): SearchState {
+function leaveSubject(state: SearchState, prefs?: Prefs): SearchState {
   const base = liveView(state);
   if (base.subject.kind === "none") return state;
   return ask(
     endDeferral(state),
-    { ...base, subject: { kind: "none" }, model: null },
+    { ...base, ...prefs, subject: { kind: "none" }, model: null },
     "user",
   );
 }
@@ -362,7 +369,9 @@ export function reducer(state: SearchState, action: Action): SearchState {
     }
 
     case "submit":
-      return commitDraft(state);
+      return action.mode === undefined
+        ? commitDraft(state)
+        : commitDraft(patch(state, { mode: action.mode }));
 
     case "runQuery": {
       // Draft, then mode as a fetchless patch, then the ordinary commit. The
@@ -383,8 +392,12 @@ export function reducer(state: SearchState, action: Action): SearchState {
     case "similar": {
       // The anchor is what the dismissal returns to, and what tells two
       // similarity views of one model apart (`requestOf`).
+      const base = liveView(state);
       const view: View = {
-        ...liveView(state),
+        ...base,
+        // As on `toggleFlat`: a committed search it supersedes takes its
+        // options with it.
+        ...(base.subject.kind !== "none" ? action.prefs : undefined),
         subject: { kind: "similar", model: action.model, k: SIMILAR_K },
         model: null,
       };
@@ -412,8 +425,14 @@ export function reducer(state: SearchState, action: Action): SearchState {
       return askCommitted(state, view, "user");
     }
 
-    case "clearSubject":
-      return leaveSubject(state);
+    case "clearSubject": {
+      // Back to browsing means the box stops showing a search that is no
+      // longer on screen.
+      const left = leaveSubject(state, action.prefs);
+      return left === state
+        ? state
+        : { ...left, drafts: { ...left.drafts, queryText: "" } };
+    }
 
     case "toggleFlat": {
       // Deep results are flat-shaped regardless of the toggle, so pressing it
@@ -421,6 +440,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
       const base = liveView(state);
       const view: View = {
         ...base,
+        ...(base.subject.kind !== "none" ? action.prefs : undefined),
         flat: !base.flat,
         subject: { kind: "none" },
         model: null,
@@ -480,7 +500,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
       };
       if (action.text.trim() !== "") return typed;
       // Delegated, not a second copy of the rule (D9).
-      return leaveSubject(typed);
+      return leaveSubject(typed, action.prefs);
     }
 
     case "deferredToName": {

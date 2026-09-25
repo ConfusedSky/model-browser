@@ -6,6 +6,7 @@
  * extend this to render at all — unlabelled is unrendered.
  */
 import type { Subject } from "../state/view";
+import { stored } from "./stored";
 
 export type ScoreScale = "k" | "sim";
 
@@ -28,3 +29,28 @@ export const SCALE_SPOKEN: Record<ScoreScale, string> = {
 };
 
 export const Z_LABEL = "z";
+
+/**
+ * A result's standing in one word, from how far its z stands above the rest of
+ * the collection — what a reader can act on without knowing what a cosine is.
+ * The raw pair stays available behind the "Show match scores" option.
+ */
+export function strengthOf(
+  z: number,
+  /** A set whose best is only middling: nothing in it is called better than
+   *  "Fair", so a guess never wears "good match". */
+  modest = false,
+): "Strong" | "Good" | "Fair" | "Weak" {
+  if (!modest && z >= 4) return "Strong";
+  if (!modest && z >= 3) return "Good";
+  if (z >= 2) return "Fair";
+  return "Weak";
+}
+
+/** Off unless a profile turns it on: the numbers need a legend a visitor
+ *  does not have. */
+export const showScoresStore = stored<boolean>(
+  "model-browser:show-scores",
+  (raw) => raw === "1",
+  (v) => (v ? "1" : "0"),
+);

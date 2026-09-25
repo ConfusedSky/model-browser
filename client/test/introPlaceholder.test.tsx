@@ -6,8 +6,7 @@
 // different: name mode would send a typed example to the wrong corpus, an index
 // that cannot answer *here* would return nothing, a draft hides the placeholder
 // anyway, and the banner is already showing the same phrases. The accessible
-// name is asserted not to move with it — `searchInput()` selects by that label,
-// so a cell that still resolves is the assertion.
+// name is asserted not to move with it: it names the mode, never the example.
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DirListing } from "../../shared/types";
@@ -42,7 +41,12 @@ const FOLDER: DirListing = {
 };
 const INTRO = { ...DEFAULT_REPORT, intro: true };
 const READY = { state: "ready" as const, collectionRoot: "/", covers: ["stl"] };
-const ORDINARY = "Search names and folders…";
+/** The ordinary text at the library top. It says what a search will match, so
+ *  which one a cell sees follows the mode in force there. */
+const ORDINARY_NAME = "Search file and folder names…";
+const ORDINARY_MEANING = "Describe what you are looking for…";
+/** A cycling phrase, as the input offers it. */
+const example = (i: number): string => `Try “${EXAMPLE_QUERIES[i]}”`;
 
 const placeholder = (): string => searchInput().placeholder;
 
@@ -70,12 +74,12 @@ describe("the cycling example", () => {
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
 
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PLACEHOLDER_PERIOD_MS + 100);
     });
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[1]);
-    expect(placeholder()).not.toBe(ORDINARY);
+    expect(placeholder()).toBe(example(1));
+    expect(placeholder()).not.toBe(ORDINARY_MEANING);
   });
 
   it("reaches a deep link too — the folder is inside what the index covers", async () => {
@@ -88,7 +92,7 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/?path=%2FKit", FOLDER);
     await settle();
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
   });
 
   it("shows the ordinary text in name mode", async () => {
@@ -100,7 +104,7 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_NAME);
   });
 
   it("shows the ordinary text where the index cannot answer here", async () => {
@@ -116,7 +120,7 @@ describe("the cycling example", () => {
     });
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
   });
 
   it("stops the interval on inactivity rather than merely ignoring its ticks", async () => {
@@ -132,16 +136,16 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
 
     await type(searchInput(), "dra");
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2 * PLACEHOLDER_PERIOD_MS + 100);
     });
 
     await type(searchInput(), "");
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
   });
 
   it("stops for a draft, as for any input holding text", async () => {
@@ -150,10 +154,10 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
+    expect(placeholder()).toBe(example(0));
 
     await type(searchInput(), "dra");
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
   });
 
   it("stays out of the way while the banner is drawn", async () => {
@@ -163,7 +167,7 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
   });
 
   it("shows the ordinary text on a server with no configuration", async () => {
@@ -174,20 +178,25 @@ describe("the cycling example", () => {
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    expect(placeholder()).toBe(ORDINARY);
+    expect(placeholder()).toBe(ORDINARY_MEANING);
   });
 
   it("never moves the accessible name", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     alreadyDismissed();
     features.mockResolvedValue(INTRO);
     indexAvailability.mockResolvedValue(READY);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();
-    // `searchInput()` selects by `aria-label`; resolving at all is the
-    // assertion, and the placeholder having moved is what makes it one.
-    expect(placeholder()).toBe(EXAMPLE_QUERIES[0]);
-    expect(searchInput().getAttribute("aria-label")).toBe(
-      "Search names and folders",
-    );
+    const name = (): string | null => searchInput().getAttribute("aria-label");
+    expect(placeholder()).toBe(example(0));
+    expect(name()).toBe("Search by meaning");
+
+    // The placeholder moving is what makes the name standing still a claim.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PLACEHOLDER_PERIOD_MS + 100);
+    });
+    expect(placeholder()).toBe(example(1));
+    expect(name()).toBe("Search by meaning");
   });
 });
