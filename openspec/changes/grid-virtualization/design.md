@@ -351,8 +351,9 @@ one source of numbers for everything that measures:
 - the scroller's `clientHeight` is the viewport height, since `applyIn`'s `center` case reads it
   rather than a rect;
 - by default the seam's `observeElementOffset` always reports `isScrolling: false`, and an opt-in
-  `scrollTiming: "production"` instead reports scrolling on each `scroll` and stops a frame after
-  the last, with a fake `ResizeObserver` delivering row measurements a frame after the commit and
+  `scrollTiming: "production"` instead reports scrolling on each `scroll` and stops after
+  TanStack's own `isScrollingResetDelay` with none, dispatching a frame's `scroll` events before
+  its `ResizeObserver` entries, with a fake `ResizeObserver` delivering row measurements a frame after the commit and
   the `scroll` event of a `scrollTop` write delivered on the next frame rather than synchronously
   inside the landing's layout effect, as a browser does — the landing's wait for measured rows is only falsifiable under it. The default: TanStack skips
   measuring a row while scrolling, and happy-dom's `ResizeObserver` never fires, so a row mounted
