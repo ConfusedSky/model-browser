@@ -337,8 +337,10 @@ happy-dom lays nothing out and applies no Tailwind CSS, so `Grid` takes its geom
 test-only setter, `setGridGeometryForTests({ viewport, rowHeight, cols, gridTop })`, which is the
 one source of numbers for everything that measures:
 
-- TanStack's `observeElementRect`, `observeElementOffset` and `measureElement` options answer
-  the viewport, the scroll offset and `rowHeight`;
+- TanStack's `observeElementRect` and `observeElementOffset` options answer the viewport and the
+  scroll offset; row heights are answered through the DOM the grid itself reads — each row's
+  `offsetHeight` (and, under production timing, the fake observer's `borderBoxSize`) — so the
+  grid's own `measureElement` override runs unchanged under test, with no branch for the seam;
 - the column count stands in for D2's computed track list, which is `""` under happy-dom;
 - a `HTMLElement.prototype.getBoundingClientRect` stub, installed by the setter and removed by
   its reset, answers the scroller (the viewport), the grid's body (`gridTop`, settable, less the
@@ -359,7 +361,7 @@ one source of numbers for everything that measures:
   measuring a row while scrolling, and happy-dom's `ResizeObserver` never fires, so a row mounted
   during a test's scroll would never be measured; it also keeps TanStack's debounce timers from
   firing outside `act`;
-- optional per-composition `rowHeights`, answered by the seam's `measureElement`, let a cell tell
+- optional per-composition `rowHeights`, answered through those same DOM reads, let a cell tell
   compositions apart (D10); the rect stub then places each mounted row at its own `translateY` and
   sizes it by its composition's height, as a browser lays it out — identical to a uniform stub
   when `rowHeights` is unset — so an estimate error is real under the seam and is corrected as
