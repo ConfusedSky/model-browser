@@ -131,8 +131,10 @@ edge. Two known limits are recorded rather than handled:
 ### D4. Bands and peeks are arithmetic over the row layout
 
 The two `IntersectionObserver`s, `bandStateRef` and the "heard by both observers" guard are
-removed. On every scroll frame (one `requestAnimationFrame` per burst), on a viewport resize, on
-a row measurement, and when `entries` or `previews` change, `Grid` computes from the
+removed. After every commit of `Grid` (which TanStack causes on a range change, a row measurement
+or `measure()`, and props cause on a listing, previews or thumbnail change) and on the D11 scroll
+frame callback (at most one `requestAnimationFrame` per frame, coalesced, and on window resize),
+`Grid` computes from the
 virtualizer's row offsets (`measurementsCache`, measured where drawn, estimated otherwise), the
 scroll offset and the viewport height:
 
@@ -143,8 +145,14 @@ scroll offset and the viewport height:
 A pure function, `bandsForRows`, maps those ranges and the rows to `Map<path, Band>` — every
 entry gets a band, preview cells one step farther through the existing `CELL_BAND` and nearest
 wins through `NEARNESS`, exactly as `publish` does now — and it is published only when either
-range changed or the listing or previews did. `onPeek` is called for folders whose rows entered
-the near range; App's existing guard already drops repeats. App's `reportBands` is unchanged:
+range changed or the listing or previews did; each of those calls is O(log rows) plus a compare,
+and O(entries) work happens only on a publish, whose App re-render finds the ranges unchanged and
+publishes nothing further. `onPeek` is derived from the published map: every folder whose band is
+visible or near and was not in the previous published map (dropped with the listing, so a new
+listing re-peeks everything in range) — the same moment as "its row entered the near range", and
+it lets a mutation of `bandsForRows` reach the peek cells. App's existing guard drops repeats.
+Since positions are known rather than awaited, a grid publishes at mount. (Stage B check-in,
+2026-09-25.) App's `reportBands` is unchanged:
 it still adds `far` for filtered-away entries and never overwrites a reported band.
 
 Why not keep the observers: an unmounted tile cannot be observed, so every entry outside the
