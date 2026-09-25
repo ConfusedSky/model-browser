@@ -1033,8 +1033,11 @@ answers the index document. Bot Preference Sync *prepends* its managed block to 
 origin returns, so the file on the wire is Cloudflare's directives followed by an HTML
 document, relabelled `text/plain`. Robots parsers skip lines they cannot read, so the
 directives still apply, but the tail is junk and it carries link-preview tags naming
-`/robots.txt`. A real file on the box fixes it; until then, read the managed block and
-ignore the rest.
+`/robots.txt`. The fix is `client/public/robots.txt` (allow-all; the AI rules stay
+Cloudflare's), which Vite copies into `dist` and the static handler serves as `text/plain`
+ahead of the SPA fallback. It rides with the next deploy of `main` rather than going out
+alone. After that deploy, `curl -s https://models.masamaeda.com/robots.txt | grep -c '<html'`
+should print 0; until then, read the managed block and ignore the rest.
 
 ### What staying proxied costs, standing
 
