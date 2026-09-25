@@ -257,6 +257,24 @@ describe("folder contact sheets", () => {
     expect(peek).toHaveBeenCalledTimes(1);
   });
 
+  it("marks a tile off screen while the margin-less observer says it is out of view", async () => {
+    // The stylesheet pauses placeholder animations under this marker; only
+    // the view observer decides it, so a tile inside the park margin but out
+    // of view is still marked.
+    peek.mockResolvedValue(found(2));
+    await mountApp("/models", ONE_FOLDER);
+    const tile = dirTile("/models/a");
+
+    await report(tile, { inPark: true, inView: false });
+    expect(tile.hasAttribute("data-offscreen")).toBe(true);
+
+    await reportHalf(tile, "inView", true);
+    expect(tile.hasAttribute("data-offscreen")).toBe(false);
+
+    await reportHalf(tile, "inView", false);
+    expect(tile.hasAttribute("data-offscreen")).toBe(true);
+  });
+
   it("draws a listing-carried preview and asks the server for nothing", async () => {
     // The derived annotation (`listing-tree-cache` 6.3/6.8): a dir entry whose
     // listing already carries `preview` lands it through the same map and

@@ -223,6 +223,11 @@ function Grid({
         const path = el.dataset.dirTile ?? el.dataset.modelTile;
         if (path === undefined) continue;
         stateOf(path)[half] = record.isIntersecting;
+        // Set on the node directly, not through state: it only gates CSS
+        // animations (index.css), and a re-render per crossing would cost
+        // more than the animations it pauses.
+        if (half === "inView")
+          el.toggleAttribute("data-offscreen", !record.isIntersecting);
         if (peeks && record.isIntersecting && el.dataset.dirTile !== undefined)
           onPeek(path);
       }
@@ -759,7 +764,9 @@ const Tile = memo(function Tile({
               data-folder-chrome
               role="img"
               aria-label="folder"
-              className="relative aspect-square w-full bg-sunken p-1.5"
+              // A relayout boundary: a landing sheet otherwise relays out the
+              // whole grid, re-resolving every cell's container units.
+              className="relative aspect-square w-full bg-sunken p-1.5 [contain:size_layout]"
             >
               {preview !== undefined && preview.length > 0 ? (
                 <ContactSheet

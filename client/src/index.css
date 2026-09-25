@@ -55,6 +55,15 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/** Placeholders in a tile scrolled out of view stop animating: a fresh
+ *  listing has hundreds of them, each costing a style recalc every frame on
+ *  the main thread. Unlayered, so it beats the `animate-*` utilities, whose
+ *  `animation` shorthand resets the play state. `Grid`'s view observer sets
+ *  the marker. */
+[data-offscreen] * {
+  animation-play-state: paused;
+}
+
 /** One focus ring for every control, drawn only for keyboard focus. In the
  *  base layer, so a control that draws its own focus can still opt out. */
 @layer base {
