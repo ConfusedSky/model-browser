@@ -49,7 +49,7 @@ function makeProps() {
     mode: "orbit",
     entry: ENTRY,
     rect: { left: 0, top: 0, width: 100, height: 100 },
-    originEl: null,
+    returnsFocus: false,
   };
   let resolvePersist!: () => void;
   const persistGate = new Promise<void>((r) => {
@@ -244,7 +244,7 @@ describe("orbit → thumbnail handoff", () => {
       mode: "orbit",
       entry: { ...ENTRY, name: "b.stl", path: "/models/b.stl" },
       rect: { left: 200, top: 0, width: 100, height: 100 },
-      originEl: null,
+      returnsFocus: false,
     };
     props.tracker.start(250, 50);
     await act(async () => {
@@ -278,7 +278,7 @@ describe("orbit → thumbnail handoff", () => {
       mode: "orbit",
       entry: { ...ENTRY, name: "b.stl", path: "/models/b.stl" },
       rect: { left: 200, top: 0, width: 100, height: 100 },
-      originEl: null,
+      returnsFocus: false,
     };
     // App re-creates `persist` for the new viewer; the layer is not remounted.
     const fresh = vi.fn(() => Promise.resolve());

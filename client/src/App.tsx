@@ -24,7 +24,11 @@ import { HttpApiClient, HttpError, type ApiClient } from "./api/client";
 import { withLocalFramings } from "./api/localFramings";
 import EntryMenu from "./components/EntryMenu";
 import FindBar from "./components/FindBar";
-import Grid, { SkeletonGrid, type TileSize } from "./components/Grid";
+import Grid, {
+  SkeletonGrid,
+  type GridHandle,
+  type TileSize,
+} from "./components/Grid";
 import Icon, { type IconName } from "./components/Icon";
 import IntroBanner from "./components/IntroBanner";
 import JobChip from "./components/JobChip";
@@ -58,10 +62,7 @@ import { createHoverWarmer } from "./lib/hover";
 import { ABOUT_URL, introDismissedStore, pickExample } from "./lib/intro";
 import { fitSquareBox, type Box } from "./lib/layout";
 import {
-  applyIn,
-  findTile,
   measureIn,
-  tilesIn,
   resolvePlacement,
   type PlacementRequest,
 } from "./lib/placement";
@@ -388,6 +389,9 @@ export default function App() {
   /** A `RefObject`, never its `.current`: the identity has to be stable in the
    *  observer effect's deps, and population happens during commit (D2). */
   const mainRef = useRef<HTMLElement>(null);
+  /** Null wherever no grid is mounted, and every caller then falls through as
+   *  it would for an absent tile (grid-virtualization D6). */
+  const gridHandleRef = useRef<GridHandle | null>(null);
   /** Focus has to land somewhere when the banner's ✕ unmounts the focused
    *  element, or the browser drops it to `<body>` (`landing-page` D3). */
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -1281,17 +1285,15 @@ export default function App() {
     arrivalFocusRef.current = null;
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
-    const main = mainRef.current;
-    if (main === null) return;
-    const el =
-      (want.child !== undefined ? findTile(main, want.child) : null) ??
-      tilesIn(main)[0];
-    el?.focus({ preventScroll: true });
+    const grid = gridHandleRef.current;
+    if (grid === null) return;
+    const options = { preventScroll: true };
+    if (want.child === undefined || !grid.focusEntry(want.child, options))
+      grid.focusEntry(0, options);
   }, [state.result, state.inflight]);
 
   function focusFirstTile(): void {
-    const main = mainRef.current;
-    if (main !== null) tilesIn(main)[0]?.focus();
+    gridHandleRef.current?.focusEntry(0);
   }
 
   /** The tile the keyboard was on when Narrow opened, to come back to. */
@@ -1315,11 +1317,8 @@ export default function App() {
     // tile it was raised from, if it is still there.
     if (fromBar)
       requestAnimationFrame(() => {
-        const main = mainRef.current;
-        const tile =
-          main !== null && back !== null ? findTile(main, back) : null;
-        if (tile !== null) tile.focus();
-        else focusFirstTile();
+        const grid = gridHandleRef.current;
+        if (back === null || grid?.focusEntry(back) !== true) focusFirstTile();
       });
   }
 
@@ -1632,7 +1631,8 @@ export default function App() {
         width: size,
         height: size,
       },
-      originEl: null,
+      // Opened by a link, not from a tile: nothing to hand focus back to.
+      returnsFocus: false,
     });
   }, []);
 
@@ -1735,8 +1735,11 @@ export default function App() {
     }
     const request = pendingPlacement?.request ?? TOP_REQUEST;
     const resolved = resolvePlacement(request, result.entries);
-    const main = mainRef.current;
-    if (main !== null) applyIn(main, resolved);
+    const grid = gridHandleRef.current;
+    if (grid !== null) grid.place(resolved);
+    // With no grid, only the top has anywhere to land.
+    else if (resolved.kind === "top" && mainRef.current !== null)
+      mainRef.current.scrollTop = 0;
     if (pendingPlacement !== null) setPendingPlacement(null);
     if (request.kind !== "reveal" || resolved.kind !== "center") return;
     setMarked(request.path);
@@ -1906,6 +1909,9 @@ export default function App() {
       anchor === undefined ? filteredListing : [anchor, ...filteredListing],
     [anchor, filteredListing],
   );
+  /** For `navigateSibling`, whose identity must not follow the listing. */
+  const shownEntriesRef = useRef(shownEntries);
+  shownEntriesRef.current = shownEntries;
   /** Models on screen still waiting for a picture — said once in the results
    *  line, rather than only as a spinner per tile. */
   const pendingThumbs = useMemo(() => {
@@ -2027,7 +2033,7 @@ export default function App() {
         mode: "orbit",
         entry,
         rect: overlayRectFor(el),
-        originEl: el,
+        returnsFocus: true,
       });
     },
     [overlayRectFor],
@@ -2040,7 +2046,7 @@ export default function App() {
       mode: "lightbox",
       entry,
       rect: { left: r.left, top: r.top, width: r.width, height: r.height },
-      originEl: el,
+      returnsFocus: true,
     });
   }, []);
 
@@ -2383,13 +2389,15 @@ export default function App() {
   );
 
   function closeViewer(): void {
-    const origin = viewer?.originEl;
+    const closing = viewer;
     setViewer(null);
     const v = parseUrl();
     if (v.model !== undefined)
       commitUrl({ ...v, model: undefined }, { replace: true });
     dispatch({ type: "modelClose" });
-    origin?.focus();
+    // By entry: a step may have gone past every tile in the document (D8).
+    if (closing?.returnsFocus === true)
+      gridHandleRef.current?.focusEntry(closing.entry.path);
   }
 
   /**
@@ -2401,10 +2409,9 @@ export default function App() {
   const navigateSibling = useCallback(
     (entry: DirEntry): void => {
       if (viewerRef.current?.mode !== "lightbox") return;
-      const main = mainRef.current;
-      const tile = main !== null ? findTile(main, entry.path) : null;
+      const shown = shownEntriesRef.current.some((e) => e.path === entry.path);
       setViewer((v) =>
-        v !== null ? { ...v, entry, originEl: tile ?? v.originEl } : v,
+        v !== null ? { ...v, entry, returnsFocus: v.returnsFocus || shown } : v,
       );
       commit(
         { type: "modelOpen", path: entry.path },
@@ -2431,8 +2438,7 @@ export default function App() {
               setAllGuessesFor(labelQuery);
               // Onto the first guess that was held back.
               requestAnimationFrame(() => {
-                const main = mainRef.current;
-                if (main !== null) tilesIn(main)[WEAK_SHOWN]?.focus();
+                gridHandleRef.current?.focusEntry(WEAK_SHOWN);
               });
             },
           },
@@ -3278,6 +3284,7 @@ export default function App() {
                   }
                 >
                   <Grid
+                    handle={gridHandleRef}
                     entries={shownEntries}
                     thumbs={thumbs}
                     onEnter={enterEntry}

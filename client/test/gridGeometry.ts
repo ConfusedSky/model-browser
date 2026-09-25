@@ -6,8 +6,10 @@
 // tall default before every happy-dom cell; a cell that needs a short viewport
 // installs its own, before the mount or again after it.
 import {
+  seamRowHeight,
   setGridGeometryForTests,
   type GridGeometry,
+  type RowComposition,
 } from "../src/lib/gridGeometry";
 
 export interface StubOptions {
@@ -43,6 +45,19 @@ function box(top: number, height: number): DOMRect {
     height,
     toJSON: () => ({}),
   } as DOMRect;
+}
+
+/** Where `Grid` drew a row inside its body: its `translateY`. */
+function drawnAt(row: HTMLElement): number {
+  const m = /translateY\((-?[\d.]+)px\)/.exec(row.style.transform);
+  return m === null ? 0 : Number(m[1]);
+}
+
+/** A row's kinds, from the tiles it holds (zips count as folders). */
+function compositionOf(row: HTMLElement): RowComposition {
+  const tiles = row.querySelectorAll("[data-entry-tile]").length;
+  const models = row.querySelectorAll("[data-model-tile]").length;
+  return models === 0 ? "dirs" : models === tiles ? "models" : "mixed";
 }
 
 /** The grid's body and its scroller: the app's `<main>`, or the document's
@@ -88,26 +103,26 @@ export function installGridGeometry(
       const bodyTop = scrollerTop + g.gridTop - scroller.scrollTop;
       if (this === body)
         return box(bodyTop, Number.parseFloat(body.style.height) || 0);
-      const rowTop = (row: number): number => bodyTop + row * g.rowHeight;
+      // A row lies where the grid drew it and is as tall as its kind
+      // measures, as a browser would lay it out; a tile shares its row's top.
+      // Never by a tile's place among the tiles in the document, which skip
+      // every unmounted row. With no `rowHeights`, every row is `rowHeight`
+      // and drawn at its index times that.
+      const rowBox = (row: HTMLElement, shorter: number): DOMRect =>
+        box(
+          bodyTop + drawnAt(row),
+          seamRowHeight(g, compositionOf(row)) - shorter,
+        );
       if (this.parentElement === body && this.dataset.index !== undefined)
-        return box(rowTop(Number(this.dataset.index)), g.rowHeight);
+        return rowBox(this, 0);
       if (this.dataset.entryTile !== undefined) {
-        // By its place in the listing — its row's index and its place in the
-        // row — never by its place among the tiles in the document, which
-        // skip every unmounted row.
-        const cell = this.parentElement;
-        const row = cell?.parentElement;
+        const row = this.parentElement?.parentElement;
         if (
-          cell != null &&
           row != null &&
           row.parentElement === body &&
           row.dataset.index !== undefined
-        ) {
-          const index =
-            Number(row.dataset.index) * g.cols +
-            Array.prototype.indexOf.call(row.children, cell);
-          return box(rowTop(Math.floor(index / g.cols)), g.rowHeight - tileGap);
-        }
+        )
+          return rowBox(row, tileGap);
       }
       return originalRect.call(this);
     },

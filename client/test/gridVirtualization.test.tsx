@@ -22,7 +22,8 @@ import {
   wait,
 } from "./appHarness";
 import { installGridGeometry } from "./gridGeometry";
-import Grid from "../src/components/Grid";
+import Grid, { type GridHandle } from "../src/components/Grid";
+import type { ThumbState } from "../src/hooks/useThumbnails";
 import { resetLookupQueueForTests } from "../src/hooks/useThumbnails";
 import type { GridGeometry } from "../src/lib/gridGeometry";
 import type { Band } from "../src/three/queue";
@@ -43,6 +44,17 @@ const SHORT: GridGeometry = {
 };
 const MODELS = (n: number): DirEntry[] =>
   Array.from({ length: n }, (_, i) => model(`m${i}.stl`));
+/** Ten rows of folders, then ninety rows alternating three models and a
+ *  folder with two models, three to a row. */
+function interleaved(): DirEntry[] {
+  const out: DirEntry[] = Array.from({ length: 30 }, (_, i) => dir(`kit${i}`));
+  let m = 0;
+  for (let row = 10; row < 100; row++) {
+    if (row % 2 === 1) out.push(dir(`mix${row}`));
+    while (out.length < (row + 1) * 3) out.push(model(`m${m++}.stl`));
+  }
+  return out;
+}
 /** Rows `from..to`, inclusive. */
 const span = (from: number, to: number): number[] =>
   Array.from({ length: to - from + 1 }, (_, i) => from + i);
@@ -55,6 +67,8 @@ async function renderGrid(
   report: {
     onBands?: (bands: ReadonlyMap<string, Band>) => void;
     onPeek?: (path: string) => void;
+    handle?: { current: GridHandle | null };
+    thumbs?: Map<string, ThumbState>;
   } = {},
 ): Promise<void> {
   host = document.createElement("div");
@@ -63,8 +77,9 @@ async function renderGrid(
   await act(async () => {
     root!.render(
       <Grid
+        handle={report.handle}
         entries={entries}
-        thumbs={new Map()}
+        thumbs={report.thumbs ?? new Map()}
         onEnter={() => {}}
         onModelPointerDown={() => {}}
         onModelOpen={() => {}}
@@ -246,5 +261,153 @@ describe("the tile that last held focus", () => {
     await scrollTo(main(), 20000);
     expect(tile.isConnected).toBe(true);
     expect(mountedRows()).toContain(3);
+  });
+});
+
+describe("the handle", () => {
+  const handle: { current: GridHandle | null } = { current: null };
+  const tileOf = (path: string): HTMLElement | undefined =>
+    Array.from(
+      document.querySelectorAll<HTMLElement>("[data-entry-tile]"),
+    ).find((el) => el.dataset.entryTile === path);
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    host?.remove();
+    host = null;
+    root = null;
+    document.body.scrollTop = 0;
+  });
+
+  it("lands an anchor whose row is not drawn at its offset, past the estimates", async () => {
+    // Folder rows on screen, and far below them model rows alternating with
+    // mixed ones, as a search interleaves them. Drawing the rows around a
+    // write toward row 80 measures the first mixed row, which re-estimates
+    // every mixed row above it, and row 80 moves by thousands of px.
+    installGridGeometry({
+      ...SHORT,
+      rowHeights: { dirs: 150, models: 250, mixed: 400 },
+    });
+    const entries = interleaved();
+    await renderGrid(entries, { handle });
+    const target = entries[80 * 3]!.path;
+    expect(tileOf(target)).toBeUndefined();
+
+    await act(async () =>
+      handle.current!.place({ kind: "anchor", path: target, offset: -50 }),
+    );
+    // 10 folder rows, then 35 model and 35 mixed rows above row 80.
+    expect(document.body.scrollTop).toBe(10 * 150 + 35 * 250 + 35 * 400 + 50);
+    expect(tileOf(target)!.getBoundingClientRect().top).toBe(-50);
+  });
+
+  it("centres a tile whose row is not drawn", async () => {
+    installGridGeometry(SHORT, { tileGap: 20 });
+    await renderGrid(MODELS(600), { handle });
+    await act(async () =>
+      handle.current!.place({ kind: "center", path: "/models/m250.stl" }),
+    );
+    // Row 83 at 16600; its 180px tile in the middle of 400px.
+    expect(document.body.scrollTop).toBe(16600 - 110);
+    expect(tileOf("/models/m250.stl")!.getBoundingClientRect().top).toBe(110);
+  });
+
+  it("focuses a tile whose row is not drawn, and refuses an entry not shown", async () => {
+    installGridGeometry(SHORT);
+    await renderGrid(MODELS(600), { handle });
+    expect(tileOf("/models/m250.stl")).toBeUndefined();
+
+    let answer = false;
+    await act(async () => {
+      answer = handle.current!.focusEntry("/models/m250.stl", {
+        preventScroll: true,
+      });
+    });
+    expect(answer).toBe(true);
+    expect((document.activeElement as HTMLElement).dataset.entryTile).toBe(
+      "/models/m250.stl",
+    );
+    expect(document.body.scrollTop).toBe(0);
+
+    expect(handle.current!.focusEntry("/models/absent.stl")).toBe(false);
+    expect(handle.current!.focusEntry(600)).toBe(false);
+  });
+
+  it("lands within a few frames when the scroll event it waits for never comes", async () => {
+    installGridGeometry(SHORT, { tileGap: 20 });
+    await renderGrid(MODELS(600), { handle });
+    // The first write reaches the scroller but not TanStack.
+    const raw = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "scrollTop",
+    )!;
+    Object.defineProperty(document.body, "scrollTop", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return raw.get!.call(this) as number;
+      },
+      set(this: HTMLElement, value: number) {
+        delete (this as unknown as Record<string, unknown>).scrollTop;
+        raw.set!.call(this, value);
+      },
+    });
+
+    await act(async () => {
+      handle.current!.place({ kind: "center", path: "/models/m250.stl" });
+      await wait(500);
+    });
+    expect(document.body.scrollTop).toBe(16600 - 110);
+    expect(tileOf("/models/m250.stl")!.getBoundingClientRect().top).toBe(110);
+
+    // Unpinned: scrolled away from, its row goes.
+    await scrollTo(document.body, 0);
+    expect(mountedRows()).not.toContain(83);
+  });
+});
+
+describe("a thumbnail drawn again", () => {
+  const URL_OF = "/api/thumb?path=%2Fmodels%2Fm0.stl";
+  const spinnerIn = (): Element | null =>
+    document.querySelector('[data-model-tile="/models/m0.stl"] .animate-spin');
+  let restore: (() => void) | null = null;
+  function imagesReport(complete: boolean): void {
+    const proto = HTMLImageElement.prototype;
+    const was = {
+      complete: Object.getOwnPropertyDescriptor(proto, "complete")!,
+      naturalWidth: Object.getOwnPropertyDescriptor(proto, "naturalWidth")!,
+    };
+    Object.defineProperty(proto, "complete", {
+      configurable: true,
+      get: () => complete,
+    });
+    Object.defineProperty(proto, "naturalWidth", {
+      configurable: true,
+      get: () => (complete ? 256 : 0),
+    });
+    restore = () => {
+      Object.defineProperty(proto, "complete", was.complete);
+      Object.defineProperty(proto, "naturalWidth", was.naturalWidth);
+    };
+  }
+  afterEach(async () => {
+    restore?.();
+    restore = null;
+    await act(async () => root?.unmount());
+    host?.remove();
+    host = null;
+    root = null;
+  });
+  const thumbs = (): Map<string, ThumbState> =>
+    new Map([["/models/m0.stl", { status: "ready", url: URL_OF }]]);
+
+  it("shows no spinner over an image already complete when it mounts", async () => {
+    imagesReport(true);
+    await renderGrid(MODELS(3), { thumbs: thumbs() });
+    expect(spinnerIn()).toBeNull();
+  });
+
+  it("spins over an image still loading when it mounts", async () => {
+    imagesReport(false);
+    await renderGrid(MODELS(3), { thumbs: thumbs() });
+    expect(spinnerIn()).not.toBeNull();
   });
 });

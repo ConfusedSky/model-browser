@@ -70,7 +70,9 @@ export interface ViewerState {
   entry: DirEntry;
   /** Tile rect at pointerdown — where the orbit overlay sits. */
   rect: { left: number; top: number; width: number; height: number };
-  originEl: HTMLElement | null;
+  /** Opened from a tile, or stepped onto a shown entry: the close focuses
+   *  that entry's tile (grid-virtualization D8). */
+  returnsFocus: boolean;
 }
 
 interface Props {
