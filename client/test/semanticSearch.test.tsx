@@ -15,6 +15,7 @@ import {
   container,
   dir,
   dismissButton,
+  flatButton,
   getThumb,
   indexAvailability,
   labels,
@@ -29,10 +30,12 @@ import {
   pressEnter,
   putThumb,
   resultsLabel,
+  showMatchScores,
   renderThumbnail,
   searchInput,
   semanticSearch,
   settle,
+  similar,
   tiles,
   type,
   unmountApp,
@@ -1545,6 +1548,8 @@ describe("a file name asked of the names", () => {
     await click(dismissButton()!);
     await settle();
     expect(modeButton("meaning")!.getAttribute("aria-pressed")).toBe("true");
+    // The box stops naming a search that is no longer on screen.
+    expect(searchInput().value).toBe("");
 
     semanticSearch.mockClear();
     await type(searchInput(), "a stone golem");
@@ -1552,6 +1557,147 @@ describe("a file name asked of the names", () => {
     await settle();
     expect(semanticSearch).toHaveBeenCalledTimes(1);
     expect(semanticSearch.mock.calls[0]![0]).toBe("a stone golem");
+  });
+});
+
+describe("a file name asked of the names, left by the flat toggle", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("puts the profile's meaning mode back, as dismissing does", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("meaning")!);
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("abc_1.stl")],
+    });
+    await type(searchInput(), "abc_1");
+    await pressEnter(searchInput());
+    await settle();
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+
+    await click(flatButton());
+    await settle();
+    expect(modeButton("meaning")!.getAttribute("aria-pressed")).toBe("true");
+
+    semanticSearch.mockClear();
+    await type(searchInput(), "a stone golem");
+    await pressEnter(searchInput());
+    await settle();
+    expect(semanticSearch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a file name asked of the names, left by finding similar", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("puts the profile's meaning mode back over the neighbours", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+    similar.mockResolvedValue({
+      path: "/models",
+      entries: [model("Kits/other.stl")],
+      poses: {},
+    });
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("meaning")!);
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("abc_1.stl")],
+    });
+    await type(searchInput(), "abc_1");
+    await pressEnter(searchInput());
+    await settle();
+    expect(modeButton("name")!.getAttribute("aria-pressed")).toBe("true");
+
+    const tile = tiles()[0]!;
+    await act(async () => {
+      tile.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          button: 2,
+          buttons: 2,
+        }),
+      );
+      tile.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    });
+    await settle();
+    await click(
+      document.querySelector<HTMLButtonElement>(
+        '[role="menu"] [data-command="findSimilar"]',
+      )!,
+    );
+    await settle();
+    expect(similar).toHaveBeenCalledTimes(1);
+    expect(modeButton("meaning")!.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("what a scored tile draws by default", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("a bar and a word, and the numbers only once asked for", async () => {
+    semanticSearch.mockResolvedValue(scoredSet(1, 4.2));
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("meaning")!);
+    await type(searchInput(), "a stone golem");
+    await pressEnter(searchInput());
+    await settle();
+
+    const tile = (): HTMLElement => tiles()[0]!;
+    expect(tile().querySelector("[data-relevance-bar]")).not.toBeNull();
+    expect(tile().title).toContain("Strong match");
+    expect(tile().textContent).not.toContain("z 4.20");
+
+    await showMatchScores();
+    expect(tile().textContent).toContain("z 4.20");
+    expect(tile().querySelector("[data-relevance-bar]")).not.toBeNull();
+  });
+});
+
+describe("the search field names what and where it searches", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("puts the folder in the placeholder and the mode in the accessible name", async () => {
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("name")!);
+    expect(searchInput().placeholder).toBe("Search names in models…");
+    expect(searchInput().getAttribute("aria-label")).toBe(
+      "Search file and folder names",
+    );
+
+    await click(modeButton("meaning")!);
+    expect(searchInput().placeholder).toBe("Describe a model in models…");
+    expect(searchInput().getAttribute("aria-label")).toBe("Search by meaning");
   });
 });
 

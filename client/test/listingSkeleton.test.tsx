@@ -11,10 +11,15 @@ import {
   listDir,
   model,
   mountApp,
+  pressEnter,
+  resultsLabel,
+  searchInput,
   settle,
   skeleton,
   tiles,
+  type,
   unmountApp,
+  upButton,
   wait,
 } from "./appHarness";
 
@@ -174,5 +179,30 @@ describe("listing skeleton", () => {
     expect(skeleton()).toBeNull();
     expect(container.textContent).toContain("walk failed");
     expect(labels()).toEqual(["a"]); // prior grid restored
+  });
+});
+
+describe("the results line over the skeleton", () => {
+  it("says what the wait is for, not what the departed search found", async () => {
+    listDir.mockImplementation(
+      (p: string, opts?: { q?: string }): Promise<DirListing> =>
+        opts?.q !== undefined
+          ? Promise.resolve({ path: "/models", entries: [model("a/x.stl")] })
+          : p === "/"
+            ? new Promise<DirListing>(() => {})
+            : Promise.resolve(NESTED),
+    );
+    await type(searchInput(), "abc");
+    await pressEnter(searchInput());
+    await settle();
+    expect(resultsLabel()).toBe("1 result “abc”");
+
+    // Up leaves the search for a listing that never lands.
+    await click(upButton());
+    await pastDelay();
+
+    expect(skeleton()).not.toBeNull();
+    expect(resultsLabel()).toBeNull();
+    expect(container.textContent).toContain("Opening the library…");
   });
 });

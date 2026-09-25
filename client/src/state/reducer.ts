@@ -120,7 +120,9 @@ export type Action =
    *  and all, because "set the draft then submit" is two dispatches across a
    *  render. It carries no location: it runs at the library's top. */
   | { type: "runQuery"; text: string; mode: SearchMode }
-  | { type: "toggleFlat" }
+  /** `prefs` as on `clearSubject`: pressing it over a committed search leaves
+   *  that search, and the options it ran under go with it. */
+  | { type: "toggleFlat"; prefs?: Prefs }
   | { type: "setMode"; mode: SearchMode }
   /** `run: false` records a value the debounce is still holding; `run: true`
    *  is the fire (or a click, which is the finished value already). */
@@ -132,7 +134,7 @@ export type Action =
   /** Neighbours of a model, anchored where the user stands. Routed through the
    *  corpus decision, so it defers while the index warms exactly as a phrase
    *  does (D4). */
-  | { type: "similar"; model: string }
+  | { type: "similar"; model: string; prefs?: Prefs }
   /** The whole parameter set, never a delta: an omitted `pool` asserts the
    *  index's own default. Always asks — the debounce lives in the control, so
    *  there is no record-only phase as `setTuning` has. */
@@ -390,8 +392,12 @@ export function reducer(state: SearchState, action: Action): SearchState {
     case "similar": {
       // The anchor is what the dismissal returns to, and what tells two
       // similarity views of one model apart (`requestOf`).
+      const base = liveView(state);
       const view: View = {
-        ...liveView(state),
+        ...base,
+        // As on `toggleFlat`: a committed search it supersedes takes its
+        // options with it.
+        ...(base.subject.kind !== "none" ? action.prefs : undefined),
         subject: { kind: "similar", model: action.model, k: SIMILAR_K },
         model: null,
       };
@@ -434,6 +440,7 @@ export function reducer(state: SearchState, action: Action): SearchState {
       const base = liveView(state);
       const view: View = {
         ...base,
+        ...(base.subject.kind !== "none" ? action.prefs : undefined),
         flat: !base.flat,
         subject: { kind: "none" },
         model: null,

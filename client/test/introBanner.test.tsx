@@ -249,7 +249,7 @@ describe("the banner at the library top", () => {
 });
 
 describe("the chips follow the index, not the report", () => {
-  it("withholds them while the index is absent, keeping the sentence and the links", async () => {
+  it("withholds them while the index is absent, keeping the sentence and the header's About link", async () => {
     features.mockResolvedValue(INTRO);
     await mountAppAtCurrentUrl("/", TOP);
     await settle();

@@ -379,11 +379,12 @@ export default function AboutPage({ api }: { api: ApiClient }): ReactNode {
                 <Combo>
                   <Kbd>Cmd</Kbd>+<Kbd>F</Kbd>
                 </Combo>{" "}
-                on a Mac, the one binding that replaces your browser&rsquo;s own
-                find while you are here. Flat puts every model below the folder
-                in one grid, and the grid buttons set the tile size: small,
-                medium or large. Occlusion switches ambient occlusion on and
-                off; turn it off if turning a model feels slow. Options opens{" "}
+                on a Mac, the bindings taken from your browser&rsquo;s find
+                while you are here (in Firefox <Kbd>/</Kbd> is quick find too).
+                Flat puts every model below the folder in one grid, and the grid
+                buttons set the tile size: small, medium or large. Occlusion
+                switches ambient occlusion on and off; turn it off if turning a
+                model feels slow. Options opens{" "}
                 {has("maintenance")
                   ? "the search options and the library tools."
                   : "the search options."}

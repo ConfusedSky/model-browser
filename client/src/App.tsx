@@ -1208,7 +1208,7 @@ export default function App() {
     // An ordinary request, so it supersedes a committed search. Targeted at
     // `dest`, so untoggling mid-navigation follows the user rather than
     // snapping back.
-    commit({ type: "toggleFlat" });
+    commit({ type: "toggleFlat", prefs: ownPrefs() });
   }
 
   /**
@@ -2072,7 +2072,9 @@ export default function App() {
       // Not `commit`, so the leaving grid's place is filed here too (D2).
       dispatch: (action) => {
         recordNow();
-        dispatch(action);
+        dispatch(
+          action.type === "similar" ? { ...action, prefs: ownPrefs() } : action,
+        );
       },
       markOnArrival: (path) => raisePlacement({ kind: "reveal", path }),
       open: (entry, el) => {
@@ -2589,94 +2591,93 @@ export default function App() {
     summary: string,
     caveat: string,
     stale = false,
-    /** Off over the skeleton: the renders it would count belong to the
-     *  listing that just left. */
+    /** Off over the skeleton: the renders it would count, and the answer
+     *  whose count and query it would head, belong to the view that left. */
     status = true,
-  ) => (
-    <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pt-3 pb-1 text-[13px]">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        {resultsHead !== null ? (
-          <>
-            <p className="shrink-0 font-semibold text-ink">
-              {resultsHead.count}
-            </p>
-            <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface py-1 pr-2.5 pl-2 text-xs text-ink-2 ring-1 ring-line">
-              <Icon name={resultsHead.icon} className="size-3 text-ink-3" />
-              <span className="min-w-[6ch] truncate">
-                “{resultsHead.query}”
+  ) => {
+    const head = status ? resultsHead : null;
+    return (
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pt-3 pb-1 text-[13px]">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {head !== null ? (
+            <>
+              <p className="shrink-0 font-semibold text-ink">{head.count}</p>
+              <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface py-1 pr-2.5 pl-2 text-xs text-ink-2 ring-1 ring-line">
+                <Icon name={head.icon} className="size-3 text-ink-3" />
+                <span className="min-w-[6ch] truncate">“{head.query}”</span>
               </span>
-            </span>
-          </>
-        ) : (
-          summary !== "" && (
-            <p className="min-w-0 truncate text-xs text-ink-3">{summary}</p>
-          )
-        )}
-        {/* The ONLY way out of a committed view on screen (D9), and the same
+            </>
+          ) : (
+            summary !== "" && (
+              <p className="min-w-0 truncate text-xs text-ink-3">{summary}</p>
+            )
+          )}
+          {/* The ONLY way out of a committed view on screen (D9), and the same
             transition emptying the input delegates to. Rendered for a model as
             for a phrase — which is the whole reason a similarity view is
             leaveable at all, since there is no text to empty. */}
-        {dismissable && (
-          <button
-            type="button"
-            onClick={() => {
-              // The button unmounts with the results it leaves.
-              arrivalFocusRef.current = {};
-              leaveSubject({ type: "clearSubject", prefs: ownPrefs() });
-            }}
-            // One sentence for both destinations: where it lands is the entry's
-            // provenance, and reading `history.state` during a render would
-            // read it one render stale.
-            title="Leave these results"
-            aria-label="Dismiss"
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-surface hover:text-ink touch:size-11"
-          >
-            <Icon name="x" className="size-3.5" strokeWidth={2.25} />
-          </button>
-        )}
-      </div>
-      {/* One status at a time on the right: a refresh outranks the renders
+          {dismissable && (
+            <button
+              type="button"
+              onClick={() => {
+                // The button unmounts with the results it leaves.
+                arrivalFocusRef.current = {};
+                leaveSubject({ type: "clearSubject", prefs: ownPrefs() });
+              }}
+              // One sentence for both destinations: where it lands is the entry's
+              // provenance, and reading `history.state` during a render would
+              // read it one render stale.
+              title="Leave these results"
+              aria-label="Dismiss"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-surface hover:text-ink touch:size-11"
+            >
+              <Icon name="x" className="size-3.5" strokeWidth={2.25} />
+            </button>
+          )}
+        </div>
+        {/* One status at a time on the right: a refresh outranks the renders
           it will restart. The whole of §5.2's affordance — not a panel, an
           overlay or a spinner, but the same weight as the notes below. On a
           phone it takes its own line rather than crowd the count. */}
-      {!status ? null : waitLabel !== "" ? (
-        <p
-          aria-live="polite"
-          className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
-        >
-          {waitLabel}
-        </p>
-      ) : stale ? (
-        <p
-          aria-live="polite"
-          className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
-        >
-          Refreshing…
-        </p>
-      ) : (
-        renderingShown &&
-        pendingThumbs > 0 && (
-          <p className="flex shrink-0 items-center gap-2 text-xs text-ink-3 max-sm:basis-full">
-            <span
-              aria-hidden="true"
-              className="size-3 animate-[spin_1s_linear_infinite] rounded-full border-[1.5px] border-white/10 border-t-white/50"
-            />
-            Rendering {pendingThumbs} thumbnail{pendingThumbs === 1 ? "" : "s"}…
+        {!status ? null : waitLabel !== "" ? (
+          <p
+            aria-live="polite"
+            className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
+          >
+            {waitLabel}
           </p>
-        )
-      )}
-      {/* What qualifies the set, on its own line under it. */}
-      {(caveat !== "" ||
-        (resultsHead !== null && resultsHead.notes.length > 0)) && (
-        <div className="flex basis-full flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
-          {caveat !== "" && <p className="text-warn">{caveat}</p>}
-          {resultsHead?.notes.map((n, i) => (
-            <p key={i}>{n}</p>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+        ) : stale ? (
+          <p
+            aria-live="polite"
+            className="shrink-0 text-xs text-ink-3 max-sm:basis-full"
+          >
+            Refreshing…
+          </p>
+        ) : (
+          renderingShown &&
+          pendingThumbs > 0 && (
+            <p className="flex shrink-0 items-center gap-2 text-xs text-ink-3 max-sm:basis-full">
+              <span
+                aria-hidden="true"
+                className="size-3 animate-[spin_1s_linear_infinite] rounded-full border-[1.5px] border-white/10 border-t-white/50"
+              />
+              Rendering {pendingThumbs} thumbnail
+              {pendingThumbs === 1 ? "" : "s"}…
+            </p>
+          )
+        )}
+        {/* What qualifies the set, on its own line under it. */}
+        {(caveat !== "" || (head !== null && head.notes.length > 0)) && (
+          <div className="flex basis-full flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
+            {caveat !== "" && <p className="text-warn">{caveat}</p>}
+            {head?.notes.map((n, i) => (
+              <p key={i}>{n}</p>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Over `kept`: the kind option is part of the view's identity, the live
   // filter is not.
@@ -2701,7 +2702,7 @@ export default function App() {
   const failedPath =
     state.failure !== null &&
     state.failure.forView.subject.kind === "none" &&
-    kept.length === 0
+    state.result === null
       ? state.failure.forView.path
       : null;
   const emptyNotice = searchHasNoMatches ? (

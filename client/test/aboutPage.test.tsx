@@ -293,14 +293,16 @@ describe("the page as a document", () => {
   });
 
   it("keeps the how-to to five lines, naming the find binding and the browser's menu", async () => {
-    // `visitor-intro`: at most five lines, Ctrl+F named as the one binding that
-    // replaces the browser's own, and Shift+right-click reaching the browser's
-    // menu.
+    // `visitor-intro`: at most five lines, the find bindings the page takes
+    // from the browser named — Ctrl+F, and `/` where it is quick find — and
+    // Shift+right-click reaching the browser's menu.
     await mount(fakeApi(() => Promise.resolve([])));
     const howTo = host.querySelector("#how-to");
     expect(howTo?.querySelectorAll("li").length).toBeLessThanOrEqual(5);
     const text = textOf(howTo);
-    expect(text).toMatch(/Ctrl\s*\+\s*F.*the one binding that replaces/);
+    expect(text).toMatch(
+      /Ctrl\s*\+\s*F.*the bindings taken from your browser’s find.*Firefox \/ is quick find/,
+    );
     expect(text).toContain(
       "Shift+right-click goes past them to the browser’s own menu",
     );
