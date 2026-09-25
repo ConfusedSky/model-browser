@@ -383,6 +383,23 @@ setTouchEmulationEnabled`, swipes by CDP touch events in the scroller's padding,
 p50/p95, frames over 33 ms and over 100 ms, main-thread task time, the distance scrolled, and the
 tiles in the document. Run against `bun run preview:remote-demo` (or any production build).
 
+Measured 2026-09-25 at 5d43a35 on the demo corpus (library `70b60f0d`, 454 folders, flat view 954
+entries; baked thumbnails, index attached), headless phone emulation, 4× throttle. The probe
+rows are the same profiler, same corpus, run earlier the same day:
+
+| view | build | frames over 33 ms | p95 | main-thread | scrolled | tiles in document |
+|---|---|---|---|---|---|---|
+| flat | before (all tiles mounted) | 84 of 712 | 50 ms | 6.6 s | 4,806 px | 954 |
+| flat | probe | 13 of 730 | 16.8 ms | 2.4 s | 7,372 px | 12–20 |
+| flat | this change | 15 of 728 | 16.8 ms | 2.5 s | 8,594 px | 22 |
+| folders | before | 57 of 725 | 33 ms | 4.4 s | 4,685 px | 454 |
+| folders | probe | 43 of 712 | 33 ms | 4.7 s | 9,757 px | — |
+| folders | this change | 34 of 725 | 16.8 ms | 3.8 s | 9,240 px | 22 |
+
+`scripts/scroll-bench.mjs` on the same build, two runs each: flat 9–16 frames over 33 ms of 467,
+main 1.9–3.0 s; folders 23–25 of 467–477, main 2.9–3.1 s; 22 tiles either way. Before the change
+the same script read flat 88–95 over 33 ms, main 5.9 s, 954 tiles (tasks.md 5.1).
+
 ## Risks / Trade-offs
 
 - **Estimated rows move under a fling on iOS** → D10 keeps estimates exact after one row of each

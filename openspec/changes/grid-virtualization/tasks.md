@@ -36,11 +36,13 @@
 
 - [x] 5.1 Add `scripts/scroll-bench.mjs` (D14) and a line for it in CLAUDE.md under `preview:remote-demo`. Verify it runs headless against `bun run preview:remote-demo` and prints the metrics D14 names.
   - 2026-09-25, 09155dc: two runs on `?flat=1` against the pre-change production build on 3177 (library 70b60f0d, the demo corpus): 461–462 frames, p95 50 ms, 88–95 frames over 33 ms, main 5.9 s, 954 tiles in the document.
-- [ ] 5.2 Bench the change against the probe's numbers in proposal.md on the demo corpus, root and `?flat=1`, two runs each, and paste the table into design.md under D14. Verify the flat view's frames over 33 ms and main-thread time are no worse than the probe's by more than the spread between the two runs.
+- [x] 5.2 Bench the change against the probe's numbers in proposal.md on the demo corpus, root and `?flat=1`, two runs each, and paste the table into design.md under D14. Verify the flat view's frames over 33 ms and main-thread time are no worse than the probe's by more than the spread between the two runs.
+  - 2026-09-25, 5d43a35: table in design.md D14. Flat 15 of 728 over 33 ms and 2.5 s against the probe's 13 of 730 and 2.4 s, within the spread of the bench's two runs (9 and 16); folders better than the probe.
 
 ## 6. Verification
 
-- [ ] 6.1 `bun run typecheck`, `bun run test` and `bun run format:check` pass; `openspec validate grid-virtualization` passes.
+- [x] 6.1 `bun run typecheck`, `bun run test` and `bun run format:check` pass; `openspec validate grid-virtualization` passes.
+  - 2026-09-25: both workspaces typecheck; client 89 files / 1189 passed, server 31 files / 950 passed; format:check clean; validate clean.
 - [ ] 6.2 Grep the tests for every scenario of the two delta specs and list, in this line's note, the cell that covers each or "6.3 only".
 - [ ] 6.3 Drive the production build in headless Playwright: back to a far anchor, reveal far down, ArrowDown and Tab past the first screen, Tab into the grid from the header, Escape from the path bar after scrolling, lightbox stepped far then closed, resize and tile-size change, folder previews and thumbnails filling below the first screen, D2's column count, 2.3's mounted-tile bound, 3.3's computed play states, and D12's `complete` on a remounted lazy image. Verify each by measurement (`getBoundingClientRect`, `document.activeElement`, computed style), not by screenshot.
 - [ ] 6.4 Hand the owner the tailnet preview for a phone check of a long flat view: momentum fling, scroll back up, return to a folder. Leave this line open until the owner has judged it.
