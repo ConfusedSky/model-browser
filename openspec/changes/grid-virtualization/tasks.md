@@ -1,6 +1,7 @@
 ## 1. Start from a clean tree
 
-- [ ] 1.1 Remove the probe: delete `client/src/probes.ts`, its import and call in `client/src/main.tsx`, and the `probeOn("virtual")` branch, draft `ROW_CLASS` and `rangeKey` dep in `Grid.tsx`; keep `@tanstack/react-virtual`. Verify `git diff HEAD -- client/src` prints nothing and `git diff HEAD --stat` lists only `client/package.json` and `bun.lock`; `bun run typecheck` passes.
+- [x] 1.1 Remove the probe: delete `client/src/probes.ts`, its import and call in `client/src/main.tsx`, and the `probeOn("virtual")` branch, draft `ROW_CLASS` and `rangeKey` dep in `Grid.tsx`; keep `@tanstack/react-virtual`. Verify `git diff HEAD -- client/src` prints nothing and `git diff HEAD --stat` lists only `client/package.json` and `bun.lock`; `bun run typecheck` passes.
+  - 2026-09-25: the probe was never committed; it was removed from the main checkout before the proposal commit 762e0a6, which carries only the dependency (`client/package.json`, `bun.lock`) besides the planning files.
 
 ## 2. The geometry seam and the virtual grid (D1, D2, D3, D10, D11, D13)
 
@@ -28,7 +29,8 @@
 
 ## 5. Bench
 
-- [ ] 5.1 Add `scripts/scroll-bench.mjs` (D14) and a line for it in CLAUDE.md under `preview:remote-demo`. Verify it runs headless against `bun run preview:remote-demo` and prints the metrics D14 names.
+- [x] 5.1 Add `scripts/scroll-bench.mjs` (D14) and a line for it in CLAUDE.md under `preview:remote-demo`. Verify it runs headless against `bun run preview:remote-demo` and prints the metrics D14 names.
+  - 2026-09-25, 09155dc: two runs on `?flat=1` against the pre-change production build on 3177 (library 70b60f0d, the demo corpus): 461–462 frames, p95 50 ms, 88–95 frames over 33 ms, main 5.9 s, 954 tiles in the document.
 - [ ] 5.2 Bench the change against the probe's numbers in proposal.md on the demo corpus, root and `?flat=1`, two runs each, and paste the table into design.md under D14. Verify the flat view's frames over 33 ms and main-thread time are no worse than the probe's by more than the spread between the two runs.
 
 ## 6. Verification
