@@ -30,13 +30,19 @@ import {
   settle,
   tiles,
   unmountApp,
+  wait,
 } from "./appHarness";
+import { installGridGeometry } from "./gridGeometry";
 import { RIG_VERSION, THUMB_LIGHTING } from "../src/three/renderer";
 import { resetLookupQueueForTests } from "../src/hooks/useThumbnails";
 import { thumbImageUrl } from "../src/api/thumbUrl";
 import { aoEnabled } from "../src/viewer/aoToggle";
 import { DEFAULT_CAMERA } from "../src/three/camera";
 import { cameraForPose, POSE_VERSION } from "../src/three/pose";
+import {
+  gridGeometryForTests,
+  type GridGeometry,
+} from "../src/lib/gridGeometry";
 
 vi.mock("../src/api/client", async () =>
   (await import("./appHarness")).apiClientModule(),
@@ -56,125 +62,55 @@ vi.mock("../src/three/models", async (importOriginal) => ({
 }));
 
 /**
- * happy-dom ships an `IntersectionObserver` whose `observe` and `disconnect`
- * are literally `// TODO: Implement`, so a real one would never report anything
- * and every test here would pass by never running. This is the smallest thing
- * that can: it records what the grid observes and lets a test say "this tile is
- * now on screen".
+ * The grid's layout for the band and peek cells (grid-virtualization D13): a
+ * tile's band is where its row lies, so a cell puts a tile on screen, near or
+ * far by scrolling its row there. A row is ten viewports tall, so the rows
+ * beside the one on screen lie outside the near band (two viewports) except
+ * across the edge the view sits at; and the grid starts a row below the
+ * scroller's top, so at `scrollTop` 0 every row is far and nothing is peeked
+ * or ranked on screen until a cell scrolls there. Cells whose tiles must take
+ * different bands set their own `cols`.
  */
-class StubObserver {
-  static live: StubObserver[] = [];
-  /**
-   * Deliver an intersecting record the moment a tile is observed — inside the
-   * grid's own effect, before App's effects have run. A real observer reports
-   * asynchronously, but that is the *earliest* a report can arrive relative
-   * to App's per-listing reset, and the flat-toggle race is exactly a report
-   * arriving before the reset is visible to `requestPeek`'s guard.
-   */
-  static reportOnObserve = false;
-  readonly targets = new Set<Element>();
-  private connected = true;
-  /** `options` identifies which of the grid's two observers this is: the band
-   *  observer carries the park `rootMargin`, the visible-splitting one none —
-   *  the selector `report` addresses them by (sweep-priority 5.2). */
-  constructor(
-    readonly callback: IntersectionObserverCallback,
-    readonly options?: IntersectionObserverInit,
-  ) {
-    StubObserver.live.push(this);
-  }
-  observe(el: Element): void {
-    this.targets.add(el);
-    if (StubObserver.reportOnObserve) {
-      this.callback(
-        [
-          {
-            target: el,
-            isIntersecting: true,
-          } as unknown as IntersectionObserverEntry,
-        ],
-        this as unknown as IntersectionObserver,
-      );
-    }
-  }
-  unobserve(el: Element): void {
-    this.targets.delete(el);
-  }
-  disconnect(): void {
-    this.targets.clear();
-    this.connected = false;
-  }
-  takeRecords(): IntersectionObserverEntry[] {
-    return [];
-  }
-  /** Whether this observer is still the grid's — a torn-down one must not
-   *  answer, or a re-rendered grid would report each tile twice. */
-  get live(): boolean {
-    return this.connected;
-  }
-}
+const TALL: GridGeometry = {
+  viewport: 100,
+  rowHeight: 1000,
+  cols: 4,
+  gridTop: 1000,
+};
 
-/**
- * Deliver one record about `el` to each of the grid's two observers — the band
- * (park-margin) observer gets `inPark`, the margin-less one `inView` — so a
- * cell can express all three bands: `{inPark: true, inView: true}` is visible,
- * `{inPark: true, inView: false}` near, `{inPark: false, inView: false}` far.
- * The old `intersect` reached every observer with `true` alike, which with two
- * observers could only ever say "visible" (sweep-priority 5.2).
- */
-async function report(
-  el: Element,
-  at: { inPark: boolean; inView: boolean },
-): Promise<void> {
+function geometry(): GridGeometry {
+  const g = gridGeometryForTests();
+  if (g === null) throw new Error("no grid geometry installed");
+  return g;
+}
+function rowOf(el: Element): number {
+  const row = el.closest<HTMLElement>("[data-index]");
+  if (row === null) throw new Error("not a tile in a grid row");
+  return Number(row.dataset.index);
+}
+/** Scroll the app's `<main>` so its top edge lies `top` px below the grid's
+ *  first row, and let the grid's frame callback run. */
+async function scrollGrid(top: number): Promise<void> {
   await act(async () => {
-    for (const observer of StubObserver.live) {
-      if (!observer.live || !observer.targets.has(el)) continue;
-      const isIntersecting =
-        observer.options?.rootMargin !== undefined ? at.inPark : at.inView;
-      observer.callback(
-        [
-          {
-            target: el,
-            isIntersecting,
-          } as unknown as IntersectionObserverEntry,
-        ],
-        observer as unknown as IntersectionObserver,
-      );
-    }
+    container.querySelector("main")!.scrollTop = geometry().gridTop + top;
   });
+  await wait(50);
   await settle();
 }
-
-/** Report `el` as fully on screen. */
-async function intersect(el: Element): Promise<void> {
-  await report(el, { inPark: true, inView: true });
+/** `el`'s row on screen with the view at its top: the row above lies near,
+ *  the row below far. */
+async function onScreen(el: Element): Promise<void> {
+  await scrollGrid(rowOf(el) * geometry().rowHeight);
 }
-
-/** Deliver a record to ONE of the grid's observers only — the band observer
- *  for `inPark`, the margin-less one for `inView` — leaving the other half
- *  unheard. */
-async function reportHalf(
-  el: Element,
-  half: "inPark" | "inView",
-  isIntersecting: boolean,
-): Promise<void> {
-  await act(async () => {
-    for (const observer of StubObserver.live) {
-      if (!observer.live || !observer.targets.has(el)) continue;
-      const isBand = observer.options?.rootMargin !== undefined;
-      if ((half === "inPark") !== isBand) continue;
-      observer.callback(
-        [
-          {
-            target: el,
-            isIntersecting,
-          } as unknown as IntersectionObserverEntry,
-        ],
-        observer as unknown as IntersectionObserver,
-      );
-    }
-  });
-  await settle();
+/** `el`'s row on screen with the view at its bottom: the row below lies near,
+ *  the row above far. */
+async function atBottom(el: Element): Promise<void> {
+  const g = geometry();
+  await scrollGrid((rowOf(el) + 1) * g.rowHeight - g.viewport);
+}
+/** Every row far: the view above the grid by more than the near band. */
+async function away(): Promise<void> {
+  await scrollGrid(-geometry().gridTop);
 }
 
 function dirTile(path: string): HTMLElement {
@@ -205,22 +141,14 @@ function hasIcon(path: string): boolean {
 }
 
 /**
- * Take every tile off screen and bring it back, inside one listing — the find
- * filter unmounts the tiles it hides, and the grid re-observes what returns.
- *
- * This is the shape "scrolled away and back" takes in a test. Since
- * `thumbnail-sweep-priority` dropped the observer's `unobserve` (a band
- * tracker keeps watching), every repeat report — re-observed or not — reaches
- * `App`'s `requestPeek`, whose guard is the one thing standing between a
- * scroll and a duplicate peek.
+ * Scroll `el`'s row out of the near band and back on screen, inside one
+ * listing. The grid reports a folder again each time it re-enters the band, so
+ * `App`'s `requestPeek` guard is the one thing standing between a scroll and a
+ * duplicate peek.
  */
-async function awayAndBack(): Promise<void> {
-  const { openFind, findInput, type } = await import("./appHarness");
-  await openFind();
-  await type(findInput()!, "zzzzzz");
-  await settle();
-  await type(findInput()!, "");
-  await settle();
+async function awayAndBack(el: Element): Promise<void> {
+  await away();
+  await onScreen(el);
 }
 
 const ONE_FOLDER: DirListing = { path: "/models", entries: [dir("a")] };
@@ -231,14 +159,13 @@ function found(n: number): DirEntry[] {
 }
 
 beforeEach(() => {
-  StubObserver.live = [];
-  StubObserver.reportOnObserve = false;
-  vi.stubGlobal("IntersectionObserver", StubObserver);
   resetLookupQueueForTests();
 });
 afterEach(() => unmountApp());
 
 describe("folder contact sheets", () => {
+  beforeEach(() => installGridGeometry(TALL));
+
   it("asks for no preview until the tile is on screen, then asks exactly once", async () => {
     peek.mockResolvedValue(found(2));
     await mountApp("/models", ONE_FOLDER);
@@ -247,32 +174,32 @@ describe("folder contact sheets", () => {
     // not cost 297 requests on first paint (D1).
     expect(peek).not.toHaveBeenCalled();
 
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     expect(peek.mock.calls).toEqual([["/models/a"]]);
 
-    // A second report of the same tile. The observer no longer unobserves —
-    // a band tracker keeps watching (sweep-priority 2.2) — so this repeat
-    // reaches `requestPeek`, and its guard is the only thing refusing it.
-    await intersect(dirTile("/models/a"));
+    // A second report of the same tile: scrolled away and back, the grid
+    // reports it again as it re-enters the near band, so this repeat reaches
+    // `requestPeek`, and its guard is the only thing refusing it.
+    await awayAndBack(dirTile("/models/a"));
     expect(peek).toHaveBeenCalledTimes(1);
   });
 
-  it("marks a tile off screen while the margin-less observer says it is out of view", async () => {
-    // The stylesheet pauses placeholder animations under this marker; only
-    // the view observer decides it, so a tile inside the park margin but out
-    // of view is still marked.
+  it("marks a row off screen while it lies outside the viewport", async () => {
+    // The stylesheet pauses placeholder animations under this marker; a row
+    // within the near band but out of view is still marked.
     peek.mockResolvedValue(found(2));
     await mountApp("/models", ONE_FOLDER);
-    const tile = dirTile("/models/a");
+    const row = (): HTMLElement =>
+      dirTile("/models/a").closest<HTMLElement>("[data-index]")!;
 
-    await report(tile, { inPark: true, inView: false });
-    expect(tile.hasAttribute("data-offscreen")).toBe(true);
+    expect(row().hasAttribute("data-offscreen")).toBe(true); // far
 
-    await reportHalf(tile, "inView", true);
-    expect(tile.hasAttribute("data-offscreen")).toBe(false);
+    await onScreen(dirTile("/models/a"));
+    expect(row().hasAttribute("data-offscreen")).toBe(false);
 
-    await reportHalf(tile, "inView", false);
-    expect(tile.hasAttribute("data-offscreen")).toBe(true);
+    // The view two viewports above the row: near, not on screen.
+    await scrollGrid(-2 * geometry().viewport);
+    expect(row().hasAttribute("data-offscreen")).toBe(true);
   });
 
   it("draws a listing-carried preview and asks the server for nothing", async () => {
@@ -287,7 +214,7 @@ describe("folder contact sheets", () => {
       entries: [{ ...dir("a"), preview: found(2) }],
     };
     await mountApp("/models", annotated);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
     // The carried choice is drawn — two cells, the sheet's own layout rules —
     // and the peek mock's four-model answer proves no request decided this.
@@ -298,13 +225,13 @@ describe("folder contact sheets", () => {
   it("reuses the map for a tile scrolled away and back inside one listing", async () => {
     peek.mockResolvedValue(found(2));
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     expect(peek).toHaveBeenCalledTimes(1);
 
     // Away and back inside one listing: the answer is reused and nothing is
     // asked for a second time (D1).
-    await awayAndBack();
-    await intersect(dirTile("/models/a"));
+    await awayAndBack(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     expect(peek).toHaveBeenCalledTimes(1);
     // And it came back with its sheet, not with an icon.
     expect(cells("/models/a")).toHaveLength(2);
@@ -322,7 +249,7 @@ describe("folder contact sheets", () => {
     await mountApp("/models", ONE_FOLDER);
     const chrome = dirTile("/models/a").querySelector("[data-folder-chrome]");
     expect(chrome).not.toBeNull();
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await act(async () => answer(found(2)));
     await settle();
     expect(dirTile("/models/a").querySelector("[data-folder-chrome]")).toBe(
@@ -369,7 +296,7 @@ describe("folder contact sheets", () => {
   it("draws one preview full size", async () => {
     peek.mockResolvedValue(found(1));
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     expect(cells("/models/a")).toHaveLength(1);
     // One image, not one quadrant and three blanks (D4).
@@ -380,7 +307,7 @@ describe("folder contact sheets", () => {
   it("draws two previews side by side", async () => {
     peek.mockResolvedValue(found(2));
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     const two = cells("/models/a");
     expect(two).toHaveLength(2);
@@ -392,7 +319,7 @@ describe("folder contact sheets", () => {
   it("draws three previews as two above one", async () => {
     peek.mockResolvedValue(found(3));
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     const three = cells("/models/a");
     expect(three).toHaveLength(3);
@@ -406,7 +333,7 @@ describe("folder contact sheets", () => {
   it("draws four previews as the 2×2 grid", async () => {
     peek.mockResolvedValue(found(4));
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     const four = cells("/models/a");
     expect(four).toHaveLength(4);
@@ -424,7 +351,7 @@ describe("folder contact sheets", () => {
   it("keeps the icon for a folder that previews nothing", async () => {
     peek.mockResolvedValue([]);
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     expect(sheet("/models/a")).toBeNull();
     expect(hasIcon("/models/a")).toBe(true);
@@ -436,7 +363,7 @@ describe("folder contact sheets", () => {
       new Promise<DirEntry[]>((resolve) => (answer = resolve)),
     );
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     // Asked for, unanswered: the tile shows what it always showed rather than
     // blanking or spinning (D4).
@@ -455,7 +382,7 @@ describe("folder contact sheets", () => {
       path: "/models",
       entries: [dir("a"), model("b.stl")],
     });
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     expect(hasIcon("/models/a")).toBe(true);
     expect(sheet("/models/a")).toBeNull();
@@ -467,8 +394,8 @@ describe("folder contact sheets", () => {
 
     // And it is not retried within this listing — a failure is an answer, and
     // the empty list it stores is what says so.
-    await awayAndBack();
-    await intersect(dirTile("/models/a"));
+    await awayAndBack(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     expect(peek).toHaveBeenCalledTimes(1);
     expect(hasIcon("/models/a")).toBe(true);
   });
@@ -481,7 +408,7 @@ describe("folder contact sheets", () => {
       new HttpError(503, "library is not configured", "unconfigured"),
     );
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     expect(hasIcon("/models/a")).toBe(true);
     expect(sheet("/models/a")).toBeNull();
@@ -493,7 +420,7 @@ describe("folder contact sheets", () => {
     const shared = model("a/one.stl");
     peek.mockResolvedValue([shared]);
     await mountApp("/models", { path: "/models", entries: [dir("a"), shared] });
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     const lookups = getThumb.mock.calls.filter(
       (c) => c[0] === "/models/a/one.stl",
@@ -530,7 +457,7 @@ describe("folder contact sheets", () => {
     renderThumbnail.mockImplementation(() => new Promise<Blob>(() => {}));
 
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
 
     const img = cells("/models/a")[0]!.querySelector("img");
     expect(img).not.toBeNull();
@@ -551,7 +478,7 @@ describe("folder contact sheets", () => {
           : { path: "/models/a", entries: [dir("a/inner")] },
       ),
     );
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     expect(cells("/models/a")).toHaveLength(2);
 
     await click(dirTile("/models/a"));
@@ -562,7 +489,7 @@ describe("folder contact sheets", () => {
     expect(container.querySelector("[data-preview-sheet]")).toBeNull();
     expect(hasIcon("/models/a/inner")).toBe(true);
 
-    await intersect(dirTile("/models/a/inner"));
+    await onScreen(dirTile("/models/a/inner"));
     expect(peek.mock.calls).toEqual([["/models/a"], ["/models/a/inner"]]);
     expect(cells("/models/a/inner")).toHaveLength(2);
   });
@@ -585,7 +512,7 @@ describe("folder contact sheets", () => {
     listDir.mockImplementation((_p: string, opts?: { flat?: boolean }) =>
       Promise.resolve(opts?.flat === true ? FLAT : ONE_FOLDER),
     );
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     expect(peek).toHaveBeenCalledTimes(1);
 
     await click(flatButton());
@@ -601,7 +528,7 @@ describe("folder contact sheets", () => {
     expect(hasIcon("/models/a")).toBe(true);
 
     // And the folder is peekable again in the listing now on screen.
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     expect(peek).toHaveBeenCalledTimes(2);
     expect(cells("/models/a")).toHaveLength(3);
   });
@@ -630,21 +557,20 @@ describe("folder contact sheets", () => {
     listDir.mockImplementation((_p: string, opts?: { flat?: boolean }) =>
       Promise.resolve(opts?.flat === true ? FLAT : ONE_FOLDER),
     );
-    await intersect(dirTile("/models/a")); // peek #1, listing L1, held open
+    await onScreen(dirTile("/models/a")); // peek #1, listing L1, held open
     await click(flatButton()); // L2 lands; the clearing effect wipes the marker set
     await settle();
-    await intersect(dirTile("/models/a")); // peek #2, listing L2, held open
+    await onScreen(dirTile("/models/a")); // peek #2, listing L2, held open
     expect(peek).toHaveBeenCalledTimes(2);
 
     // L1's answer arrives while #2 is still in flight.
     await act(async () => answer1([model("a/stale.stl")]));
     await settle();
 
-    // A re-report of the tile (the find filter rebuilds the observer) must be
-    // stopped by #2's marker — a third request means the stale landing
-    // stripped it.
-    await awayAndBack();
-    await intersect(dirTile("/models/a"));
+    // A re-report of the tile (scrolled away and back) must be stopped by #2's
+    // marker — a third request means the stale landing stripped it.
+    await awayAndBack(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     expect(peek).toHaveBeenCalledTimes(2);
 
     // #2 answers normally and the sheet appears.
@@ -655,6 +581,7 @@ describe("folder contact sheets", () => {
 });
 
 describe("a sheet cell follows the index", () => {
+  beforeEach(() => installGridGeometry(TALL));
   // getThumb's IMPLEMENTATION survives mount's mockClear — restore the
   // miss-everything default so later cells count renders, not this cell's hits.
   afterEach(() => getThumb.mockResolvedValue({ status: "miss" }));
@@ -682,7 +609,7 @@ describe("a sheet cell follows the index", () => {
     peek.mockResolvedValue([shared]);
     await mountApp("/models", { path: "/models", entries: [dir("a"), shared] });
     await settle();
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
 
     expect(semanticPosesFor).toHaveBeenCalledTimes(2);
@@ -705,7 +632,7 @@ describe("a sheet cell follows the index", () => {
     listDir.mockImplementation((_p: string, opts?: { flat?: boolean }) =>
       Promise.resolve(opts?.flat === true ? FLAT : ONE_FOLDER),
     );
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     const asksFor = (path: string) =>
       semanticPosesFor.mock.calls.filter((c) =>
         (c[0] as string[]).includes(path),
@@ -714,7 +641,7 @@ describe("a sheet cell follows the index", () => {
 
     await click(flatButton());
     await settle();
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
     // The asked-set cleared with the listing: the same preview path is asked
     // about again rather than skipped on a stale memory of the last listing.
@@ -736,7 +663,7 @@ describe("a sheet cell follows the index", () => {
     listDir.mockImplementation((p: string) =>
       Promise.resolve(p === "/models/a" ? INSIDE : ONE_FOLDER),
     );
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
     const rendersBefore = renderThumbnail.mock.calls.length;
     const lookupsBefore = getThumb.mock.calls.filter(
@@ -781,7 +708,7 @@ describe("a sheet cell follows the index", () => {
       rig: RIG_VERSION,
     });
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
 
     // The previews' wave asked about the preview path...
@@ -821,7 +748,7 @@ describe("a sheet cell follows the index", () => {
       poseKey: "y:1.0000:0.3491",
     });
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
 
     const put = putThumb.mock.calls.find(
@@ -841,6 +768,8 @@ describe("a sheet cell follows the index", () => {
 // new one even if the same picture comes back, so a preserved node is proof
 // the state was never torn down.
 describe("a peek landing resets nothing (D3)", () => {
+  // One column: each folder its own row, so bringing a on screen leaves c far.
+  beforeEach(() => installGridGeometry({ ...TALL, cols: 1 }));
   const TWO_FOLDERS: DirListing = {
     path: "/models",
     entries: [dir("a"), dir("c"), model("b.stl")],
@@ -859,7 +788,7 @@ describe("a peek landing resets nothing (D3)", () => {
   it("keeps every shown tile and sheet cell, and looks up only the added paths", async () => {
     peekByPath();
     await mountApp("/models", TWO_FOLDERS);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
 
     // Everything on screen has landed: the model tile and a's sheet cell.
@@ -873,7 +802,7 @@ describe("a peek landing resets nothing (D3)", () => {
     const rendersBefore = renderThumbnail.mock.calls.length;
 
     // The second folder's peek lands and grows thumbEntries.
-    await intersect(dirTile("/models/c"));
+    await onScreen(dirTile("/models/c"));
     await settle();
 
     // Only the added path issued a lookup and a render — nothing pre-existing
@@ -906,7 +835,7 @@ describe("a peek landing resets nothing (D3)", () => {
       getThumb.mock.calls.filter((c) => c[0] === "/models/b.stl").length;
     expect(bLookups()).toBe(1);
 
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
 
     // The peek landed and b.stl is still the one in-flight job it was — not
@@ -925,7 +854,7 @@ describe("a peek landing resets nothing (D3)", () => {
 });
 
 // ─── thumbnail-sweep-priority (5.2) ─────────────────────────────────────────
-// The band pipeline end to end: Grid's two observers → App's wrapper →
+// The band pipeline end to end: Grid's layout bands → App's wrapper →
 // useThumbnails' parking. Only an App mount has all three, which is why these
 // cells live here and not in thumbnailQueue.test.tsx.
 
@@ -1001,12 +930,18 @@ function holdSlots(): { release: () => Promise<void> } {
     },
   };
 }
-/** Report both blockers fully on screen and start their renders. */
+/** Bring both blockers on screen and start their renders. With one column
+ *  they are two rows, and the view straddles the edge between them. A cell
+ *  scrolls to its own layout afterwards: a blocker's render, once started,
+ *  holds its slot wherever its row goes. */
 async function startBlockers(gate: {
   open: (only?: string[]) => Promise<void>;
 }): Promise<void> {
-  for (const p of BLOCKER_PATHS)
-    await report(modelTile(p), { inPark: true, inView: true });
+  const g = geometry();
+  const [r1, r2] = BLOCKER_PATHS.map((p) => rowOf(modelTile(p)));
+  await scrollGrid(
+    r1 === r2 ? r1! * g.rowHeight : r2! * g.rowHeight - g.viewport / 2,
+  );
   await gate.open(BLOCKER_PATHS);
 }
 /** The rendered paths after the blockers. */
@@ -1014,6 +949,8 @@ const renderedAfterBlockers = (): string[] =>
   rendered().filter((p) => !BLOCKER_PATHS.includes(p));
 
 describe("bands rank work through the whole pipeline", () => {
+  beforeEach(() => installGridGeometry(TALL));
+
   it("a visible folder’s preview models are rendered — never deferred by the hidden-set merge", async () => {
     // The cell that fails if App's wrapper over-reaches: preview models are in
     // `thumbEntries` and never in `shownEntries`, so a wrapper built on that
@@ -1021,7 +958,7 @@ describe("bands rank work through the whole pipeline", () => {
     const gate = gateThumbs();
     peek.mockResolvedValue(found(2));
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await gate.open();
 
     expect(rendered()).toEqual(
@@ -1042,8 +979,9 @@ describe("bands rank work through the whole pipeline", () => {
     peek.mockResolvedValue(found(1));
     await mountApp("/models", LISTING);
     const hold = holdSlots();
-    await intersect(dirTile("/models/a")); // peek lands; the cell queues
-    await report(modelTile("/models/x.stl"), { inPark: true, inView: true });
+    // One row of four: the peek lands and the cell queues, x on screen beside
+    // the folder.
+    await onScreen(dirTile("/models/a"));
     await startBlockers(gate);
     await gate.open(["/models/a/m0.stl"]);
     await gate.open(["/models/x.stl"]);
@@ -1072,9 +1010,9 @@ describe("bands rank work through the whole pipeline", () => {
     };
     await mountApp("/models", LISTING);
     const hold = holdSlots();
-    await intersect(dirTile("/models/a")); // peek requested, not yet answered
-    await report(modelTile("/models/y.stl"), { inPark: false, inView: false }); // y far
-    await report(modelTile("/models/x.stl"), { inPark: true, inView: true }); // x visible
+    // Row 0 on screen — the peek requested, not yet answered, and x visible —
+    // and y alone in row 1, far.
+    await onScreen(dirTile("/models/a"));
     await startBlockers(gate);
     await act(async () => answer(found(1))); // the peek lands *after* the reports
     await settle();
@@ -1103,8 +1041,9 @@ describe("bands rank work through the whole pipeline", () => {
     await openFind();
     await type(findInput()!, "x"); // keeps x; hides y (and the running blockers)
     await settle();
-    // A report arrives while y's tile is hidden: the wrapper merges y as far.
-    await report(modelTile("/models/x.stl"), { inPark: true, inView: true });
+    // The filtered listing's bands arrive while y's tile is hidden — x on
+    // screen — and the wrapper merges y as far.
+    await onScreen(modelTile("/models/x.stl"));
     await gate.open();
     await hold.release();
 
@@ -1125,7 +1064,7 @@ describe("bands rank work through the whole pipeline", () => {
     peek.mockResolvedValue([model("alpha/w.stl")]);
     await mountApp("/models", LISTING);
     const hold = holdSlots();
-    await intersect(dirTile("/models/alpha")); // peek lands: w is alpha's cell
+    await onScreen(dirTile("/models/alpha")); // peek lands: w is alpha's cell
     await startBlockers(gate);
     const { openFind, findInput, type } = await import("./appHarness");
     await openFind();
@@ -1134,7 +1073,7 @@ describe("bands rank work through the whole pipeline", () => {
     // z is reported far itself, and its render is pushed *before* w's: under
     // the rule both are far and insertion order keeps z first; were w left
     // unreported it would rank above far and overtake z.
-    await report(modelTile("/models/z.stl"), { inPark: false, inView: false });
+    await away();
     await gate.open(["/models/z.stl"]);
     await gate.open(["/models/alpha/w.stl"]);
     await gate.open();
@@ -1163,19 +1102,19 @@ describe("bands rank work through the whole pipeline", () => {
       ],
     };
     peek.mockResolvedValue([model("other.stl")]);
+    // Three columns: filtered, row 0 is the blockers and alpha, and alpha-z
+    // is alone in row 1.
+    installGridGeometry({ ...TALL, cols: 3 });
     await mountApp("/models", LISTING);
     const hold = holdSlots();
-    await intersect(dirTile("/models/alpha"));
+    await onScreen(dirTile("/models/alpha"));
     await startBlockers(gate);
     const { openFind, findInput, type } = await import("./appHarness");
     await openFind();
     await type(findInput()!, "alpha"); // hides other.stl's tile alone
     await settle();
-    await report(modelTile("/models/alpha-z.stl"), {
-      inPark: false,
-      inView: false,
-    }); // a far tile
-    await report(dirTile("/models/alpha"), { inPark: true, inView: true });
+    // alpha on screen, alpha-z a row below it and far.
+    await onScreen(dirTile("/models/alpha"));
     await gate.open(["/models/alpha-z.stl"]); // the far tile is pushed first…
     await gate.open(["/models/other.stl"]);
     await gate.open();
@@ -1200,23 +1139,16 @@ describe("bands rank work through the whole pipeline", () => {
       entries: [...BLOCKERS, dir("a"), model("x.stl"), model("y.stl")],
     };
     peek.mockResolvedValue([model("x.stl")]); // x is also a's cell
+    installGridGeometry({ ...TALL, cols: 1 });
     await mountApp("/models", LISTING);
     const hold = holdSlots();
-    await intersect(dirTile("/models/a")); // the peek lands
-    // Rebuild the observers (a filter keystroke and back) so the tracked
-    // state forgets the folder: below, x's own tile is heard *before* the
-    // folder, so the folder's `far` registration is the later write — a
-    // last-write-wins `put` would demote x; the nearest-wins max keeps it.
-    const { openFind, findInput, type } = await import("./appHarness");
-    await openFind();
-    await type(findInput()!, "zzz");
-    await settle();
-    await type(findInput()!, "");
-    await settle();
-    await report(modelTile("/models/x.stl"), { inPark: true, inView: true }); // x's own tile visible, heard first
-    await report(dirTile("/models/a"), { inPark: false, inView: false }); // folder far, heard second
-    await report(modelTile("/models/y.stl"), { inPark: true, inView: false }); // y near
+    await onScreen(dirTile("/models/a")); // the peek lands
     await startBlockers(gate);
+    // x's own tile visible, the folder a row above and far, y a row below
+    // and near. Cells are banded after every tile, so the folder's `far` for
+    // x is the later write — a last-write-wins `put` would demote x; the
+    // nearest-wins max keeps it (gridBands.test.ts has both directions).
+    await atBottom(modelTile("/models/x.stl"));
     await gate.open(["/models/y.stl"]);
     await gate.open(["/models/x.stl"]);
     await gate.open();
@@ -1235,12 +1167,13 @@ describe("bands rank work through the whole pipeline", () => {
       entries: [...BLOCKERS, dir("a"), model("z.stl")],
     };
     peek.mockResolvedValue(found(1)); // a/m0 is a's cell, no tile of its own
+    installGridGeometry({ ...TALL, cols: 1 });
     await mountApp("/models", LISTING);
     const hold = holdSlots();
-    await intersect(dirTile("/models/a"));
-    await report(dirTile("/models/a"), { inPark: false, inView: false }); // folder far → its cell far
-    await report(modelTile("/models/z.stl"), { inPark: true, inView: true });
+    await onScreen(dirTile("/models/a"));
     await startBlockers(gate);
+    // z on screen, the folder a row above and far → its cell far.
+    await atBottom(modelTile("/models/z.stl"));
     await gate.open();
     await hold.release();
 
@@ -1249,33 +1182,6 @@ describe("bands rank work through the whole pipeline", () => {
       order.indexOf("/models/a/m0.stl"),
     );
     expect(order).toContain("/models/a/m0.stl"); // deferred, not withheld: it drains
-  });
-
-  it("a tile heard by only one observer is unreported, not a band from a defaulted half", async () => {
-    // Code-review finding 6, at the pipeline level: deliver only the band
-    // observer's record for x (near, by that half alone) — with the view half
-    // unheard, x must be unreported (ranked after near), not derived as near.
-    const gate = gateThumbs();
-    const LISTING: DirListing = {
-      path: "/models",
-      entries: [...BLOCKERS, model("x.stl"), model("y.stl")],
-    };
-    await mountApp("/models", LISTING);
-    const hold = holdSlots();
-    await reportHalf(modelTile("/models/x.stl"), "inPark", true); // x: one half only
-    await report(modelTile("/models/y.stl"), { inPark: true, inView: false }); // y: near, both halves
-    await startBlockers(gate);
-    await gate.open(["/models/x.stl"]); // x's render is pushed first…
-    await gate.open(["/models/y.stl"]);
-    await gate.open();
-    await hold.release();
-
-    // …yet y runs first: near beats unreported. Were x derived from its one
-    // heard half it would be `near` too and keep its head start.
-    const order = renderedAfterBlockers();
-    expect(order.indexOf("/models/y.stl")).toBeLessThan(
-      order.indexOf("/models/x.stl"),
-    );
   });
 });
 
@@ -1286,7 +1192,7 @@ describe("bands rank work through the whole pipeline", () => {
  * failed image demotes the cell's own path.
  */
 describe("a listing that shares the last one’s folders", () => {
-  it("draws every sheet again even when the observers report before App’s effects run — the flat-toggle race", async () => {
+  it("draws every sheet again even when the grid reports before App’s effects run — the flat-toggle race", async () => {
     // Masa's report, reproduced 2026-09-03 with the event order logged: after
     // a rapid Flat on/off, the tree listing landed and every folder tile lost
     // its sheet until the next landing. The grid's observers reported every
@@ -1294,18 +1200,18 @@ describe("a listing that shares the last one’s folders", () => {
     // previews map through a ref that lagged the effect's reset by a render,
     // the previous listing (the flat one) shared every folder path, so every
     // report returned as "already answered" and nothing was marked; then the
-    // reset landed on top. The reset now happens during render, and the
-    // stub's synchronous report on `observe` is the earliest a report can
-    // come. Falsify by moving the reset back into the effect.
+    // reset landed on top. The reset now happens during render. The grid
+    // reports a new listing's folders from its own effect, which runs before
+    // App's — the earliest a report can come. Falsify by moving the reset
+    // back into the effect.
     const a = { ...dir("a"), preview: [model("a/m0.stl"), model("a/m1.stl")] };
     await mountApp("/models", { path: "/models", entries: [a] });
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     expect(cells("/models/a")).toHaveLength(2);
     expect(peek).not.toHaveBeenCalled(); // carried by the listing
 
-    // The next listing shares the folder and carries its preview too; its
-    // observers report on observe, inside the grid's effect.
-    StubObserver.reportOnObserve = true;
+    // The next listing shares the folder and carries its preview too; the
+    // grid reports it inside its own effect.
     listDir.mockResolvedValue({ path: "/models", entries: [{ ...a }] });
     await click(flatButton());
     await settle();
@@ -1361,7 +1267,7 @@ describe("tiles drawn from the listing", () => {
         { ...dir("a"), preview: [vouched("a/m0.stl"), vouched("a/m1.stl")] },
       ],
     });
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
     expect(peek).not.toHaveBeenCalled();
     expect(getThumb).not.toHaveBeenCalled();
@@ -1375,7 +1281,7 @@ describe("tiles drawn from the listing", () => {
   it("a sheet cell’s image error demotes the cell’s path, not the folder’s", async () => {
     peek.mockResolvedValue([vouched("a/m0.stl"), vouched("a/m1.stl")]);
     await mountApp("/models", ONE_FOLDER);
-    await intersect(dirTile("/models/a"));
+    await onScreen(dirTile("/models/a"));
     await settle();
     expect(getThumb).not.toHaveBeenCalled();
     const cell = container.querySelector(

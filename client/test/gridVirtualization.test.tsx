@@ -25,6 +25,7 @@ import { installGridGeometry } from "./gridGeometry";
 import Grid from "../src/components/Grid";
 import { resetLookupQueueForTests } from "../src/hooks/useThumbnails";
 import type { GridGeometry } from "../src/lib/gridGeometry";
+import type { Band } from "../src/three/queue";
 
 vi.mock("../src/api/client", async () =>
   (await import("./appHarness")).apiClientModule(),
@@ -49,7 +50,13 @@ const span = (from: number, to: number): number[] =>
 let host: HTMLElement | null = null;
 let root: Root | null = null;
 
-async function renderGrid(entries: DirEntry[]): Promise<void> {
+async function renderGrid(
+  entries: DirEntry[],
+  report: {
+    onBands?: (bands: ReadonlyMap<string, Band>) => void;
+    onPeek?: (path: string) => void;
+  } = {},
+): Promise<void> {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -68,8 +75,8 @@ async function renderGrid(entries: DirEntry[]): Promise<void> {
         scoreFor={() => undefined}
         scoreScale={null}
         previews={new Map()}
-        onPeek={() => {}}
-        onBands={() => {}}
+        onPeek={report.onPeek ?? (() => {})}
+        onBands={report.onBands ?? (() => {})}
         scrollRoot={{ current: document.body }}
       />,
     );
@@ -155,6 +162,53 @@ describe("a Grid rendered alone", () => {
     });
     await wait(50);
     expect(mountedRows()).toEqual([0, ...span(96, 103)]);
+  });
+});
+
+describe("bands and peeks from the layout", () => {
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    host?.remove();
+    host = null;
+    root = null;
+    document.body.scrollTop = 0;
+  });
+
+  it("ranks and peeks a folder below the mounted rows, and ranks the far end far", async () => {
+    // Two rows on screen, three of overscan: rows 0–4 mounted. The near band
+    // reaches two viewports (four rows) below the view, so row 5 is near.
+    installGridGeometry(SHORT);
+    const entries = MODELS(600);
+    entries[15] = dir("k"); // row 5
+    const onBands = vi.fn();
+    const onPeek = vi.fn();
+    await renderGrid(entries, { onBands, onPeek });
+
+    expect(mountedRows()).toEqual(span(0, 4));
+    expect(document.querySelector('[data-dir-tile="/models/k"]')).toBeNull();
+    expect(onPeek.mock.calls).toEqual([["/models/k"]]);
+    const bands = onBands.mock.calls.at(-1)![0] as ReadonlyMap<string, Band>;
+    expect(bands.get("/models/k")).toBe("near");
+    expect(bands.get("/models/m0.stl")).toBe("visible");
+    expect(bands.get("/models/m150.stl")).toBe("far"); // row 50
+    expect(bands.size).toBe(600);
+  });
+
+  it("publishes nothing for a scroll that stays within the same rows", async () => {
+    installGridGeometry(SHORT);
+    const onBands = vi.fn();
+    await renderGrid(MODELS(600), { onBands });
+    // Off the rows' edges, so the next scroll crosses none: on screen rows
+    // 0–2, near rows 0–6, both before and after.
+    await scrollTo(document.body, 50);
+    const published = onBands.mock.calls.length;
+
+    await scrollTo(document.body, 150);
+    expect(onBands).toHaveBeenCalledTimes(published);
+
+    // The control: a row's height further, and the rows on screen change.
+    await scrollTo(document.body, 250);
+    expect(onBands).toHaveBeenCalledTimes(published + 1);
   });
 });
 

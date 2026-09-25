@@ -4,6 +4,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type RefObject,
@@ -20,6 +21,12 @@ import Icon from "./Icon";
 import type { DirEntry, IndexScore } from "../../../shared/types";
 import type { ThumbState } from "../hooks/useThumbnails";
 import { formatCosine, formatZ } from "../lib/format";
+import {
+  bandsForRows,
+  layoutRanges,
+  sameRange,
+  type RowRange,
+} from "../lib/gridBands";
 import { nativeMenuRequested } from "../lib/gesture";
 import {
   gridGeometryForTests,
@@ -37,21 +44,6 @@ import {
   type ScoreScale,
 } from "../lib/scoreScale";
 import type { Band } from "../three/queue";
-
-/** How far past the scrollport a tile may sit before its render ranks `far`.
- *  Wide enough that ordinary scrolling oscillation cannot flip a tile's rank
- *  back and forth, and a screen or two of travel lands on rendered tiles. */
-export const FAR_ROOT_MARGIN = "200% 0px 200% 0px";
-
-/** How near a band sorts — the per-path max ("nearest wins") compares on this. */
-const NEARNESS: Record<Band, number> = { visible: 0, near: 1, far: 2 };
-/** One worse than the folder's own: a sheet is decoration, and at equal bands
- *  an off-screen folder's cells beat near model tiles on listing order (D2). */
-const CELL_BAND: Record<Band, Band> = {
-  visible: "near",
-  near: "far",
-  far: "far",
-};
 
 export type TileSize = "s" | "m" | "l";
 /** Whole literals, one per size, so each reaches the stylesheet. */
@@ -136,15 +128,18 @@ interface Props {
    *  draws as an empty answer does — the folder's own icon. The arrays are the
    *  map's own, so `Tile`'s memo compares them by identity. */
   previews: ReadonlyMap<string, DirEntry[]>;
-  /** Raised whenever a tile crosses the park boundary — the band observer
-   *  keeps watching, so App's guard is the only thing dropping repeats (D1). */
+  /** Raised for a folder each time its band becomes visible or near — again
+   *  after it scrolled far and back, and for every such folder of a new
+   *  listing — so App's guard is the only thing dropping repeats (D1). */
   onPeek: (path: string) => void;
-  /** Every observed tile's band, wholesale, after each observer batch (D2). */
+  /** Every entry's band, wholesale, taken from the row layout whether or not
+   *  its row is mounted; raised only when the visible or near rows, the
+   *  entries, the previews or the column count changed (grid-virtualization
+   *  D4). */
   onBands: (bands: ReadonlyMap<string, Band>) => void;
-  /** **Must be the scroller**: the intersection algorithm clips against every
-   *  clipping ancestor before the root's margin applies, so a `rootMargin`
-   *  against the default viewport root is inert (D2). A `RefObject` so it is
-   *  stable in deps and populated during commit. */
+  /** The element that scrolls the grid, which the rows are virtualized
+   *  against and the bands measured in. A `RefObject` so it is stable in deps
+   *  and populated during commit. */
   scrollRoot: RefObject<HTMLElement | null>;
   size?: TileSize;
   /** The raw score pair on each result, rather than the strength alone. */
@@ -289,38 +284,24 @@ function Grid({
   // D11: rows are drawn relative to the body, and TanStack is told where the
   // body sits in the scroller.
   const [scrollMargin, setScrollMargin] = useState(0);
-  const readMargin = useCallback((): void => {
+  const marginRef = useRef(0);
+  /** True when the margin moved, so a re-render is on its way. */
+  const readMargin = useCallback((): boolean => {
     const body = bodyRef.current;
     const scroller = scrollRootRef.current.current;
-    if (body === null || scroller === null) return;
+    if (body === null || scroller === null) return false;
     const margin =
       body.getBoundingClientRect().top -
       scroller.getBoundingClientRect().top +
       scroller.scrollTop;
-    setScrollMargin((prev) => (prev === margin ? prev : margin));
+    if (margin === marginRef.current) return false;
+    marginRef.current = margin;
+    setScrollMargin(margin);
+    return true;
   }, []);
-  useLayoutEffect(readMargin, [readMargin, entries, size, cols]);
-  // Content above the grid changes without re-rendering it (a results line, a
-  // notice), so the margin is re-read once per scroll burst and on resize.
-  useEffect(() => {
-    const scroller = scrollRootRef.current.current;
-    if (scroller === null) return;
-    let frame = 0;
-    const schedule = (): void => {
-      if (frame !== 0) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        readMargin();
-      });
-    };
-    scroller.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
-    return () => {
-      scroller.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
-      cancelAnimationFrame(frame);
-    };
-  }, [readMargin]);
+  useLayoutEffect(() => {
+    readMargin();
+  }, [readMargin, entries, size, cols]);
 
   /** Read once, at the first render: without it TanStack's first render sees
    *  a 0×0 scroller and mounts nothing, and a consumer in the same commit (the
@@ -381,124 +362,124 @@ function Grid({
     virtualizer.measure();
   });
   const virtualRows = virtualizer.getVirtualItems();
-  /** The observers below see only mounted tiles, so they re-attach whenever
-   *  the mounted rows change. */
-  const rangeKey = virtualRows.map((row) => row.index).join(",");
 
-  /** Each observed tile's last record from each observer. A tile heard by one
-   *  observer stays unreported rather than taking a band from a defaulted
-   *  half. */
-  const bandStateRef = useRef<
-    Map<string, { inPark?: boolean; inView?: boolean }>
-  >(new Map());
-  /** Read inside the observer callbacks, so it cannot be an effect dep: every
-   *  landed peek mints a new map and would rebuild both observers. */
+  /** The rows on screen and near it, from TanStack's measurements (starts
+   *  carry the scroll margin) — O(log rows). `calculateRange` first, which
+   *  refreshes the memoised measurements, size and offset these read. */
+  const readRanges = useCallback((): {
+    visible: RowRange | null;
+    near: RowRange | null;
+  } => {
+    virtualizer.calculateRange();
+    return layoutRanges(
+      virtualizer.measurementsCache,
+      virtualizer.scrollOffset ?? 0,
+      virtualizer.scrollRect?.height ?? 0,
+    );
+  }, [virtualizer]);
+  /** What this render marks off screen (D5). The same rows as TanStack's own
+   *  range whenever the grid meets the viewport, so the renders TanStack does
+   *  on a range change keep the marker current. */
+  const visibleRows = readRanges().visible;
+  const renderedVisibleRef = useRef(visibleRows);
+  renderedVisibleRef.current = visibleRows;
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+
+  /** Read by `sync`, which runs from a frame callback as well as effects. */
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
   const previewsRef = useRef(previews);
   previewsRef.current = previews;
-  /** Returns early while nothing is tracked: an empty report would read as
-   *  "every path is unreported" over work the last one had ranked. */
-  const publish = useCallback(() => {
-    const state = bandStateRef.current;
-    if (state.size === 0) return;
-    const bands = new Map<string, Band>();
-    // A path shown in two places — its own tile and a folder's preview — takes
-    // the nearest band (D2).
-    const put = (path: string, band: Band): void => {
-      const cur = bands.get(path);
-      if (cur === undefined || NEARNESS[band] < NEARNESS[cur])
-        bands.set(path, band);
-    };
-    const shown = previewsRef.current;
-    for (const [path, s] of state) {
-      if (s.inPark === undefined || s.inView === undefined) continue;
-      const band: Band = s.inView ? "visible" : s.inPark ? "near" : "far";
-      put(path, band);
-      // Preview models have no tile of their own; unregistered they would rank
-      // behind every visible tile while their folder is on screen.
-      const cells = shown.get(path);
-      if (cells !== undefined)
-        for (const cell of cells) put(cell.path, CELL_BAND[band]);
-    }
-    // Nothing heard by both observers yet is not a report either — the first
-    // batch after a rebuild fills one half for every path.
-    if (bands.size === 0) return;
-    onBands(bands);
-  }, [onBands]);
+  const onBandsRef = useRef(onBands);
+  onBandsRef.current = onBands;
+  const onPeekRef = useRef(onPeek);
+  onPeekRef.current = onPeek;
+  const publishedRef = useRef<{
+    entries: DirEntry[];
+    rows: DirEntry[][];
+    previews: ReadonlyMap<string, DirEntry[]>;
+    visible: RowRange | null;
+    near: RowRange | null;
+    bands: Map<string, Band>;
+  } | null>(null);
   /**
-   * Two observers, rooted at the scroller (D2). Three bands need both: one
-   * `rootMargin` yields two states, and `intersectionRatio` is measured against
-   * the *expanded* root, so visible and near read alike to a single observer.
-   * `onPeek` rides the margined one, firing screens before a tile is seen.
-   *
-   * Built and populated in one effect, so no window has an observer with
-   * nothing observed. Every dep is identity-stable by design — an unstable one
-   * pays an observer rebuild per render.
+   * Bands and peeks from the layout (D4): published only when the visible or
+   * near rows, the listing, its chunking or the previews changed — never for a
+   * scroll that stays within the same rows. A publish re-renders App, and so
+   * this grid, whose effect calls back in here; nothing compared below has
+   * changed by then (a peek landing changes `previews` once, and its publish
+   * peeks nothing new), so that second pass returns without publishing.
    */
-  useEffect(() => {
-    // Before the guard below: an empty listing renders no grid, and the old
-    // paths must not survive for the previews effect to publish.
-    const state = bandStateRef.current;
-    state.clear();
-    const root = gridRef.current;
-    const scroller = scrollRoot.current;
-    if (root === null || scroller === null) return;
-    const stateOf = (path: string): { inPark?: boolean; inView?: boolean } => {
-      let s = state.get(path);
-      if (s === undefined) {
-        s = {};
-        state.set(path, s);
-      }
-      return s;
-    };
-    const apply = (
-      records: IntersectionObserverEntry[],
-      half: "inPark" | "inView",
-      peeks: boolean,
-    ): void => {
-      for (const record of records) {
-        const el = record.target as HTMLElement;
-        const path = el.dataset.dirTile ?? el.dataset.modelTile;
-        if (path === undefined) continue;
-        stateOf(path)[half] = record.isIntersecting;
-        // Set on the node directly, not through state: it only gates CSS
-        // animations (index.css), and a re-render per crossing would cost
-        // more than the animations it pauses.
-        if (half === "inView")
-          el.toggleAttribute("data-offscreen", !record.isIntersecting);
-        if (peeks && record.isIntersecting && el.dataset.dirTile !== undefined)
-          onPeek(path);
-      }
-      publish();
-    };
-    const bandObserver = new IntersectionObserver(
-      (records) => apply(records, "inPark", true),
-      {
-        root: scroller,
-        rootMargin: FAR_ROOT_MARGIN,
-      },
-    );
-    const viewObserver = new IntersectionObserver(
-      (records) => apply(records, "inView", false),
-      {
-        root: scroller,
-      },
-    );
-    for (const el of root.querySelectorAll<HTMLElement>(
-      "[data-dir-tile], [data-model-tile]",
-    )) {
-      bandObserver.observe(el);
-      viewObserver.observe(el);
+  const sync = useCallback((): void => {
+    const rows = rowsRef.current;
+    const entries = entriesRef.current;
+    // An empty report would read as "every path is unreported" over work the
+    // last one had ranked.
+    if (rows.length === 0) {
+      publishedRef.current = null;
+      return;
     }
-    return () => {
-      bandObserver.disconnect();
-      viewObserver.disconnect();
-    };
-  }, [entries, onPeek, publish, scrollRoot, rangeKey]);
-
-  /** A landed peek's models join their folder's band with no observer churn. */
+    // A margin read but not yet rendered: TanStack still lays the rows out at
+    // the old one, and the re-render on its way syncs. Without this the first
+    // commit ranks and peeks as though the grid began at the scroller's top.
+    if (virtualizer.options.scrollMargin !== marginRef.current) return;
+    const { visible, near } = readRanges();
+    const previews = previewsRef.current;
+    const last = publishedRef.current;
+    if (
+      last !== null &&
+      last.rows === rows &&
+      last.previews === previews &&
+      sameRange(last.visible, visible) &&
+      sameRange(last.near, near)
+    )
+      return;
+    const bands = bandsForRows(rows, visible, near, previews);
+    // A new listing starts from nothing, so every folder in range is new.
+    const before =
+      last !== null && last.entries === entries ? last.bands : null;
+    publishedRef.current = { entries, rows, previews, visible, near, bands };
+    onBandsRef.current(bands);
+    for (const entry of entries) {
+      if (entry.kind !== "dir" || bands.get(entry.path) === "far") continue;
+      const was = before?.get(entry.path);
+      if (was === undefined || was === "far") onPeekRef.current(entry.path);
+    }
+  }, [readRanges, virtualizer]);
+  // After every commit: a range change, a row measurement, and a change of
+  // listing, previews or columns all arrive as renders.
+  useEffect(sync);
+  // Content above the grid changes without re-rendering it (a results line, a
+  // notice), so the margin is re-read once per scroll frame and on resize,
+  // and the bands with it.
   useEffect(() => {
-    publish();
-  }, [previews, publish]);
+    const scroller = scrollRootRef.current.current;
+    if (scroller === null) return;
+    let frame = 0;
+    const schedule = (): void => {
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        // A moved margin re-renders, and that render's effect syncs.
+        if (readMargin()) return;
+        // Where TanStack's range and the rows meeting the viewport part —
+        // the grid wholly outside it — no render of TanStack's would redraw
+        // the marker.
+        if (!sameRange(readRanges().visible, renderedVisibleRef.current)) {
+          rerender();
+          return;
+        }
+        sync();
+      });
+    };
+    scroller.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      scroller.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      cancelAnimationFrame(frame);
+    };
+  }, [readMargin, readRanges, sync]);
 
   /**
    * With nothing focused, an arrow lands on the first tile instead of doing
@@ -559,7 +540,7 @@ function Grid({
     tiles[target]?.focus();
   };
 
-  // Below the hooks: an early return above them makes the observer effect
+  // Below the hooks: an early return above them makes the effects
   // conditional.
   if (entries.length === 0) {
     return (
@@ -629,6 +610,15 @@ function Grid({
             key={row.key}
             data-index={row.index}
             ref={virtualizer.measureElement}
+            // Pauses the placeholder animations of rows not on screen
+            // (index.css): overscan rows and kept rows (D5).
+            data-offscreen={
+              visibleRows !== null &&
+              row.index >= visibleRows.first &&
+              row.index <= visibleRows.last
+                ? undefined
+                : ""
+            }
             className={ROW_CLASS[size]}
             style={{
               position: "absolute",
@@ -1016,8 +1006,8 @@ const Tile = memo(function Tile({
             onEntryMenu(entry, e.currentTarget, menuAt(e.currentTarget, e));
           }}
           onKeyDown={onMenuKey}
-          // What the observer watches. Folders only — a zip is not peeked, and an
-          // absent attribute cannot be picked up by mistake.
+          // Folders only — a zip is not peeked, and an absent attribute cannot
+          // be picked up by mistake.
           data-dir-tile={entry.kind === "dir" ? entry.path : undefined}
         >
           {/* The folder chrome — a tab and a framed body — IS the directory

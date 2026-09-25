@@ -55,11 +55,11 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/** Placeholders in a tile scrolled out of view stop animating: a fresh
- *  listing has hundreds of them, each costing a style recalc every frame on
- *  the main thread. Unlayered, so it beats the `animate-*` utilities, whose
- *  `animation` shorthand resets the play state. `Grid`'s view observer sets
- *  the marker. */
+/** Placeholders in a row scrolled out of view stop animating: each costs a
+ *  style recalc every frame on the main thread. Unlayered, so it beats the
+ *  `animate-*` utilities, whose `animation` shorthand resets the play state.
+ *  `Grid` sets the marker on each mounted row outside the visible rows —
+ *  overscan and kept rows. */
 [data-offscreen] * {
   animation-play-state: paused;
 }
