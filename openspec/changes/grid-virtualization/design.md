@@ -208,7 +208,11 @@ that would put it there — it writes `scrollTop` raw to the row's current start
 the phase 1 above); a row already at its target but off screen by the estimates is waited for, not
 written to again, since a write equal to the current offset fires no `scroll` and measures
 nothing (fix round 2, 2026-09-25: counting such writes as tries let four passes time out in one
-task before any row was measured); while a measurement has moved the row since this commit drew it, it waits again;
+task before any row was measured); near the listing's end the view counts as at its target when it
+sits at the scroll extent, and a target past the *rendered* extent but inside the layout's total
+is waited for rather than written — the body re-renders to the grid's new height one render after
+the measurements that grew it, and a write clamped against the stale extent moves nothing it can
+keep (follow-up 7.6, 2026-09-25); while a measurement has moved the row since this commit drew it, it waits again;
 and while any row in the visible range is still unmeasured it waits too (a D10 `measure()` runs
 in an earlier layout effect of the same commit, so the rows it moves are caught by the moved-row
 test); then `applyIn` lands it. "Measured" is `Grid`'s own record — a set of the row
