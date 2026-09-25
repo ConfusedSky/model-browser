@@ -99,6 +99,11 @@ id=$(jq -r '.id // empty' "$root/.model-browser/library.json" 2>/dev/null || tru
 bake="${MODEL_BROWSER_CACHE:-$HOME/.cache/model-browser}/$id/bake/bake.json"
 index_dir=${INDEX_DIR:-$(jq -r '.index.cacheDir // empty' "$bake" 2>/dev/null || true)}
 mini=${MINI_CLASSIFY_DIR:-$HOME/Documents/tests/mini-classify}
+# Its children go with it however it ends — Ctrl-C, or a `kill` of this
+# script's PID, which would otherwise orphan the server on 3177.
+trap 'kill ${server_pid:+"$server_pid"} ${index_pid:+"$index_pid"} 2>/dev/null' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if curl -s -m 2 http://127.0.0.1:8077/status >/dev/null; then
   echo "index: already answering on 8077, left as it is"
 elif [ -n "$index_dir" ] && [ -x "$mini/.venv/bin/python" ]; then
@@ -112,12 +117,7 @@ else
 fi
 
 echo "built client for this tailnet: $built"
-# Its children go with it however it ends — Ctrl-C, or a `kill` of this
-# script's PID, which would otherwise orphan the server on 3177.
 cd "$top/server"
 bun src/index.ts &
 server_pid=$!
-trap 'kill "$server_pid" ${index_pid:+"$index_pid"} 2>/dev/null' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 wait "$server_pid"
