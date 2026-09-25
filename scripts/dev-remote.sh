@@ -106,11 +106,18 @@ elif [ -n "$index_dir" ] && [ -x "$mini/.venv/bin/python" ]; then
   (cd "$mini" && exec .venv/bin/python serve_api.py "$root" --cache-dir "$index_dir" \
     --no-volume --host 127.0.0.1 --port 8077) &
   index_pid=$!
-  trap 'kill "$index_pid" 2>/dev/null' EXIT
 else
   echo "warning: no index started (INDEX_DIR unset and no bake at $bake,"
   echo "         or no $mini/.venv). Posed thumbnails will re-render on the device."
 fi
 
 echo "built client for this tailnet: $built"
-cd "$top/server" && bun src/index.ts
+# Its children go with it however it ends — Ctrl-C, or a `kill` of this
+# script's PID, which would otherwise orphan the server on 3177.
+cd "$top/server"
+bun src/index.ts &
+server_pid=$!
+trap 'kill "$server_pid" ${index_pid:+"$index_pid"} 2>/dev/null' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+wait "$server_pid"
