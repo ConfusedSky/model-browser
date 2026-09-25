@@ -33,7 +33,9 @@ export default defineConfig({
   // Vitest stubs every CSS import empty unless it processes CSS, `?raw`
   // included — and chromeLayers.test.tsx reads index.css as text to check that
   // the named layers are ordered. Nothing else in the suite imports CSS.
-  test: { css: true },
+  // The setup file gives every happy-dom cell the grid's geometry
+  // (test/gridGeometry.ts), since happy-dom lays nothing out.
+  test: { css: true, setupFiles: ["./test/setup.ts"] },
   server: {
     // Both default to Vite's own behaviour (loopback, no extra hosts) and are
     // set only to reach the dev server from another machine — e.g. behind

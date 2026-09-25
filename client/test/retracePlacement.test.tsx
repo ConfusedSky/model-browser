@@ -4,8 +4,8 @@
 // app: retracing (Back, a dismissal, ↑) restores the grid's place, arriving
 // (a tile, a typed path, a deep link, a search) lands at the top, and the
 // reveal centres. happy-dom lays nothing out, so each cell carries its own
-// geometry: one `getBoundingClientRect` on the prototype answers the scroller
-// a fixed box and every tile a box computed from its index in the grid, the
+// geometry through the grid's seam (test/gridGeometry.ts): the scroller a
+// fixed box and every tile a box computed from its index in the listing, the
 // cell's column count and row height, and the scroller's `scrollTop` — which
 // is what makes `measureIn`'s anchor and `applyIn`'s arithmetic exact enough
 // to assert to the pixel. History is the real happy-dom stack: `back()` and
@@ -41,6 +41,7 @@ import {
   upButton,
   wait,
 } from "./appHarness";
+import { installGridGeometry } from "./gridGeometry";
 
 vi.mock("../src/api/client", async () =>
   (await import("./appHarness")).apiClientModule(),
@@ -148,45 +149,19 @@ const TILE_GAP = 20;
 let cols = 3;
 let rowH = 200;
 
-function box(top: number, height: number): DOMRect {
-  return {
-    x: 0,
-    y: top,
-    top,
-    bottom: top + height,
-    left: 0,
-    right: 0,
-    width: 0,
-    height,
-    toJSON: () => ({}),
-  } as DOMRect;
-}
-
 const main = (): HTMLElement => container.querySelector("main")!;
 const tileEls = (): HTMLElement[] =>
   Array.from(main().querySelectorAll("[data-entry-tile]"));
 const tile = (path: string): HTMLElement =>
   tileEls().find((el) => el.getAttribute("data-entry-tile") === path)!;
 
-const originalRect = HTMLElement.prototype.getBoundingClientRect;
+/** The seam's geometry for this file: 200px rows of three in a 600px
+ *  scroller whose top edge is at 100, each tile 20px shorter than its row. */
 function installGeometry(): void {
-  HTMLElement.prototype.getBoundingClientRect = function (
-    this: HTMLElement,
-  ): DOMRect {
-    const scroller = container.querySelector("main");
-    if (scroller === null) return box(0, 0);
-    if (this === scroller) return box(MAIN_TOP, MAIN_HEIGHT);
-    if (this.getAttribute("data-entry-tile") === null) return box(0, 0);
-    const i = tileEls().indexOf(this);
-    return box(
-      MAIN_TOP + Math.floor(i / cols) * rowH - scroller.scrollTop,
-      rowH - TILE_GAP,
-    );
-  };
-  Object.defineProperty(main(), "clientHeight", {
-    get: () => MAIN_HEIGHT,
-    configurable: true,
-  });
+  installGridGeometry(
+    { viewport: MAIN_HEIGHT, rowHeight: rowH, cols, gridTop: 0 },
+    { scrollerTop: MAIN_TOP, tileGap: TILE_GAP },
+  );
 }
 
 /** Where the scroller sits once `path`'s tile is at `offset` from the top edge. */
@@ -236,12 +211,11 @@ beforeEach(async () => {
   resetLookupQueueForTests();
   cols = 3;
   rowH = 200;
+  installGeometry();
   await mountApp("/models", PARENT);
   routes();
-  installGeometry();
 });
 afterEach(async () => {
-  HTMLElement.prototype.getBoundingClientRect = originalRect;
   await unmountApp();
 });
 
@@ -402,6 +376,7 @@ describe("retracing restores the place", () => {
 
     cols = 2;
     rowH = 300;
+    installGeometry();
     await back();
     await settle();
     // k06 is now row 3 of a 300px grid: a different scrollTop, the same tile

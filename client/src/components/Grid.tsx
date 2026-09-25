@@ -2,16 +2,32 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type RefObject,
 } from "react";
+import {
+  defaultRangeExtractor,
+  measureElement as measureRowElement,
+  useVirtualizer,
+  type Range,
+  type Rect,
+} from "@tanstack/react-virtual";
 import { baseName } from "../../../shared/names";
 import Icon from "./Icon";
 import type { DirEntry, IndexScore } from "../../../shared/types";
 import type { ThumbState } from "../hooks/useThumbnails";
 import { formatCosine, formatZ } from "../lib/format";
 import { nativeMenuRequested } from "../lib/gesture";
+import {
+  gridGeometryForTests,
+  observeSeamOffset,
+  observeSeamRect,
+  seamRowHeight,
+  type RowComposition,
+} from "../lib/gridGeometry";
 import { tilesIn } from "../lib/placement";
 import {
   SCALE_BADGE,
@@ -47,19 +63,44 @@ const GRID_CLASS: Record<TileSize, string> = {
 
 const ARROWS = new Set(["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"]);
 
-/** The grid is `auto-fill`, so its columns are whatever the width yields (D2):
- *  the leading run of tiles sharing the first one's `top` is the top row. Pure
- *  over the rects, since happy-dom lays nothing out. Empty grid returns 1. */
-export function columnCount(tiles: HTMLElement[]): number {
-  const first = tiles[0];
-  if (first === undefined) return 1;
-  const top = first.getBoundingClientRect().top;
-  let n = 0;
-  for (const tile of tiles) {
-    if (tile.getBoundingClientRect().top !== top) break;
-    n++;
-  }
-  return n;
+/** One mounted row: `GRID_CLASS` less its vertical padding, with the row gap
+ *  as bottom padding, so a stack of one-row grids spaces like one grid. Whole
+ *  literals, one per size, so each reaches the stylesheet. */
+const ROW_CLASS: Record<TileSize, string> = {
+  s: "grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-2 px-3 pb-2 sm:px-4",
+  m: "grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-3 px-3 pb-3 sm:grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] sm:px-4",
+  l: "grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-4 px-3 pb-4 sm:px-4",
+};
+
+/** A row's height before any row of this listing has been measured (D10). */
+const ROW_ESTIMATE: Record<TileSize, number> = { s: 170, m: 220, l: 300 };
+
+const OVERSCAN_ROWS = 3;
+
+/** The columns a grid displays, from its computed `grid-template-columns`:
+ *  one resolved size per track, line names aside (D2). `""` (no layout) and
+ *  `none` count as one column. */
+export function trackCount(template: string): number {
+  const tracks = template.replace(/\[[^\]]*\]/g, " ").trim();
+  if (tracks === "" || tracks === "none") return 1;
+  return tracks.split(/\s+/).length;
+}
+
+/** Zips count with folders: both draw the non-model tile, one shape. */
+function compositionOf(row: readonly DirEntry[]): RowComposition {
+  const models = row.filter((e) => e.kind === "model").length;
+  return models === 0 ? "dirs" : models === row.length ? "models" : "mixed";
+}
+
+/** The heights D10 estimates from, kept per listing, column count and size:
+ *  a change of any of them can change what a composition measures. */
+interface Compositions {
+  entries: DirEntry[];
+  cols: number;
+  size: TileSize;
+  heights: Map<RowComposition, number>;
+  last: number | undefined;
+  remeasure: boolean;
 }
 
 interface Props {
@@ -148,6 +189,202 @@ function Grid({
   modestSet = false,
 }: Props) {
   const gridRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /** Read by the listeners below, which must not resubscribe per render. */
+  const scrollRootRef = useRef(scrollRoot);
+  scrollRootRef.current = scrollRoot;
+  const geometry = gridGeometryForTests();
+
+  // The column count is what the measuring row's `auto-fill` rule yields (D2),
+  // so the responsive rule lives only in the class strings.
+  const [measuredCols, setMeasuredCols] = useState<number | null>(null);
+  const cols = geometry?.cols ?? measuredCols ?? 1;
+  /** False until the first read: before it, rows are chunked at one column.
+   *  Stage C's handle defers its landings on this. */
+  const colsReady = geometry !== null || measuredCols !== null;
+  const empty = entries.length === 0;
+  useLayoutEffect(() => {
+    const el = measureRef.current;
+    if (geometry !== null || el === null) return;
+    const read = (): void =>
+      setMeasuredCols(trackCount(getComputedStyle(el).gridTemplateColumns));
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [geometry, size, empty]);
+
+  const rows = useMemo(() => {
+    const out: DirEntry[][] = [];
+    for (let i = 0; i < entries.length; i += cols)
+      out.push(entries.slice(i, i + cols));
+    return out;
+  }, [entries, cols]);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const indexOf = useMemo(
+    () => new Map(entries.map((e, i) => [e.path, i])),
+    [entries],
+  );
+
+  /** The tile that last held focus stays mounted wherever the view goes (D3),
+   *  so a control handing focus back finds the element it came from. Kept past
+   *  a blur; replaced only by another tile's focus. */
+  const [lastFocused, setLastFocused] = useState<string | null>(null);
+  const focusedIndex =
+    lastFocused === null ? undefined : indexOf.get(lastFocused);
+  // The entry left the listing: forgotten, so its return is not kept either.
+  if (lastFocused !== null && focusedIndex === undefined) setLastFocused(null);
+  /** An entry index kept mounted for one action. Stage C's handle sets it. */
+  const [pinned] = useState<number | null>(null);
+  const focusedRow =
+    focusedIndex === undefined ? null : Math.floor(focusedIndex / cols);
+  const pinnedRow =
+    pinned === null || pinned >= entries.length
+      ? null
+      : Math.floor(pinned / cols);
+  const rangeExtractor = useCallback(
+    (range: Range): number[] => {
+      const keep = new Set(defaultRangeExtractor(range));
+      // The first row, so Tab into the grid from above lands on the first tile.
+      keep.add(0);
+      if (focusedRow !== null) keep.add(focusedRow);
+      if (pinnedRow !== null) keep.add(pinnedRow);
+      return [...keep].sort((a, b) => a - b);
+    },
+    [focusedRow, pinnedRow],
+  );
+
+  // D10: a row is estimated at the height last measured for its composition.
+  const compositionsRef = useRef<Compositions | null>(null);
+  let compositions = compositionsRef.current;
+  if (
+    compositions === null ||
+    compositions.entries !== entries ||
+    compositions.cols !== cols ||
+    compositions.size !== size
+  ) {
+    compositions = {
+      entries,
+      cols,
+      size,
+      heights: new Map(),
+      last: undefined,
+      remeasure: false,
+    };
+    compositionsRef.current = compositions;
+  }
+  const fallbackHeight = geometry?.rowHeight ?? ROW_ESTIMATE[size];
+  const estimateSize = (i: number): number => {
+    const c = compositionsRef.current;
+    const row = rowsRef.current[i];
+    return (
+      (row === undefined ? undefined : c?.heights.get(compositionOf(row))) ??
+      c?.last ??
+      fallbackHeight
+    );
+  };
+
+  // D11: rows are drawn relative to the body, and TanStack is told where the
+  // body sits in the scroller.
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const readMargin = useCallback((): void => {
+    const body = bodyRef.current;
+    const scroller = scrollRootRef.current.current;
+    if (body === null || scroller === null) return;
+    const margin =
+      body.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      scroller.scrollTop;
+    setScrollMargin((prev) => (prev === margin ? prev : margin));
+  }, []);
+  useLayoutEffect(readMargin, [readMargin, entries, size, cols]);
+  // Content above the grid changes without re-rendering it (a results line, a
+  // notice), so the margin is re-read once per scroll burst and on resize.
+  useEffect(() => {
+    const scroller = scrollRootRef.current.current;
+    if (scroller === null) return;
+    let frame = 0;
+    const schedule = (): void => {
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        readMargin();
+      });
+    };
+    scroller.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      scroller.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      cancelAnimationFrame(frame);
+    };
+  }, [readMargin]);
+
+  /** Read once, at the first render: without it TanStack's first render sees
+   *  a 0×0 scroller and mounts nothing, and a consumer in the same commit (the
+   *  placement) finds no tile. The scroller's ref is attached in the commit
+   *  that mounts both, hence the window's size as the fallback. */
+  const initialRectRef = useRef<Rect | null>(null);
+  if (initialRectRef.current === null) {
+    const scroller = scrollRoot.current;
+    initialRectRef.current =
+      geometry !== null
+        ? { width: scroller?.clientWidth ?? 0, height: geometry.viewport }
+        : scroller !== null
+          ? { width: scroller.clientWidth, height: scroller.clientHeight }
+          : { width: window.innerWidth, height: window.innerHeight };
+  }
+  const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
+    count: rows.length,
+    getScrollElement: () => scrollRootRef.current.current,
+    estimateSize,
+    overscan: OVERSCAN_ROWS,
+    scrollMargin,
+    rangeExtractor,
+    initialRect: initialRectRef.current,
+    // Otherwise TanStack scrolls a scrolled scroller back to 0 when it
+    // subscribes, which a retrace landing on a fresh grid would lose.
+    initialOffset: () => scrollRootRef.current.current?.scrollTop ?? 0,
+    measureElement: (el, entry, instance) => {
+      const row = rowsRef.current[instance.indexFromElement(el)];
+      const composition = row === undefined ? undefined : compositionOf(row);
+      const height =
+        geometry !== null
+          ? seamRowHeight(geometry, composition)
+          : measureRowElement(el, entry, instance);
+      const c = compositionsRef.current;
+      if (c !== null && composition !== undefined) {
+        if (!c.heights.has(composition)) c.remeasure = true;
+        c.heights.set(composition, height);
+        c.last = height;
+      }
+      return height;
+    },
+    ...(geometry !== null
+      ? {
+          observeElementRect: observeSeamRect(geometry),
+          observeElementOffset: observeSeamOffset,
+        }
+      : {}),
+  });
+  // A measurement re-estimates only the rows after the one measured, so a
+  // composition's first height re-estimates every row not drawn yet, those
+  // above the view included. Deferred to after the
+  // commit: `measure()` inside the measuring callback would clear the cache
+  // under `resizeItem`, which then writes this row's size back over it.
+  useLayoutEffect(() => {
+    const c = compositionsRef.current;
+    if (c === null || !c.remeasure) return;
+    c.remeasure = false;
+    virtualizer.measure();
+  });
+  const virtualRows = virtualizer.getVirtualItems();
+  /** The observers below see only mounted tiles, so they re-attach whenever
+   *  the mounted rows change. */
+  const rangeKey = virtualRows.map((row) => row.index).join(",");
+
   /** Each observed tile's last record from each observer. A tile heard by one
    *  observer stays unreported rather than taking a band from a defaulted
    *  half. */
@@ -256,7 +493,7 @@ function Grid({
       bandObserver.disconnect();
       viewObserver.disconnect();
     };
-  }, [entries, onPeek, publish, scrollRoot]);
+  }, [entries, onPeek, publish, scrollRoot, rangeKey]);
 
   /** A landed peek's models join their folder's band with no observer churn. */
   useEffect(() => {
@@ -302,7 +539,6 @@ function Grid({
     const idx = tiles.indexOf(document.activeElement as HTMLElement);
     if (idx === -1) return;
     const last = tiles.length - 1;
-    const cols = columnCount(tiles);
     let target = idx;
     if (key === "ArrowRight") target = Math.min(idx + 1, last);
     else if (key === "ArrowLeft") target = Math.max(idx - 1, 0);
@@ -333,42 +569,79 @@ function Grid({
       </div>
     );
   }
+  const renderTile = (entry: DirEntry) => {
+    // The map's own array, so the memo sees an unchanged preview list as
+    // unchanged. Folders only — a zip is never peeked.
+    const preview = entry.kind === "dir" ? previews.get(entry.path) : undefined;
+    return (
+      <Tile
+        key={entry.path}
+        entry={entry}
+        thumb={thumbs.get(entry.path)}
+        preview={preview}
+        // A fresh array every render, which is why `tilePropsEqual`
+        // compares it elementwise.
+        previewThumbs={preview?.map((e) => thumbs.get(e.path))}
+        onEnter={onEnter}
+        onModelPointerDown={onModelPointerDown}
+        onModelOpen={onModelOpen}
+        onModelHover={onModelHover}
+        onEntryMenu={onEntryMenu}
+        onImageError={onImageError}
+        // A boolean per tile, not the path, so only the marked tile's props
+        // change and the memo holds the rest.
+        marked={entry.path === markedPath}
+        anchor={entry.path === anchorPath}
+        // Only the scale is tested here; the anchor rule and the missing
+        // hit live inside `scoreFor`, which returns the landed map's own
+        // object so the memo sees an unchanged answer as unchanged.
+        score={scoreScale === null ? undefined : scoreFor(entry.path)}
+        scale={scoreScale}
+        showScores={showScores}
+        modest={modestSet}
+      />
+    );
+  };
   return (
-    <div ref={gridRef} className={GRID_CLASS[size]} onKeyDown={onKeyDown}>
-      {entries.map((entry) => {
-        // The map's own array, so the memo sees an unchanged preview list as
-        // unchanged. Folders only — a zip is never peeked.
-        const preview =
-          entry.kind === "dir" ? previews.get(entry.path) : undefined;
-        return (
-          <Tile
-            key={entry.path}
-            entry={entry}
-            thumb={thumbs.get(entry.path)}
-            preview={preview}
-            // A fresh array every render, which is why `tilePropsEqual`
-            // compares it elementwise.
-            previewThumbs={preview?.map((e) => thumbs.get(e.path))}
-            onEnter={onEnter}
-            onModelPointerDown={onModelPointerDown}
-            onModelOpen={onModelOpen}
-            onModelHover={onModelHover}
-            onEntryMenu={onEntryMenu}
-            onImageError={onImageError}
-            // A boolean per tile, not the path, so only the marked tile's props
-            // change and the memo holds the rest.
-            marked={entry.path === markedPath}
-            anchor={entry.path === anchorPath}
-            // Only the scale is tested here; the anchor rule and the missing
-            // hit live inside `scoreFor`, which returns the landed map's own
-            // object so the memo sees an unchanged answer as unchanged.
-            score={scoreScale === null ? undefined : scoreFor(entry.path)}
-            scale={scoreScale}
-            showScores={showScores}
-            modest={modestSet}
-          />
-        );
-      })}
+    <div
+      ref={gridRef}
+      className="pt-1 pb-6"
+      onKeyDown={onKeyDown}
+      onFocus={(e) => {
+        const path = (e.target as HTMLElement).dataset.entryTile;
+        if (path !== undefined && path !== lastFocused) setLastFocused(path);
+      }}
+    >
+      {/* Never holds a tile: its computed columns are the column count. */}
+      <div
+        ref={measureRef}
+        aria-hidden="true"
+        className={ROW_CLASS[size]}
+        style={{ height: 0, paddingBottom: 0, overflow: "hidden" }}
+      />
+      <div
+        ref={bodyRef}
+        data-grid-body
+        style={{ position: "relative", height: virtualizer.getTotalSize() }}
+      >
+        {virtualRows.map((row) => (
+          <div
+            key={row.key}
+            data-index={row.index}
+            ref={virtualizer.measureElement}
+            className={ROW_CLASS[size]}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(${row.start - scrollMargin}px)`,
+            }}
+          >
+            {rows[row.index]?.map(renderTile)}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

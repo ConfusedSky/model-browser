@@ -5,9 +5,8 @@
 // moves focus between the tile buttons. A second, document-level listener
 // (link-previews D11) catches the arrow nobody is focused for and lands it on
 // the first tile. happy-dom lays nothing out, so the
-// column-stepping cells stub each tile's `getBoundingClientRect` to fake a
-// three-column layout, and `columnCount` is unit-tested directly over stubbed
-// rects. Import `./appHarness` before any `../src/...` module (the renderer-mock
+// grid's geometry seam gives it three columns, and `trackCount` (the column
+// read from a real grid's computed tracks) is unit-tested directly. Import `./appHarness` before any `../src/...` module (the renderer-mock
 // ordering rule).
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +21,8 @@ import {
   unmountApp,
   wait,
 } from "./appHarness";
-import { columnCount } from "../src/components/Grid";
+import { DEFAULT_GRID_GEOMETRY, installGridGeometry } from "./gridGeometry";
+import { trackCount } from "../src/components/Grid";
 import { resetLookupQueueForTests } from "../src/hooks/useThumbnails";
 
 vi.mock("../src/api/client", async () =>
@@ -38,26 +38,6 @@ const SEVEN: DirListing = {
   path: "/models",
   entries: Array.from({ length: 7 }, (_, i) => model(`m${i}.stl`)),
 };
-
-/** Fake a three-column, 160px-tile grid on the live tile buttons. */
-function stub3col(): void {
-  tiles().forEach((t, i) => {
-    const top = Math.floor(i / 3) * 200;
-    const left = (i % 3) * 180;
-    t.getBoundingClientRect = () =>
-      ({
-        top,
-        left,
-        right: left + 160,
-        bottom: top + 160,
-        width: 160,
-        height: 160,
-        x: left,
-        y: top,
-        toJSON: () => ({}),
-      }) as DOMRect;
-  });
-}
 
 /** Dispatch a keydown on whatever holds focus; return the event for defaultPrevented. */
 async function fireArrow(
@@ -79,6 +59,7 @@ async function fireArrow(
 describe("grid arrow-key focus movement", () => {
   beforeEach(async () => {
     resetLookupQueueForTests();
+    installGridGeometry({ ...DEFAULT_GRID_GEOMETRY, cols: 3 });
     await mountApp("/models", SEVEN);
   });
   afterEach(async () => {
@@ -124,7 +105,6 @@ describe("grid arrow-key focus movement", () => {
   });
 
   it("steps by the live column count for Down and Up", async () => {
-    stub3col();
     tiles()[1]!.focus();
     await fireArrow("ArrowDown");
     expect(document.activeElement).toBe(tiles()[4]);
@@ -133,14 +113,12 @@ describe("grid arrow-key focus movement", () => {
   });
 
   it("does not move sideways on ArrowUp from the top row", async () => {
-    stub3col();
     tiles()[1]!.focus(); // top row, but not the first tile
     await fireArrow("ArrowUp");
     expect(document.activeElement).toBe(tiles()[1]);
   });
 
   it("lands on the last tile stepping down into a short final row", async () => {
-    stub3col();
     // Tile 4 is in the last full row; a straight step (→7) falls past the end,
     // but a partial row sits below, so focus goes to the last tile.
     tiles()[4]!.focus();
@@ -148,14 +126,12 @@ describe("grid arrow-key focus movement", () => {
     expect(document.activeElement).toBe(tiles()[6]);
   });
 
-  it("columnCount counts the leading top-row tiles", () => {
-    const rects = [0, 0, 0, 200, 200, 200, 400];
-    const fake = rects.map(
-      (top) =>
-        ({ getBoundingClientRect: () => ({ top }) }) as unknown as HTMLElement,
-    );
-    expect(columnCount(fake)).toBe(3);
-    expect(columnCount([])).toBe(1);
+  it("trackCount counts the computed column tracks", () => {
+    expect(trackCount("181.333px 181.333px 181.333px")).toBe(3);
+    expect(trackCount("[a] 160px [b c] 160px [d]")).toBe(2);
+    // No layout (happy-dom) and a non-grid both read as one column.
+    expect(trackCount("")).toBe(1);
+    expect(trackCount("none")).toBe(1);
   });
 
   it("leaves arrows in the find input untouched", async () => {
