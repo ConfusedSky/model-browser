@@ -35,6 +35,15 @@ export LC_ALL=C   # $EPOCHREALTIME and awk both parse decimals; a comma locale b
 #     them; the standalone thumbnail is drawn at random from a disjoint pool and is meant
 #     to stay a cold-object measurement, so it reads MISS on a healthy edge. Gate on
 #     `batch_hit`, never on `thumb_cf`.
+#   - the `model_*` columns fetch `/api/file` with no `mtime`, exactly as the first
+#     baseline did, so they stay comparable across runs — but that is the version-less
+#     `no-cache` tier and not what a visitor's client asks for. The `glb*` columns are:
+#     `/api/model.glb` naming the listing's `mtime` verbatim (the server compares it
+#     exactly), one drawn fresh per sample (`glbcold_*`, mostly MISS) and one fixed model
+#     repeated every sample (`glbwarm_*`, HIT once warm) — the same cold/warm split as the
+#     thumbnails. They fail `glb_ok`, never `ok`, so the first baseline's exclusion rule
+#     still means the same thing. GLB has no size in the listing; truncation is checked
+#     against `Content-Length`.
 #   - `%header{}` needs curl 7.84 or newer; the startup check refuses to run without it.
 set -uo pipefail
 HOST=${HOST:-https://models.masamaeda.com}
@@ -72,7 +81,7 @@ d=json.load(sys.stdin)
 for e in d.get("entries",[]):
     for p in e.get("preview",[]):
         if p.get("kind")=="model" and 2_000_000 <= p.get("size",0) <= 2_600_000:
-            print(p["path"], p["size"], sep="\t")
+            print(p["path"], p["size"], p["mtime"], sep="\t")
 ')
 
 # Thumbnail URLs, each naming its own current generation so the origin answers the
@@ -100,12 +109,21 @@ SOLO=( "${THUMBS[@]:0:${#THUMBS[@]}-20}" )     # disjoint pool for the cold sing
 enc() { python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$1"; }
 sub() { awk "BEGIN{printf \"%.4f\", $1-$2}"; }
 bps() { awk "BEGIN{d=$2-$3; printf \"%d\", (d>0)? $1/d : 0}"; }
+glburl() { printf '%s/api/model.glb?path=%s&mtime=%s' "$HOST" "$(enc "$1")" "$2"; }
+# code,exit,cf,ttfb_net,total,bytes,content-length
+glb() {
+  curl -s -o /dev/null -m 150 -w '%{http_code},%{exitcode},%header{cf-cache-status},%{time_appconnect},%{time_starttransfer},%{time_total},%{size_download},%header{content-length}' "$1" \
+    | awk -F, '{printf "%s,%s,%s,%.4f,%s,%s,%s", $1, $2, ($3==""?"none":$3), $5-$4, $6, $7, $8}'
+}
 
-echo "ts,ok,why,thumb_code,thumb_exit,thumb_cf,thumb_cc_immutable,thumb_ttfb,thumb_ttfb_net,thumb_bytes,batch_total,batch_total_net,batch_ok,batch_hit,batch_cf,model_code,model_exit,model_cf,model_ttfb,model_ttfb_net,model_total,model_bytes,model_expected,model_bps,model_path,dir_code,dir_exit,dir_ttfb,dir_ttfb_net" >"$OUT"
+IFS=$'\t' read -r WPATH _ WMTIME <<<"${MODELS[0]}"   # the fixed warm model
+COLD=( "${MODELS[@]:1}" )
+
+echo "ts,ok,why,thumb_code,thumb_exit,thumb_cf,thumb_cc_immutable,thumb_ttfb,thumb_ttfb_net,thumb_bytes,batch_total,batch_total_net,batch_ok,batch_hit,batch_cf,model_code,model_exit,model_cf,model_ttfb,model_ttfb_net,model_total,model_bytes,model_expected,model_bps,model_path,dir_code,dir_exit,dir_ttfb,dir_ttfb_net,glb_ok,glb_why,glbcold_code,glbcold_exit,glbcold_cf,glbcold_ttfb_net,glbcold_total,glbcold_bytes,glbcold_path,glbwarm_code,glbwarm_exit,glbwarm_cf,glbwarm_ttfb_net,glbwarm_total,glbwarm_bytes" >"$OUT"
 for ((i=0;i<SAMPLES;i++)); do
   DEADLINE=$(( $(date +%s) + INTERVAL ))
   TS=$(date -Is)
-  IFS=$'\t' read -r MPATH MSIZE <<<"${MODELS[RANDOM % ${#MODELS[@]}]}"
+  IFS=$'\t' read -r MPATH MSIZE _ <<<"${MODELS[RANDOM % ${#MODELS[@]}]}"
   PE=$(enc "$MPATH")
   TURL=${SOLO[RANDOM % ${#SOLO[@]}]}
 
@@ -149,7 +167,16 @@ for ((i=0;i<SAMPLES;i++)); do
   [[ $MBPS -gt 0 ]] || WHY="$WHY zerobps"
   [[ -z $WHY ]] && OK=1 || OK=0
 
-  echo "$TS,$OK,\"${WHY# }\",$TCODE,$TEXIT,${TCF:-none},$TCC,$TTTFB,$(sub "$TTTFB" "$TTLS"),$TBYTES,$BTOTAL,$BNET,$BOK,$BHIT,$BCF,$MCODE,$MEXIT,${MCF:-none},$MTTFB,$(sub "$MTTFB" "$MTLS"),$MTOTAL,$MBYTES,$MSIZE,$MBPS,\"$MPATH\",$DCODE,$DEXIT,$DTTFB,$(sub "$DTTFB" "$DTLS")" >>"$OUT"
+  IFS=$'\t' read -r CPATH _ CMTIME <<<"${COLD[RANDOM % ${#COLD[@]}]}"
+  IFS=, read -r GCCODE GCEXIT GCCF GCNET GCTOTAL GCBYTES GCLEN <<<"$(glb "$(glburl "$CPATH" "$CMTIME")")"
+  IFS=, read -r GWCODE GWEXIT GWCF GWNET GWTOTAL GWBYTES GWLEN <<<"$(glb "$(glburl "$WPATH" "$WMTIME")")"
+  GWHY=""
+  [[ $GCCODE == 200 && $GWCODE == 200 ]] || GWHY="$GWHY status"
+  [[ $GCEXIT == 0 && $GWEXIT == 0 ]] || GWHY="$GWHY curlexit"
+  [[ -n $GCLEN && $GCBYTES == "$GCLEN" && -n $GWLEN && $GWBYTES == "$GWLEN" ]] || GWHY="$GWHY short"
+  [[ -z $GWHY ]] && GOK=1 || GOK=0
+
+  echo "$TS,$OK,\"${WHY# }\",$TCODE,$TEXIT,${TCF:-none},$TCC,$TTTFB,$(sub "$TTTFB" "$TTLS"),$TBYTES,$BTOTAL,$BNET,$BOK,$BHIT,$BCF,$MCODE,$MEXIT,${MCF:-none},$MTTFB,$(sub "$MTTFB" "$MTLS"),$MTOTAL,$MBYTES,$MSIZE,$MBPS,\"$MPATH\",$DCODE,$DEXIT,$DTTFB,$(sub "$DTTFB" "$DTLS"),$GOK,\"${GWHY# }\",$GCCODE,$GCEXIT,$GCCF,$GCNET,$GCTOTAL,$GCBYTES,\"$CPATH\",$GWCODE,$GWEXIT,$GWCF,$GWNET,$GWTOTAL,$GWBYTES" >>"$OUT"
 
   (( i + 1 < SAMPLES )) || break
   NOW=$(date +%s); (( DEADLINE > NOW )) && sleep $(( DEADLINE - NOW ))
