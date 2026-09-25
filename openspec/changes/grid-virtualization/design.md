@@ -67,12 +67,27 @@ expects uniform items. A bespoke virtualizer would own resize, measurement and s
 bugs TanStack already handles. `content-visibility: auto` was measured and judged weaker on the
 phone (proposal.md), and keeps every element in the DOM.
 
+**The first commit mounts rows.** A fresh virtualizer's scroll rect is its `initialRect`, 0×0 by
+default, so its first render mounts nothing and the rect arrives only in TanStack's own layout
+effect — after App's placement layout effect in the same commit, which would find no tile.
+`Grid` therefore passes `initialRect` (the scroller's client size, or the window's while
+`scrollRoot.current` is still null on App's first commit; the viewport under the seam) and
+`initialOffset: () => scroller.scrollTop`, without which TanStack scrolls a scrolled `<main>` back
+to 0 when a grid mounts into it. (Stage A check-in, 2026-09-25.)
+
 ### D2. The column count comes from the CSS, through a measuring row
 
 An empty, zero-height element carries `ROW_CLASS[size]`; its computed `grid-template-columns`
 has one track per column the `auto-fill` rule yields, observed with a `ResizeObserver`. The
 responsive rule stays in one place (the class strings), and the count is exactly what a row
 will display. `columnCount` (tile rects) is deleted.
+
+In production the count is read in the measuring row's layout effect, so a freshly mounted grid's
+first commit is chunked at one column and corrected before paint. Anything that places or focuses
+in that same commit would read the wrong rows, so `Grid` exposes `colsReady` (true from the first
+render under the seam, after the first read in production) and the handle (D6) defers `place` and
+`focusEntry` until it is true. No module-level seed of the last count is kept: it would still be
+wrong on the first mount and would hide the dependency. (Stage A check-in, 2026-09-25.)
 
 Alternative: arithmetic from the scroller's width, the rem minimums and the gap — a second copy
 of the CSS rule that drifts the day either changes.
@@ -84,14 +99,17 @@ by a `rangeExtractor` with:
 
 - **the first row**, always — so the keyboard entering the grid from the header with Tab lands
   on the first tile, as it does today, and the first-tile focus rules find a real element;
-- **the row of the tile that last held focus** — `Grid` records a tile's path on `focusin` and
+- **the row of the tile that last held focus** — `Grid` records a tile's path on `focusin` (as
+  state, since TanStack memoises its indexes on the extractor's identity, which is a callback
+  over the focused and pinned rows) and
   keeps it until another tile takes focus or the entry leaves `entries`, *not* only while focus
   is inside the grid. A focused tile is then never unmounted by scrolling away (the
   requirement's *Focus is not lost by scrolling away*), and every control that hands focus back
   to the element it came from finds that same, still-connected element: `PathBar`'s Escape
   (`cameFrom`, `back.isConnected`), `EntryMenu`'s close, the find bar;
 - **a pinned row** — set by the handle (D6) for the one action it is completing, cleared once
-  that action has run.
+  that action has run. It holds an *entry* index, not a row index, so a re-chunk cannot point it
+  at the wrong row.
 
 Rows render in index order, so DOM order is a *subsequence* of listing order: with the
 last-focused row far from the view, the tiles between it and the mounted range are not in the
@@ -226,7 +244,10 @@ App state passed to `Grid` as `size`, so both causes arrive through the same `co
 folders, all models, or mixed — else of any row, else a per-size constant. TanStack computes
 measurements once and does not re-ask `estimateSize` when its answers change, so the first time
 a composition is measured `Grid` calls `virtualizer.measure()` to re-estimate the rows not yet
-drawn (at most three times per listing). `measure()` clears every measured height, the mounted
+drawn (at most three times per listing). The composition is model against non-model — a zip's
+tile has a folder's shape — and the record resets when the entries, `cols` or `size` change.
+`measure()` runs from a layout effect after the commit that first measured a composition, never
+re-entrantly inside TanStack's `resizeItem`. `measure()` clears every measured height, the mounted
 rows' included, and a mounted row is not re-measured until it resizes or remounts; so after a
 `measure()` every row stands at its composition's height. That is exact in practice — `Grid`
 records each composition's height itself, and tile names truncate to one line, so rows of one
@@ -276,6 +297,12 @@ one source of numbers for everything that measures:
   tiles by DOM position, is replaced by the seam;
 - the scroller's `clientHeight` is the viewport height, since `applyIn`'s `center` case reads it
   rather than a rect;
+- the seam's `observeElementOffset` always reports `isScrolling: false`: TanStack skips
+  measuring a row while scrolling, and happy-dom's `ResizeObserver` never fires, so a row mounted
+  during a test's scroll would never be measured; it also keeps TanStack's debounce timers from
+  firing outside `act`;
+- optional per-composition `rowHeights`, answered only by the seam's `measureElement`, let a cell
+  tell compositions apart (D10); the rect stub stays uniform;
 - happy-dom's `scrollTop` setter fires no `scroll` event, so the seam wraps the scroller's
   `scrollTop` setter to dispatch one, as the browser does; its `observeElementOffset` reads
   `scrollTop` on that event as TanStack's default does. The grid's own raw writes (`place`,
