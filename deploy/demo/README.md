@@ -885,7 +885,8 @@ Two Edge TTL notes, and they differ per route because the origins differ:
 
 Bot Fight Mode was already off. The AI crawler policies (Search/Agent/Training) and Bot
 Preference Sync were left at Cloudflare's defaults — they do nothing while nothing is
-proxied, and they are a content decision rather than part of this work.
+proxied, and they are a content decision rather than part of this work. They were set on
+2026-09-25; see *AI crawlers are blocked*, below.
 
 ### Verified through the edge, 2026-09-18
 
@@ -978,12 +979,62 @@ Verified through the edge after the change:
 | `/` | DYNAMIC | `no-cache` |
 | `/api/dir` | DYNAMIC | none |
 
-**Tiered Cache is still off** (Caching → Tiered Cache). Smart Tiered Cache is free on every
-plan and reduces origin load, so it is worth turning on — but it changes what a miss costs,
-so turn it on *between* measurements rather than during one. Note it is not a substitute for
-an R2 `wnam` bucket: Smart Topology picks the upper tier closest to the **origin**, so it
-sits near Falkenstein and a US miss still crosses the Atlantic. The topologies that would
-help a distant visitor, Generic Global and Regional Tiered Cache, are Enterprise only.
+**DYNAMIC on `/api/dir` is the bypass working.** Cloudflare Trace (Rules → Rule simulator)
+on `/api/dir?path=/` shows rule 2 *matched* and neither cacheable rule did. Cloudflare
+reports BYPASS only where a bypass overrides a response it would otherwise have cached;
+nothing under `/api/` has a default-cacheable extension, so a matched bypass there still
+reads DYNAMIC. Trace is the tool for any "is this rule matching" question — the status
+header cannot answer it.
+
+**Smart Tiered Cache is on since 2026-09-25** (Caching → Tiered Cache → Tiered Cache
+Topology). It changes what a miss costs, so it went on *between* probe runs, and any run
+before that date is a no-tiered-cache run. It is not a substitute for an R2 `wnam` bucket:
+Smart Topology picks the upper tier closest to the **origin**, so it sits near Falkenstein
+and a US miss still crosses the Atlantic. What it buys is the box being asked once per
+object rather than once per PoP. The topologies that would help a distant visitor, Generic
+Global and Regional Tiered Cache, are Enterprise only.
+
+**The PoP this machine reaches is not fixed.** On 2026-09-25 `curl
+https://models.masamaeda.com/cdn-cgi/trace | grep colo` answered ATL five times in six where
+every earlier measurement here went through SJC, and median `time_appconnect` doubled. A run
+through a different PoP is a different experiment: record `colo` beside every probe run, and
+treat a latency comparison across PoPs as void rather than as a finding. Cache status and a
+cold/warm split *within* one run survive the change.
+
+### AI crawlers are blocked (2026-09-25)
+
+Security → Settings → *Configure AI bot policies*: **Search, Agent and Training all Block**,
+Bot Preference Sync on, Bot Fight Mode still off. The reason is the corpus's licences —
+part of it is CC BY-NC-SA, and commercial model training and AI answer engines sit badly
+with NC.
+
+The names mislead. **"Search" here is AI search** — PerplexityBot, OAI-SearchBot,
+Claude-SearchBot, Applebot, Amzn-SearchBot and the like — **not Googlebot or Bingbot**, which
+are not in the list; the managed robots.txt still carries `Content-Signal:
+search=yes,ai-train=no,use=reference`, so the demo stays in ordinary search results.
+Baiduspider and PetalBot sit under *Training* and are blocked with it.
+
+Enforcement is at the edge and does not depend on robots.txt. Checked by user agent, with the
+caveat that a spoofed UA from one address says nothing about Cloudflare's IP-verified bot
+handling:
+
+| user agent | `/` |
+|---|---|
+| a browser, `curl` | 200 |
+| `GPTBot`, `ClaudeBot` | **403** |
+| `Googlebot` | 200 |
+| `Discordbot`, `Slackbot-LinkExpanding`, `facebookexternalhit` | 200 — link previews unaffected |
+
+Bot Fight Mode stays off on purpose: it challenges unverified bots generally, which takes in
+the link-preview fetchers and turns the latency probe's `curl` into fast small 403s.
+
+**The box serves no robots.txt of its own**, so `/robots.txt` falls through to the SPA and
+answers the index document. Bot Preference Sync *prepends* its managed block to whatever the
+origin returns, so the file on the wire is Cloudflare's directives followed by an HTML
+document, relabelled `text/plain`. Robots parsers skip lines they cannot read, so the
+directives still apply, but the tail is junk and it carries link-preview tags naming
+`/robots.txt`. A real file on the box fixes it; until then, read the managed block and
+ignore the rest.
 
 ### What staying proxied costs, standing
 
