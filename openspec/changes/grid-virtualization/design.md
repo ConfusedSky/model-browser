@@ -281,6 +281,14 @@ one source of numbers for everything that measures:
   `scrollTop` on that event as TanStack's default does. The grid's own raw writes (`place`,
   D9's re-anchor) then reach TanStack with no test-only branch in production code.
 
+The seam is split so that no DOM patching ships in the production bundle: a module under
+`client/src/` holds the numbers (`setGridGeometryForTests`, read by `Grid` for TanStack's options
+and `cols`, null in production), and a test helper under `client/test/` installs them together
+with the rect stub and the `scrollTop` wrapper, and removes all three on reset. A vitest setup
+file installs a tall default geometry before every happy-dom cell, so a cell that mounts the grid
+outside the app harness never meets a 0×0 scroller; cells that need a short viewport install
+their own.
+
 There is no switch that turns virtualization off: every cell runs the production path.
 
 - The seam lands **before** the virtual grid (tasks.md 2.1): without it TanStack sees a 0×0
