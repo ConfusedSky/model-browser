@@ -185,7 +185,7 @@ export function getLiveChain(width: number, height: number): RenderChain {
   return liveChain;
 }
 
-/** Pinned to `UnsignedByteType`: `readRenderTargetPixels` into a `Uint8Array`
+/** Pinned to `UnsignedByteType`: `readRenderTargetPixelsAsync` into a `Uint8Array`
  *  needs an 8-bit target (D1). */
 export function getThumbChain(): RenderChain {
   if (thumbChain === null) {
@@ -356,12 +356,12 @@ export function unstage(
  * implementation for both, so both go through `getRenderer()` and the
  * one-renderer rule holds.
  */
-export function renderThumbnailCanvas(
+export async function renderThumbnailCanvas(
   object: THREE.Object3D,
   state: CameraState = DEFAULT_CAMERA,
   axis: OrbitAxis,
   ao = true,
-): HTMLCanvasElement {
+): Promise<HTMLCanvasElement> {
   const r = getRenderer();
   const lit = makeScene();
   const { scene, rig } = lit;
@@ -377,11 +377,15 @@ export function renderThumbnailCanvas(
   const chain = getThumbChain();
   const prevTarget = r.getRenderTarget();
   const pixels = new Uint8Array(THUMB_SIZE * THUMB_SIZE * 4);
+  let readback: Promise<unknown>;
   try {
     chain.render(scene, camera, bounds, ao);
     // The composer swaps after `OutputPass`, so the finished frame is in
-    // `readBuffer`, already sRGB (D1/D2).
-    r.readRenderTargetPixels(
+    // `readBuffer`, already sRGB (D1/D2). Async: a synchronous readback holds
+    // the main thread until the GPU finishes the whole render, which stalls
+    // scrolling on a phone. The copy is queued here, before any later draw
+    // can reuse the target, so the cleanup below need not wait for it.
+    readback = r.readRenderTargetPixelsAsync(
       chain.composer.readBuffer,
       0,
       0,
@@ -403,6 +407,7 @@ export function renderThumbnailCanvas(
     floor.material.dispose();
   }
 
+  await readback;
   // GL readback is bottom-up.
   const canvas = document.createElement("canvas");
   canvas.width = THUMB_SIZE;
@@ -421,13 +426,13 @@ export function renderThumbnailCanvas(
 
 /** `ao` is the caller's reading of the preference, never read here: the pixels
  *  and the cache slot must come from one reading (D4a). */
-export function renderThumbnail(
+export async function renderThumbnail(
   object: THREE.Object3D,
   state: CameraState = DEFAULT_CAMERA,
   axis: OrbitAxis,
   ao = true,
 ): Promise<Blob> {
-  const canvas = renderThumbnailCanvas(object, state, axis, ao);
+  const canvas = await renderThumbnailCanvas(object, state, axis, ao);
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) => {

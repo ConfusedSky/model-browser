@@ -18,7 +18,7 @@ vi.mock("three", async (importOriginal) => {
     }
     setRenderTarget(): void {}
     render(): void {}
-    readRenderTargetPixels(): void {}
+    async readRenderTargetPixelsAsync(): Promise<void> {}
   }
   return { ...actual, WebGLRenderer: FakeWebGLRenderer };
 });
@@ -44,7 +44,7 @@ function directionalCount(): number {
 }
 
 describe("renderThumbnail teardown", () => {
-  it("disposes every directional light of its per-call scene", () => {
+  it("disposes every directional light of its per-call scene", async () => {
     const expected = directionalCount();
     expect(expected).toBeGreaterThan(1);
     const dispose = vi.spyOn(THREE.DirectionalLight.prototype, "dispose");
@@ -59,7 +59,7 @@ describe("renderThumbnail teardown", () => {
     // happy-dom has no 2d canvas context, so the encode step at the very end
     // throws — after the finally block that owns teardown, which is the point
     // of this test.
-    expect(() => renderThumbnail(mesh, undefined, "y")).toThrow(
+    await expect(renderThumbnail(mesh, undefined, "y")).rejects.toThrow(
       "2d context unavailable",
     );
 
@@ -71,14 +71,41 @@ describe("renderThumbnail teardown", () => {
 });
 
 describe("renderThumbnailCanvas", () => {
+  it("tears the scene down while the readback is still in flight", async () => {
+    // The readback is async so the main thread is free while the GPU renders.
+    // Staging borrows an LRU-shared model, so it must go home before that wait,
+    // not after it.
+    vi.spyOn(getThumbChain().composer, "render").mockImplementation(() => {});
+    let land!: () => void;
+    vi.spyOn(getRenderer(), "readRenderTargetPixelsAsync").mockImplementation(
+      () => new Promise((resolve) => (land = () => resolve(new Uint8Array(0)))),
+    );
+    const dispose = vi.spyOn(THREE.DirectionalLight.prototype, "dispose");
+    const home = new THREE.Group();
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 2),
+      new THREE.MeshBasicMaterial(),
+    );
+    home.add(mesh);
+
+    const rendered = renderThumbnailCanvas(mesh, undefined, "y");
+    expect(mesh.parent).toBe(home);
+    expect(dispose).toHaveBeenCalledTimes(directionalCount());
+
+    // happy-dom has no 2d context, so the flip after the wait rejects.
+    land();
+    await expect(rendered).rejects.toThrow("2d context unavailable");
+  });
+
   it("is the canvas renderThumbnail encodes: the same flipped readback, then toBlob as WebP", async () => {
     vi.spyOn(getThumbChain().composer, "render").mockImplementation(() => {});
     // A deterministic readback — byte i of the GL buffer is i mod 251 — so a
     // row flip (or a missing one) shows in the bytes.
-    vi.spyOn(getRenderer(), "readRenderTargetPixels").mockImplementation(
-      (...args) => {
+    vi.spyOn(getRenderer(), "readRenderTargetPixelsAsync").mockImplementation(
+      async (...args) => {
         const buf = args[5] as Uint8Array;
         for (let i = 0; i < buf.length; i++) buf[i] = i % 251;
+        return buf;
       },
     );
     // happy-dom has no 2d context: a fake that keeps what each canvas was painted with.
@@ -118,7 +145,7 @@ describe("renderThumbnailCanvas", () => {
       new THREE.BoxGeometry(2, 2, 2),
       new THREE.MeshBasicMaterial(),
     );
-    const canvas = renderThumbnailCanvas(mesh, undefined, "y");
+    const canvas = await renderThumbnailCanvas(mesh, undefined, "y");
     await renderThumbnail(mesh, undefined, "y");
 
     // One encode, of a canvas painted with exactly the bytes the lossless path hands out.

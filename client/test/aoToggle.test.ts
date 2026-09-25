@@ -22,7 +22,7 @@ vi.mock("three", async (importOriginal) => {
     }
     setRenderTarget(): void {}
     render(): void {}
-    readRenderTargetPixels(): void {}
+    async readRenderTargetPixelsAsync(): Promise<void> {}
   }
   return { ...actual, WebGLRenderer: FakeWebGLRenderer };
 });
@@ -124,7 +124,7 @@ describe("AO toggle", () => {
     expect(first.aoEnabled()).toBe(false);
   });
 
-  it("renderThumbnail draws the recipe its caller names — occluded when none is named", () => {
+  it("renderThumbnail draws the recipe its caller names — occluded when none is named", async () => {
     // Retitled with `ao-as-recipe-dimension`: thumbnails DO follow the
     // preference now, through their callers' captured reads — what this pins
     // is only that the bare call's default argument is the occluded recipe,
@@ -134,7 +134,7 @@ describe("AO toggle", () => {
 
     setAoEnabled(false);
     // happy-dom has no 2d canvas; the throw is after the render this asserts.
-    expect(() => renderThumbnail(makeMesh(), undefined, "y")).toThrow(
+    await expect(renderThumbnail(makeMesh(), undefined, "y")).rejects.toThrow(
       "2d context unavailable",
     );
     expect(gtaoOf(chain).enabled).toBe(true);

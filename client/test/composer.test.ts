@@ -23,7 +23,7 @@ vi.mock("three", async (importOriginal) => {
     }
     setRenderTarget(): void {}
     render(): void {}
-    readRenderTargetPixels(): void {}
+    async readRenderTargetPixelsAsync(): Promise<void> {}
   }
   return { ...actual, WebGLRenderer: FakeWebGLRenderer };
 });
@@ -166,18 +166,18 @@ describe("render paths go through the chains, never renderer.render", () => {
     session.close();
   });
 
-  it("reads the thumbnail back from the chain readBuffer as RGBA", () => {
+  it("reads the thumbnail back from the chain readBuffer as RGBA", async () => {
     const chain = getThumbChain();
     const composed = vi
       .spyOn(chain.composer, "render")
       .mockImplementation(() => {});
     const r = getRenderer();
     const direct = vi.spyOn(r, "render");
-    const read = vi.spyOn(r, "readRenderTargetPixels");
+    const read = vi.spyOn(r, "readRenderTargetPixelsAsync");
 
     // happy-dom has no 2d canvas context, so the PNG encode at the very end
     // throws — well after the readback this test is about.
-    expect(() => renderThumbnail(makeMesh(), undefined, "y")).toThrow(
+    await expect(renderThumbnail(makeMesh(), undefined, "y")).rejects.toThrow(
       "2d context unavailable",
     );
 
@@ -293,20 +293,22 @@ describe("both paths render under the same occlusion preference", () => {
 
   /** Draw a thumbnail once and report whether its chain occluded it. The PNG
    *  encode throws in happy-dom, well after the chain render this reads. */
-  function thumbOccluded(draw: () => unknown): boolean {
+  async function thumbOccluded(draw: () => Promise<unknown>): Promise<boolean> {
     const chain = getThumbChain();
     vi.spyOn(chain.composer, "render").mockImplementation(() => {});
-    expect(draw).toThrow("2d context unavailable");
+    await expect(draw()).rejects.toThrow("2d context unavailable");
     return aoPassOf(chain).enabled;
   }
 
-  it("with the preference off, the tile and the overlay over it are both unoccluded", () => {
+  it("with the preference off, the tile and the overlay over it are both unoccluded", async () => {
     setAoEnabled(false);
     const session = new ViewerSession(makeMesh(), "y");
     try {
       // The thumbnail the tile shows: rendered under the caller's reading.
       expect(
-        thumbOccluded(() => renderThumbnail(makeMesh(), undefined, "y", false)),
+        await thumbOccluded(() =>
+          renderThumbnail(makeMesh(), undefined, "y", false),
+        ),
       ).toBe(false);
       // The overlay that opens over it: the live chain reads the same store.
       expect(liveOccluded(session)).toBe(false);
@@ -315,11 +317,11 @@ describe("both paths render under the same occlusion preference", () => {
     }
   });
 
-  it("with the preference on, both are occluded — the shipped recipe, unchanged", () => {
+  it("with the preference on, both are occluded — the shipped recipe, unchanged", async () => {
     const session = new ViewerSession(makeMesh(), "y");
     try {
       expect(
-        thumbOccluded(() => renderThumbnail(makeMesh(), undefined, "y")),
+        await thumbOccluded(() => renderThumbnail(makeMesh(), undefined, "y")),
       ).toBe(true);
       expect(liveOccluded(session)).toBe(true);
     } finally {
@@ -327,7 +329,7 @@ describe("both paths render under the same occlusion preference", () => {
     }
   });
 
-  it("a session's snapshot draws under the value handed to it, never a read of its own", () => {
+  it("a session's snapshot draws under the value handed to it, never a read of its own", async () => {
     // The site a grep for `aoEnabled` misses: `snapshot` goes through
     // `renderThumbnail`, not the live chain, and takes the preference as an
     // argument so `persist` can capture it once and use the same value for the
@@ -337,7 +339,7 @@ describe("both paths render under the same occlusion preference", () => {
     setAoEnabled(true);
     const session = new ViewerSession(makeMesh(), "y");
     try {
-      expect(thumbOccluded(() => session.snapshot(false))).toBe(false);
+      expect(await thumbOccluded(() => session.snapshot(false))).toBe(false);
     } finally {
       session.close();
     }
@@ -360,15 +362,15 @@ describe("the thumbnail rig is fixed in the rest camera’s frame", () => {
 
   /** Draw once and report the rig and camera the chain was handed. The PNG
    *  encode throws in happy-dom, well after the render this reads. */
-  function drawn(
+  async function drawn(
     state: CameraState | undefined,
     axis: OrbitAxis,
-  ): { rig: THREE.Object3D; camera: THREE.PerspectiveCamera } {
+  ): Promise<{ rig: THREE.Object3D; camera: THREE.PerspectiveCamera }> {
     const chain = getThumbChain();
     const seen = vi.spyOn(chain, "render").mockImplementation(() => {});
-    expect(() => renderThumbnail(makeMesh(), state, axis, true)).toThrow(
-      "2d context unavailable",
-    );
+    await expect(
+      renderThumbnail(makeMesh(), state, axis, true),
+    ).rejects.toThrow("2d context unavailable");
     const [scene, camera] = seen.mock.calls[0] as unknown as [
       THREE.Scene,
       THREE.PerspectiveCamera,
@@ -392,7 +394,7 @@ describe("the thumbnail rig is fixed in the rest camera’s frame", () => {
     target: [0, 0, 0],
   };
 
-  it("copies the rest camera’s quaternion onto the rig, whatever the framing", () => {
+  it("copies the rest camera’s quaternion onto the rig, whatever the framing", async () => {
     const cases: [CameraState | undefined, OrbitAxis][] = [
       [undefined, "y"], // the default framing every un-orbited tile gets
       [TURNED, "y"],
@@ -400,7 +402,7 @@ describe("the thumbnail rig is fixed in the rest camera’s frame", () => {
       [TURNED, "-x"], // a negated spindle: the rig follows the camera, not the axis
     ];
     for (const [state, axis] of cases) {
-      const { rig, camera } = drawn(state, axis);
+      const { rig, camera } = await drawn(state, axis);
       expect(rig.quaternion.angleTo(camera.quaternion)).toBeLessThan(1e-6);
       // The control, and it is load-bearing: a rig left at identity would pass
       // the line above for any camera that happened to be at identity too.
@@ -409,11 +411,11 @@ describe("the thumbnail rig is fixed in the rest camera’s frame", () => {
     }
   });
 
-  it("turns the rig when the framing turns, rather than fixing it to the world", () => {
+  it("turns the rig when the framing turns, rather than fixing it to the world", async () => {
     // Two framings, two rig orientations. Without this a rig copied *once* into
     // a module-level constant would satisfy the equality above forever.
-    const a = drawn(undefined, "y");
-    const b = drawn(TURNED, "y");
+    const a = await drawn(undefined, "y");
+    const b = await drawn(TURNED, "y");
     expect(a.rig.quaternion.angleTo(b.rig.quaternion)).toBeGreaterThan(0.1);
     expect(a.camera.quaternion.angleTo(b.camera.quaternion)).toBeGreaterThan(
       0.1,

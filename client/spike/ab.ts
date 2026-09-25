@@ -104,7 +104,12 @@ async function render(opts: RenderOpts): Promise<RenderResult> {
     axis = derived.axis;
     camera = derived.camera;
   }
-  const canvas = renderThumbnailCanvas(object, camera, axis, opts.ao ?? true);
+  const canvas = await renderThumbnailCanvas(
+    object,
+    camera,
+    axis,
+    opts.ao ?? true,
+  );
   return { axis, camera, pngDataUrl: canvas.toDataURL("image/png") };
 }
 
