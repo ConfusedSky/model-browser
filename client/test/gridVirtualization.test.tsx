@@ -229,6 +229,29 @@ describe("a Grid rendered alone", () => {
     },
   );
 
+  it("estimates the rows not yet drawn from a drawn row whose kinds changed under the same index", async () => {
+    installGridGeometry({ ...SHORT, rowHeights: { dirs: 150, models: 250 } });
+    await renderGrid([
+      ...Array.from({ length: 60 }, (_, i) => dir(`kit${i}`)),
+      ...MODELS(300),
+    ]);
+    // Folder rows grow once first measured. Scrolled away and back, rows 1–5
+    // are drawn anew at a height off their estimate, which TanStack caches by
+    // index; a row measured at its estimate would cache nothing.
+    installGridGeometry({ ...SHORT, rowHeights: { dirs: 160, models: 250 } });
+    await scrollTo(document.body, 1500);
+    expect(mountedRows()).not.toContain(1);
+    await scrollTo(document.body, 0);
+    expect(mountedRows()).toEqual(span(0, 5));
+
+    // A filter keeps the same row elements, now holding models, and no
+    // `measure()` has cleared that cache since.
+    await act(async () => {
+      root!.render(gridOf(MODELS(300), {}));
+    });
+    expect(bodyHeight()).toBe(`${100 * 250}px`);
+  });
+
   it("re-reads where the grid sits in the scroller on the next scroll frame", async () => {
     installGridGeometry(SHORT);
     await renderGrid(MODELS(600));
@@ -469,6 +492,95 @@ describe("the handle", () => {
     expect(toward.length).toBeLessThan(MAX_PLACE_TRIES);
     expect(frames.count()).toBeLessThan(MAX_PLACE_FRAMES);
   });
+
+  it.each([
+    [
+      "an anchor on a row the pin draws past the body",
+      "anchor",
+      98,
+      100,
+      30100,
+    ],
+    // A 250px row centred in 400px would need 75px past the listing's end.
+    [
+      "a centre on the last row, past the listing's end",
+      "center",
+      100,
+      101,
+      30600,
+    ],
+  ] as const)(
+    "lands %s without spending its tries on writes the body clamps",
+    async (_, kind, row, rows, landed) => {
+      // The pin draws the target's row, whose first measurement re-estimates
+      // every row in a commit that rendered the body at the old total: for a
+      // render the layout reaches past the body.
+      installGridGeometry({
+        ...SHORT,
+        rowHeights: { dirs: 150, models: 250, mixed: 400 },
+        scrollTiming: "production",
+      });
+      const entries = [
+        ...interleaved(),
+        ...Array.from({ length: rows * 3 - 300 }, (_, i) =>
+          model(`tail${i}.stl`),
+        ),
+      ];
+      await renderGrid(entries, { handle });
+      const target = entries[row * 3]!.path;
+      expect(tileOf(target)).toBeUndefined();
+
+      // The grid's own writes, apart from TanStack's `scrollTo` adjustments.
+      const seam = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        "scrollTop",
+      )!;
+      let adjusting = false;
+      let writes = 0;
+      const scrollTo = document.body.scrollTo.bind(document.body);
+      document.body.scrollTo = ((...args: Parameters<typeof scrollTo>) => {
+        adjusting = true;
+        try {
+          scrollTo(...args);
+        } finally {
+          adjusting = false;
+        }
+      }) as typeof scrollTo;
+      Object.defineProperty(document.body, "scrollTop", {
+        configurable: true,
+        get(this: HTMLElement) {
+          return seam.get!.call(this) as number;
+        },
+        set(this: HTMLElement, value: number) {
+          if (!adjusting) writes += 1;
+          seam.set!.call(this, value);
+        },
+      });
+      const frames = countPlacementFrames();
+      try {
+        await act(async () => {
+          handle.current!.place(
+            kind === "anchor"
+              ? { kind, path: target, offset: 0 }
+              : { kind, path: target },
+          );
+          await wait(300);
+        });
+      } finally {
+        frames.restore();
+        delete (document.body as unknown as Record<string, unknown>).scrollTop;
+        delete (document.body as unknown as Record<string, unknown>).scrollTo;
+      }
+      expect(document.body.scrollTop).toBe(landed);
+      expect(tileOf(target)!.getBoundingClientRect().top).toBe(
+        kind === "anchor" ? 0 : 150,
+      );
+      // Every write before `applyIn`'s is a try: the landing converged
+      // rather than running out of tries or frames.
+      expect(writes - 1).toBeLessThan(MAX_PLACE_TRIES);
+      expect(frames.count()).toBeLessThan(MAX_PLACE_FRAMES);
+    },
+  );
 
   it("centres a tile whose row is not drawn", async () => {
     installGridGeometry(SHORT, { tileGap: 20 });

@@ -496,6 +496,25 @@ describe("a column change keeps the top entry", () => {
     );
   });
 
+  it("keeps a top row that fills a view shorter than half of it", async () => {
+    install({ ...SHORT, viewport: 100, rowHeight: 250 });
+    await mountApp("/models", LONG);
+    // Row 100 fills the view with 110 of its 250px below the top: no other
+    // row shows, so m300 leads the top row, 56% of it scrolled past.
+    await scrollTo(100 * 250 + 140);
+
+    install({ ...SHORT, viewport: 100, rowHeight: 250, cols: 2 });
+    await click(
+      container.querySelector<HTMLButtonElement>('[data-tile-size="l"]')!,
+    );
+    await settle();
+    // m300 leads row 150, not m303 row 151.
+    expect(main().scrollTop).toBe(150 * 250 + 140);
+    expect(tile("/models/m300.stl")!.getBoundingClientRect().top).toBe(
+      SCROLLER_TOP - 140,
+    );
+  });
+
   it("keeps the top entry when the columns change right after content above the grid moved", async () => {
     await mountApp("/models", LONG);
     await scrollTo(20050);

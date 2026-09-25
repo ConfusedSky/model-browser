@@ -34,7 +34,6 @@ import {
   gridGeometryForTests,
   observeSeamOffset,
   observeSeamRect,
-  seamRowHeight,
   type RowComposition,
 } from "../lib/gridGeometry";
 import { applyIn, findTile, type Resolved } from "../lib/placement";
@@ -386,9 +385,12 @@ function Grid({
     measureElement: (el, entry, instance) => {
       const row = rowsRef.current[instance.indexFromElement(el)];
       const composition = row === undefined ? undefined : compositionOf(row);
+      // With no observer entry TanStack's own read answers its size cache,
+      // which holds whatever row last had this index; `offsetHeight` is the
+      // read it makes otherwise.
       const height =
-        geometry !== null
-          ? seamRowHeight(geometry, composition)
+        entry === undefined
+          ? el.offsetHeight
           : measureRowElement(el, entry, instance);
       measuredRowsRef.current.add(el);
       const c = compositionsRef.current;
@@ -410,6 +412,8 @@ function Grid({
   // measured again on their own: their ref is stable, and the observer does not
   // fire for a row whose size did not change. Measured here, before D10's
   // `measure()`, so the rows not drawn are estimated from them, not the fallback.
+  // Before paint on purpose, though `resizeItem` may then reach react-virtual's
+  // `flushSync` (a development warning): deferred, a frame draws the estimate.
   const remeasuredRef = useRef<Compositions | null>(null);
   useLayoutEffect(() => {
     const c = compositionsRef.current;
@@ -526,8 +530,8 @@ function Grid({
   /** An entry of the top row and the share of that row scrolled past, as of
    *  the last scroll frame (D9). A share, because a column change changes the
    *  row's height and a pixel offset can exceed the new one. The top row is
-   *  the first with at least half of itself showing: a sliver above it is not
-   *  what the user is reading. */
+   *  the first with at least half of itself showing, unless no other row
+   *  shows: a sliver above it is not what the user is reading. */
   const topRef = useRef<{
     entries: DirEntry[];
     index: number;
@@ -548,10 +552,11 @@ function Grid({
     );
     const cache = virtualizer.measurementsCache;
     let row = visible?.first;
-    if (row !== undefined) {
+    if (visible !== null && row !== undefined) {
       const first = cache[row]!;
-      if (first.end - at < first.size / 2 && cache[row + 1] !== undefined)
-        row += 1;
+      // Only to a row that shows: a row taller than twice the view can fill
+      // it with less than half of itself.
+      if (first.end - at < first.size / 2 && visible.last > row) row += 1;
     }
     const item = row === undefined ? undefined : cache[row];
     if (row === undefined || item === undefined) {
@@ -712,6 +717,15 @@ function Grid({
           : resolved.kind === "anchor"
             ? item.start - resolved.offset
             : item.start - (scroller.clientHeight - item.size) / 2;
+      const renderedMax = scroller.scrollHeight - scroller.clientHeight;
+      const layoutMax =
+        virtualizer.options.scrollMargin +
+        virtualizer.getTotalSize() -
+        scroller.clientHeight;
+      // The body lags the layout by a render, and a write it clamps moves
+      // nothing the landing can keep.
+      if (target !== undefined && Math.min(target, layoutMax) > renderedMax + 1)
+        return;
       // An anchor offset past its row's estimated height lands the row just
       // above the view. Writing the same offset again fires no scroll and
       // measures nothing, so it waits below with a landing already there.

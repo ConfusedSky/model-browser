@@ -1,11 +1,13 @@
 // The grid's geometry for happy-dom, which lays nothing out (grid-virtualization
 // D13). `installGridGeometry` hands `Grid` its numbers through the src seam and
-// makes the DOM report the same ones: the scroller's rect and `clientHeight`,
-// the grid body's rect, each row's and each tile's, and a `scroll` event on
-// every `scrollTop` change, as a browser fires one. `test/setup.ts` installs a
-// tall default before every happy-dom cell; a cell that needs a short viewport
-// installs its own, before the mount or again after it. Under `scrollTiming:
-// "production"` the scroll event comes a frame after the write and a
+// makes the DOM report the same ones: the scroller's rect, `clientHeight` and
+// `scrollHeight`, the grid body's rect, each row's rect and `offsetHeight` (so
+// `Grid` measures rows as it does in a browser), each tile's rect, and a
+// `scroll` event on every `scrollTop` change, as a browser fires one.
+// `test/setup.ts` installs a tall default before every happy-dom cell; a cell
+// that needs a short viewport installs its own, before the mount or again
+// after it. Under `scrollTiming: "production"` the scroll event comes a frame
+// after the write, a write is clamped to the content drawn, and a
 // `ResizeObserver` reports sizes a frame after they appear or change, after
 // that frame's scroll events, so a cell sees a browser's order of events
 // rather than a synchronous one.
@@ -33,6 +35,8 @@ export const DEFAULT_GRID_GEOMETRY: GridGeometry = {
 interface Saved {
   rect: PropertyDescriptor | undefined;
   clientHeight: PropertyDescriptor | undefined;
+  scrollHeight: PropertyDescriptor | undefined;
+  offsetHeight: PropertyDescriptor | undefined;
   scrollTop: PropertyDescriptor | undefined;
   resizeObserver: typeof ResizeObserver | undefined;
 }
@@ -163,6 +167,8 @@ export function installGridGeometry(
   saved = {
     rect: Object.getOwnPropertyDescriptor(proto, "getBoundingClientRect"),
     clientHeight: Object.getOwnPropertyDescriptor(proto, "clientHeight"),
+    scrollHeight: Object.getOwnPropertyDescriptor(proto, "scrollHeight"),
+    offsetHeight: Object.getOwnPropertyDescriptor(proto, "offsetHeight"),
     scrollTop: Object.getOwnPropertyDescriptor(proto, "scrollTop"),
     resizeObserver: window.ResizeObserver,
   };
@@ -174,6 +180,21 @@ export function installGridGeometry(
   const written = new Set<HTMLElement>();
   const originalRect = Element.prototype.getBoundingClientRect;
   const clientHeight = Object.getOwnPropertyDescriptor(proto, "clientHeight")!;
+  const scrollHeight = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "scrollHeight",
+  )!;
+  /** The scroller's content: what lies above the grid, then its body. By
+   *  default unbounded, as its writes are never clamped; under production
+   *  timing clamped as a browser clamps them. */
+  const extentOf = (el: HTMLElement): number | null => {
+    const found = scrollerAndBody();
+    if (found === null || found.scroller !== el) return null;
+    if (!production) return Number.MAX_SAFE_INTEGER;
+    const body = Number.parseFloat(found.body.style.height) || 0;
+    return Math.max(g.viewport, g.gridTop + body);
+  };
+  const offsetHeight = Object.getOwnPropertyDescriptor(proto, "offsetHeight")!;
   const scrollTop = Object.getOwnPropertyDescriptor(
     Element.prototype,
     "scrollTop",
@@ -214,12 +235,29 @@ export function installGridGeometry(
       return originalRect.call(this);
     },
   });
+  Object.defineProperty(proto, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement): number {
+      const body = scrollerAndBody()?.body;
+      return body !== undefined &&
+        this.parentElement === body &&
+        this.dataset.index !== undefined
+        ? seamRowHeight(g, compositionOf(this))
+        : (offsetHeight.get!.call(this) as number);
+    },
+  });
   Object.defineProperty(proto, "clientHeight", {
     configurable: true,
     get(this: HTMLElement): number {
       return scrollerAndBody()?.scroller === this
         ? g.viewport
         : (clientHeight.get!.call(this) as number);
+    },
+  });
+  Object.defineProperty(proto, "scrollHeight", {
+    configurable: true,
+    get(this: HTMLElement): number {
+      return extentOf(this) ?? (scrollHeight.get!.call(this) as number);
     },
   });
   Object.defineProperty(proto, "scrollTop", {
@@ -229,7 +267,13 @@ export function installGridGeometry(
     },
     set(this: HTMLElement, value: number) {
       const before = scrollTop.get!.call(this);
-      scrollTop.set!.call(this, value);
+      const extent = extentOf(this);
+      scrollTop.set!.call(
+        this,
+        extent === null
+          ? value
+          : Math.max(0, Math.min(value, extent - g.viewport)),
+      );
       if (scrollTop.get!.call(this) === before) return;
       if (!production) {
         this.dispatchEvent(new Event("scroll"));
@@ -254,6 +298,8 @@ export function resetGridGeometry(): void {
   for (const key of [
     "getBoundingClientRect",
     "clientHeight",
+    "scrollHeight",
+    "offsetHeight",
     "scrollTop",
   ] as const) {
     const was = saved[key === "getBoundingClientRect" ? "rect" : key];

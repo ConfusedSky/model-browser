@@ -24,9 +24,10 @@ export interface GridGeometry {
    *  `isScrollingResetDelay` passes without one, and `test/gridGeometry.ts`
    *  fires the scroll event and then the rows' `ResizeObserver` entries a
    *  frame later, as a browser does — so a row mounted by a scroll is measured
-   *  only after the commit that drew it. Unset,
-   *  never scrolling, and rows are measured as they mount. Install it before
-   *  the grid mounts: TanStack creates its observer once. */
+   *  only after the commit that drew it — and clamps a `scrollTop` write to
+   *  the body as drawn. Unset, never scrolling, rows are measured as they
+   *  mount, and a write is never clamped. Install it before the grid mounts:
+   *  TanStack creates its observer once. */
   scrollTiming?: "production";
 }
 
