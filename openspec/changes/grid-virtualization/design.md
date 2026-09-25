@@ -205,14 +205,16 @@ at one column (D2), so everything waits for `colsReady`. A layout effect after e
 converges: while TanStack's offset has not caught up with `scrollTop` it waits; while the target
 row is not visible it writes `scrollTop` raw to the row's current start (the first pass is the
 phase 1 above); while a measurement has moved the row since this commit drew it, it waits again;
-and while any row in the visible range is still unmeasured, or a D10 `measure()` is pending, it
-waits too; then `applyIn` lands it. "Measured" is `Grid`'s own record — a set of the row
+and while any row in the visible range is still unmeasured it waits too (a D10 `measure()` runs
+in an earlier layout effect of the same commit, so the rows it moves are caught by the moved-row
+test); then `applyIn` lands it. "Measured" is `Grid`'s own record — a set of the row
 *elements* its `measureElement` option has answered for — because TanStack's size cache cannot
 say it: `resizeItem` stores nothing when a measurement equals the estimate, and a `measure()`
-clears the mounted rows' sizes without their being measured again. A record by row index would
-outlive the listing (row keys are indexes, and a row stays mounted across a new listing). Its one
-limit: a row element kept mounted across a re-chunk counts as measured before its
-`ResizeObserver` reports the new height; TanStack compensates that for rows above the view. (Implementation review, pass 1, 2026-09-25: without that wait
+clears the mounted rows' sizes without their being measured again. What the element record
+guarantees is that rows *drawn by the landing's own scroll* — new elements — are waited for. Its
+limit: a row element reused from before the landing (kept mounted near the top, across a new
+listing, or across a re-chunk, all under the same index key) counts as measured before its
+`ResizeObserver` reports any new height; TanStack compensates that for rows above the view. (Implementation review, pass 1, 2026-09-25: without that wait
 a far anchor below rows of a composition not yet measured drifts after landing.) Measuring the
 rows around a write, and D10's `measure()` on a
 composition's first height, can both move a far row after a one-shot `applyIn`, which is why the

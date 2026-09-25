@@ -550,10 +550,10 @@ function Grid({
         : { entries, index, path: entry.path, offset: item.start - at };
   }, [virtualizer]);
 
-  /** Nothing is left to move the rows on screen: each has been measured, and
-   *  no composition's first height waits to re-estimate the rows above. */
+  /** Every row on screen has been measured. A composition's first height is
+   *  not checked here: D10's `measure()` runs in an earlier layout effect of
+   *  the same commit, and the rows it moves fail the caller's moved-row test. */
   const settledOn = (visible: RowRange | null): boolean => {
-    if (compositionsRef.current?.remeasure === true) return false;
     if (visible === null) return true;
     for (let i = visible.first; i <= visible.last; i++) {
       const el = virtualizer.elementsCache.get(
@@ -692,6 +692,8 @@ function Grid({
   // waits for, and gives up waiting after `MAX_PLACE_FRAMES`.
   useEffect(() => {
     if (placing === null) return;
+    // Named: gridVirtualization.test.tsx counts this loop's frames by the
+    // callback's name to prove a landing converged rather than timed out.
     let frame = requestAnimationFrame(function tick() {
       placeFramesRef.current += 1;
       rerender();
