@@ -406,6 +406,23 @@ function Grid({
         }
       : {}),
   });
+  // A reset of the record empties it, and the rows already drawn are not
+  // measured again on their own: their ref is stable, and the observer does not
+  // fire for a row whose size did not change. Measured here, before D10's
+  // `measure()`, so the rows not drawn are estimated from them, not the fallback.
+  const remeasuredRef = useRef<Compositions | null>(null);
+  useLayoutEffect(() => {
+    const c = compositionsRef.current;
+    if (c === remeasuredRef.current) return;
+    remeasuredRef.current = c;
+    for (const el of virtualizer.elementsCache.values()) {
+      if (!el.isConnected) continue;
+      virtualizer.resizeItem(
+        virtualizer.indexFromElement(el),
+        virtualizer.options.measureElement(el, undefined, virtualizer),
+      );
+    }
+  });
   // A measurement re-estimates only the rows after the one measured, so a
   // composition's first height re-estimates every row not drawn yet, those
   // above the view included. Deferred to after the

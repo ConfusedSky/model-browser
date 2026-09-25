@@ -196,6 +196,39 @@ describe("a Grid rendered alone", () => {
     expect(bodyHeight()).toBe(`${10 * 150 + 100 * 250}px`);
   });
 
+  it.each([
+    ["a new listing array with a row added far below", 3, 201],
+    ["a new column count", 2, 300],
+  ])(
+    "keeps the drawn rows' measured height through %s that draws no new row",
+    async (_, cols, count) => {
+      // The fallback is 220, every row measures 250.
+      const measured = {
+        ...SHORT,
+        rowHeight: 220,
+        rowHeights: { models: 250 },
+      };
+      installGridGeometry(measured);
+      await renderGrid(MODELS(600));
+      expect(mountedRows()).toEqual(span(0, 4));
+      expect(bodyHeight()).toBe(`${200 * 250}px`);
+
+      installGridGeometry({ ...measured, cols });
+      const entries = cols === 3 ? MODELS(603) : MODELS(600);
+      await act(async () => {
+        root!.render(gridOf(entries, {}));
+      });
+      expect(mountedRows()).toEqual(span(0, 4));
+      const starts = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          "[data-grid-body] > [data-index]",
+        ),
+      ).map((row) => row.style.transform);
+      expect(starts).toEqual(span(0, 4).map((i) => `translateY(${i * 250}px)`));
+      expect(bodyHeight()).toBe(`${count * 250}px`);
+    },
+  );
+
   it("re-reads where the grid sits in the scroller on the next scroll frame", async () => {
     installGridGeometry(SHORT);
     await renderGrid(MODELS(600));
