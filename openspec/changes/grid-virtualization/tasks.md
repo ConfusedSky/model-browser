@@ -43,6 +43,21 @@
 
 - [x] 6.1 `bun run typecheck`, `bun run test` and `bun run format:check` pass; `openspec validate grid-virtualization` passes.
   - 2026-09-25: both workspaces typecheck; client 89 files / 1189 passed, server 31 files / 950 passed; format:check clean; validate clean.
-- [ ] 6.2 Grep the tests for every scenario of the two delta specs and list, in this line's note, the cell that covers each or "6.3 only".
+- [x] 6.2 Grep the tests for every scenario of the two delta specs and list, in this line's note, the cell that covers each or "6.3 only".
+  - 2026-09-25 (at 5d43a35): cells found for every scenario but one; partial ones leave the real-layout half to 6.3.
+    - *keeps a screenful* → gridVirtualization "mounts only the rows near the view …"; *scrolling brings tiles in* → same cell for drawing, presses/menu 6.3 only, hover nowhere;
+    - *back far* → gridHandle "Back to a place far down …"; *reveal far* → gridHandle "a reveal far down a folder …" (identity case: 6.3, see 7.1);
+    - *ArrowDown* → gridHandle "ArrowDown from the first row visits every row"; *Tabbing through* → partial (Tab/Shift+Tab after scrolling away, ends), repeated Tab 6.3 only;
+    - *focus not lost* → gridVirtualization "stays in the document, focused …"; *Tab after scrolling away* → gridHandle; *Escape from the path bar* → mechanism only (gridVirtualization, via the search input), end to end 6.3;
+    - *lightbox stepped far* → gridHandle "a close after stepping past the drawn rows …"; *up to a far folder* → gridHandle; *resize keeps the top entry* → gridHandle m→s (tile size), window resize 6.3;
+    - model-thumbnails: *below the drawn rows is near* → gridVirtualization "ranks and peeks a folder below …" + gridBands; *far, not unreported* → gridBands + the same cell; *scrolling re-ranks never-drawn tiles* → no direct cell (gridBands `layoutRanges`, the within-row publish cell's control), 6.3 cannot show render order on a baked, write-refusing deployment.
 - [ ] 6.3 Drive the production build in headless Playwright: back to a far anchor, reveal far down, ArrowDown and Tab past the first screen, Tab into the grid from the header, Escape from the path bar after scrolling, lightbox stepped far then closed, resize and tile-size change, folder previews and thumbnails filling below the first screen, D2's column count, 2.3's mounted-tile bound, 3.3's computed play states, and D12's `complete` on a remounted lazy image. Verify each by measurement (`getBoundingClientRect`, `document.activeElement`, computed style), not by screenshot.
+  - 2026-09-25 (at 5d43a35, library 70b60f0d, headless Chromium, 390×844 touch and 1400×1000): 10 of 12 pass — mounted bound (12–22 tiles at 390, 77 at 1400), columns per size at both widths, back to a far anchor (Δ 0 px, 4/4), ArrowDown and Tab ×40 in order, Tab from the header, Escape from the path bar after scrolling, lightbox stepped 31/50 past the mounted rows then closed, previews and images filling at 50 %, paused/running play states by row, remounted lazy images `complete` at mount (D12's assumption confirmed). FAILED: reveal far down (marked, not centred: the pending place is dropped when a follow-up listing re-creates `entries`) → 7.1; the top entry drifting across successive column changes → 7.2. Re-run both after the fix round.
 - [ ] 6.4 Hand the owner the tailnet preview for a phone check of a long flat view: momentum fling, scroll back up, return to a folder. Leave this line open until the owner has judged it.
+
+## 7. Fix rounds from review and verification
+
+- [ ] 7.1 A pending landing survives a new `entries` array with the target still in it (reveal lost its centring when a follow-up listing re-created the array). Verify with a cell that re-renders with a same-content array before the landing completes, falsified by restoring the identity check, and re-run 6.3's reveal item.
+- [ ] 7.2 D9 keeps the recorded entry while it stays in the top visible row, so successive column changes do not drift. Verify with a two-step column change cell, and re-run 6.3's resize item.
+- [ ] 7.3 Implementation review pass 1: the landing waits for every visible row to be measured and for any pending D10 `measure()`; the seam gains `scrollTiming: "production"` with a fake `ResizeObserver`; `recordTop` runs before the margin early return; the handle's empty-state doc; the no-grid fallback cell; "stage" wording out of code comments. Verify with the production-timing far-anchor cell (falsified by removing the wait) and the fallback cell.
+
