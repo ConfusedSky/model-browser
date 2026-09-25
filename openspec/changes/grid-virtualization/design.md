@@ -192,6 +192,25 @@ Where no grid is mounted — the empty state, the error notice, the commit on wh
 comes down — `handle.current` is null and the call sites fall through exactly as `applyIn`
 returning false and an absent tile do today.
 
+**How a landing runs** (stage C check-in, 2026-09-25). The handle keeps two pending slots,
+`placing` and `focusing` — the ↑ landing places the parent's anchor and focuses the child folder in
+the same landing, and the two may lie in different far rows — each tagged with the entries it was
+raised against and dropped when they change; the range extractor keeps both rows mounted. `place`
+does no DOM work itself: App places in exactly the commit where a fresh grid may still be chunked
+at one column (D2), so everything waits for `colsReady`. A layout effect after every commit then
+converges: while TanStack's offset has not caught up with `scrollTop` it waits; while the target
+row is not visible it writes `scrollTop` raw to the row's current start (the first pass is the
+phase 1 above); while a measurement has moved the row since this commit drew it, it waits again;
+then `applyIn` lands it. Measuring the rows around a write, and D10's `measure()` on a
+composition's first height, can both move a far row after a one-shot `applyIn`, which is why the
+landing converges rather than applying once. It is bounded: at most four passes, re-checked every
+animation frame while pending (not only on `scroll`, which a write equal to the current offset
+never fires), and after a fixed number of frames `applyIn` runs and the slot clears, so a missed
+event cannot leave a grid unlanded or a row pinned. `focusEntry` focuses synchronously when the
+columns are known and the tile is mounted — every case that is mounted today keeps today's
+timing — and otherwise defers through `focusing`. With no grid mounted, App still writes
+`scrollTop = 0` for a `top` landing, as `applyIn` did on the empty notice.
+
 `measureIn` stays a DOM walk (D3).
 
 Call sites move as follows. Each keeps its existing deferral: the weak set's "Show all" still
@@ -232,9 +251,11 @@ so stepping tile to tile is exactly the sequence native Tab produced.
 `closeViewer` focuses the tile of `viewer.entry` through the handle. Today that happens exactly
 when `originEl` is non-null at close: a view opened from a tile, or any view after a step whose
 tile was in the grid (all of them were). The viewer state therefore carries
-`returnsFocus: boolean`, true when opened from a tile and set by `navigateSibling` when the
-stepped-to entry is shown; a deep-linked view that was never stepped still returns focus to
-nothing. `originEl` remains only where it is still read at open, for the overlay's rect.
+`returnsFocus: boolean` in place of `originEl` — true when opened from a tile, false for a view
+restored from the URL, and set by `navigateSibling` when the stepped-to entry is shown; a
+deep-linked view that was never stepped still returns focus to nothing. `originEl` is removed: the
+open rect is taken from the pressed element passed to `onModelPointerDown`/`openLightbox`, and
+nothing else read the field. (Stage C check-in, 2026-09-25.)
 
 ### D9. A column change keeps the top entry
 
@@ -242,8 +263,10 @@ nothing. `originEl` remains only where it is still read at open, for the overlay
 row's offset from the scrollport top. When `cols` changes — a resize or a tile-size change — the
 rows are re-chunked, `virtualizer.measure()` clears TanStack's size cache (keyed by row index,
 so every index would otherwise keep the height of the row that held it before the re-chunk),
-and, in the same layout pass, a raw `scrollTop` write (D6) puts the row now holding that entry at
-the same offset; the corrections as rows are measured are the ordinary D10 ones. Tile size is
+and, in the same layout pass, the entry is placed at that offset through the handle's own landing
+(D6) — whose first pass is the raw `scrollTop` write, and whose convergence makes it exact where
+the compositions reset on a column change and the estimates fall back to the per-size constant.
+A place App raises in the same commit wins, since App's layout effect runs after the grid's. Tile size is
 App state passed to `Grid` as `size`, so both causes arrive through the same `cols` change.
 
 ### D10. Estimated heights by row composition
@@ -309,8 +332,11 @@ one source of numbers for everything that measures:
   measuring a row while scrolling, and happy-dom's `ResizeObserver` never fires, so a row mounted
   during a test's scroll would never be measured; it also keeps TanStack's debounce timers from
   firing outside `act`;
-- optional per-composition `rowHeights`, answered only by the seam's `measureElement`, let a cell
-  tell compositions apart (D10); the rect stub stays uniform;
+- optional per-composition `rowHeights`, answered by the seam's `measureElement`, let a cell tell
+  compositions apart (D10); the rect stub then places each mounted row at its own `translateY` and
+  sizes it by its composition's height, as a browser lays it out — identical to a uniform stub
+  when `rowHeights` is unset — so an estimate error is real under the seam and is corrected as
+  rows are measured, rather than TanStack and the DOM disagreeing for good;
 - happy-dom's `scrollTop` setter fires no `scroll` event, so the seam wraps the scroller's
   `scrollTop` setter to dispatch one, as the browser does; its `observeElementOffset` reads
   `scrollTop` on that event as TanStack's default does. The grid's own raw writes (`place`,
