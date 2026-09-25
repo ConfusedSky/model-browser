@@ -206,7 +206,13 @@ converges: while TanStack's offset has not caught up with `scrollTop` it waits; 
 row is not visible it writes `scrollTop` raw to the row's current start (the first pass is the
 phase 1 above); while a measurement has moved the row since this commit drew it, it waits again;
 and while any row in the visible range is still unmeasured, or a D10 `measure()` is pending, it
-waits too; then `applyIn` lands it. (Implementation review, pass 1, 2026-09-25: without that wait
+waits too; then `applyIn` lands it. "Measured" is `Grid`'s own record — a set of the row
+*elements* its `measureElement` option has answered for — because TanStack's size cache cannot
+say it: `resizeItem` stores nothing when a measurement equals the estimate, and a `measure()`
+clears the mounted rows' sizes without their being measured again. A record by row index would
+outlive the listing (row keys are indexes, and a row stays mounted across a new listing). Its one
+limit: a row element kept mounted across a re-chunk counts as measured before its
+`ResizeObserver` reports the new height; TanStack compensates that for rows above the view. (Implementation review, pass 1, 2026-09-25: without that wait
 a far anchor below rows of a composition not yet measured drifts after landing.) Measuring the
 rows around a write, and D10's `measure()` on a
 composition's first height, can both move a far row after a one-shot `applyIn`, which is why the
@@ -337,8 +343,9 @@ one source of numbers for everything that measures:
   rather than a rect;
 - by default the seam's `observeElementOffset` always reports `isScrolling: false`, and an opt-in
   `scrollTiming: "production"` instead reports scrolling on each `scroll` and stops a frame after
-  the last, with a fake `ResizeObserver` delivering row measurements a frame after the commit, as
-  a browser does — the landing's wait for measured rows is only falsifiable under it. The default: TanStack skips
+  the last, with a fake `ResizeObserver` delivering row measurements a frame after the commit and
+  the `scroll` event of a `scrollTop` write delivered on the next frame rather than synchronously
+  inside the landing's layout effect, as a browser does — the landing's wait for measured rows is only falsifiable under it. The default: TanStack skips
   measuring a row while scrolling, and happy-dom's `ResizeObserver` never fires, so a row mounted
   during a test's scroll would never be measured; it also keeps TanStack's debounce timers from
   firing outside `act`;
