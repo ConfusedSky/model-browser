@@ -84,6 +84,9 @@ export interface GridHandle {
 interface Placing {
   resolved: Exclude<Resolved, { kind: "top" }>;
   tries: number;
+  /** A column change's landing (D9): the share of the anchor's row scrolled
+   *  past, which stands in for `offset` against the row's height at landing. */
+  fraction?: number;
 }
 interface Focusing {
   path: string;
@@ -91,7 +94,7 @@ interface Focusing {
 }
 /** Raw writes a placement may make toward its row before `applyIn` lands it:
  *  each can draw a composition for the first time and re-estimate the rows. */
-const MAX_PLACE_TRIES = 4;
+export const MAX_PLACE_TRIES = 4;
 /** Frames a placement may wait for TanStack to hear a scroll, so a missed
  *  event cannot leave the grid unlanded and the row pinned. */
 export const MAX_PLACE_FRAMES = 10;
@@ -503,13 +506,16 @@ function Grid({
   // listing, previews or columns all arrive as renders.
   useEffect(sync);
 
-  /** An entry of the top visible row and that row's offset from the
-   *  scrollport's top, as of the last scroll frame (D9). */
+  /** An entry of the top row and the share of that row scrolled past, as of
+   *  the last scroll frame (D9). A share, because a column change changes the
+   *  row's height and a pixel offset can exceed the new one. The top row is
+   *  the first with at least half of itself showing: a sliver above it is not
+   *  what the user is reading. */
   const topRef = useRef<{
     entries: DirEntry[];
     index: number;
     path: string;
-    offset: number;
+    fraction: number;
   } | null>(null);
   const recordTop = useCallback((): void => {
     virtualizer.calculateRange();
@@ -523,11 +529,15 @@ function Grid({
       at,
       virtualizer.scrollRect?.height ?? 0,
     );
-    const item =
-      visible === null
-        ? undefined
-        : virtualizer.measurementsCache[visible.first];
-    if (visible === null || item === undefined) {
+    const cache = virtualizer.measurementsCache;
+    let row = visible?.first;
+    if (row !== undefined) {
+      const first = cache[row]!;
+      if (first.end - at < first.size / 2 && cache[row + 1] !== undefined)
+        row += 1;
+    }
+    const item = row === undefined ? undefined : cache[row];
+    if (row === undefined || item === undefined) {
       topRef.current = null;
       return;
     }
@@ -540,14 +550,17 @@ function Grid({
         ? undefined
         : indexOfRef.current.get(topRef.current.path);
     const index =
-      kept !== undefined && Math.floor(kept / cols) === visible.first
-        ? kept
-        : visible.first * cols;
+      kept !== undefined && Math.floor(kept / cols) === row ? kept : row * cols;
     const entry = entries[index];
     topRef.current =
       entry === undefined
         ? null
-        : { entries, index, path: entry.path, offset: item.start - at };
+        : {
+            entries,
+            index,
+            path: entry.path,
+            fraction: Math.max((at - item.start) / item.size, 0),
+          };
   }, [virtualizer]);
 
   /** Every row on screen has been measured. A composition's first height is
@@ -623,8 +636,9 @@ function Grid({
     if (entry === undefined || placing !== null) return;
     placeFramesRef.current = 0;
     setPlacing({
-      resolved: { kind: "anchor", path: entry.path, offset: top!.offset },
+      resolved: { kind: "anchor", path: entry.path, offset: 0 },
       tries: 0,
+      fraction: top!.fraction,
     });
   });
 
@@ -658,25 +672,37 @@ function Grid({
     const overdue =
       placing.tries >= MAX_PLACE_TRIES ||
       placeFramesRef.current >= MAX_PLACE_FRAMES;
+    const row = Math.floor(index / cols);
+    virtualizer.calculateRange();
+    const item = virtualizer.measurementsCache[row];
+    const resolved =
+      placing.fraction === undefined || item === undefined
+        ? placing.resolved
+        : { ...placing.resolved, offset: -placing.fraction * item.size };
     if (!overdue) {
       // TanStack hears a write on the scroll event; until then it draws the
       // old offset's rows. The frame loop below checks again.
       if (Math.abs((virtualizer.scrollOffset ?? 0) - scroller.scrollTop) >= 1)
         return;
-      const row = Math.floor(index / cols);
-      virtualizer.calculateRange();
-      const item = virtualizer.measurementsCache[row];
       const drawn = virtualRows.find((r) => r.index === row);
       const onScreen =
         visibleRows !== null &&
         row >= visibleRows.first &&
         row <= visibleRows.last;
-      if (item !== undefined && (!onScreen || drawn?.start !== item.start)) {
-        if (!onScreen)
-          scroller.scrollTop =
-            placing.resolved.kind === "anchor"
-              ? item.start - placing.resolved.offset
-              : item.start - (scroller.clientHeight - item.size) / 2;
+      const target =
+        item === undefined
+          ? undefined
+          : resolved.kind === "anchor"
+            ? item.start - resolved.offset
+            : item.start - (scroller.clientHeight - item.size) / 2;
+      // An anchor offset past its row's estimated height lands the row just
+      // above the view. Writing the same offset again fires no scroll and
+      // measures nothing, so it waits below with a landing already there.
+      const reached =
+        onScreen ||
+        (target !== undefined && Math.abs(scroller.scrollTop - target) < 1);
+      if (item !== undefined && (!reached || drawn?.start !== item.start)) {
+        if (!reached) scroller.scrollTop = target!;
         setPlacing({ ...placing, tries: placing.tries + 1 });
         return;
       }
@@ -685,7 +711,7 @@ function Grid({
       // would be undone. The frame loop checks again.
       if (!settledOn(visibleRows)) return;
     }
-    applyIn(scroller, placing.resolved);
+    applyIn(scroller, resolved);
     setPlacing(null);
   });
   // A placement re-checks every frame, not only on the scroll events it

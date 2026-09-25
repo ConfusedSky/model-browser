@@ -20,10 +20,11 @@ export interface GridGeometry {
   /** The grid body's offset from the scroller's content top. */
   gridTop: number;
   rowHeights?: Partial<Record<RowComposition, number>>;
-  /** `"production"`: a scroll is heard as scrolling until a frame passes
-   *  without one, and `test/gridGeometry.ts` fires the scroll event and the
-   *  rows' `ResizeObserver` entries a frame later, as a browser does — so a row
-   *  mounted by a scroll is measured only after the commit that drew it. Unset,
+  /** `"production"`: a scroll is heard as scrolling until TanStack's
+   *  `isScrollingResetDelay` passes without one, and `test/gridGeometry.ts`
+   *  fires the scroll event and then the rows' `ResizeObserver` entries a
+   *  frame later, as a browser does — so a row mounted by a scroll is measured
+   *  only after the commit that drew it. Unset,
    *  never scrolling, and rows are measured as they mount. Install it before
    *  the grid mounts: TanStack creates its observer once. */
   scrollTiming?: "production";
@@ -57,9 +58,9 @@ export function observeSeamRect(
  * default reads it. By default never "scrolling": TanStack skips measuring a
  * row while scrolling and leaves the catch-up to a `ResizeObserver` happy-dom
  * never fires, and its scroll-end debounce would fire outside `act`. Under
- * `scrollTiming: "production"` it is scrolling until a frame passes with no
- * scroll, as TanStack's debounce does, and the test helper's observer does the
- * catching up.
+ * `scrollTiming: "production"` it is scrolling until TanStack's debounce
+ * passes with no scroll, as its own observer does, and the test helper's
+ * observer does the catching up.
  */
 export function observeSeamOffset(
   g: GridGeometry,
@@ -70,22 +71,22 @@ export function observeSeamOffset(
   return (instance, cb) => {
     const el = instance.scrollElement;
     if (el === null) return () => {};
-    let end: number | null = null;
+    let end: ReturnType<typeof setTimeout> | null = null;
     const onScroll =
       g.scrollTiming === "production"
         ? (): void => {
-            if (end !== null) cancelAnimationFrame(end);
-            end = requestAnimationFrame(() => {
+            if (end !== null) clearTimeout(end);
+            end = setTimeout(() => {
               end = null;
               cb(el.scrollTop, false);
-            });
+            }, instance.options.isScrollingResetDelay);
             cb(el.scrollTop, true);
           }
         : (): void => cb(el.scrollTop, false);
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
-      if (end !== null) cancelAnimationFrame(end);
+      if (end !== null) clearTimeout(end);
     };
   };
 }

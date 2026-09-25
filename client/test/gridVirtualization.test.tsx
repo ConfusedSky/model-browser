@@ -8,6 +8,7 @@
 // `./appHarness` before any `../src/...` module (the renderer-mock ordering
 // rule).
 import { act } from "react";
+import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DirEntry, DirListing } from "../../shared/types";
@@ -24,6 +25,7 @@ import {
 import { installGridGeometry } from "./gridGeometry";
 import Grid, {
   MAX_PLACE_FRAMES,
+  MAX_PLACE_TRIES,
   type GridHandle,
 } from "../src/components/Grid";
 import type { ThumbState } from "../src/hooks/useThumbnails";
@@ -358,6 +360,80 @@ describe("the handle", () => {
     // Converged: the frame cap lands regardless, and must not be the fix.
     // It did wait, for the scroll a frame after the write.
     expect(frames.count()).toBeGreaterThan(0);
+    expect(frames.count()).toBeLessThan(MAX_PLACE_FRAMES);
+  });
+
+  it("lands an anchor past its row's estimated height without spending its tries on writes that go nowhere", async () => {
+    // Folder rows measured at the top, model rows below never drawn: every
+    // model row is estimated at the folders' 170px until one is measured at
+    // 193. Raised while the grid scrolls, as a column change's landing is, the
+    // anchor's own row is not measured when the pin draws it. An offset of
+    // -180 then lands row 80 just above the view by the estimates, where a
+    // second write of the same offset fires no scroll and measures nothing.
+    installGridGeometry({
+      ...SHORT,
+      rowHeight: 170,
+      rowHeights: { models: 193 },
+      scrollTiming: "production",
+    });
+    const entries = [
+      ...Array.from({ length: 30 }, (_, i) => dir(`kit${i}`)),
+      ...MODELS(570),
+    ];
+    await renderGrid(entries, { handle });
+    const target = entries[80 * 3]!.path;
+    expect(tileOf(target)).toBeUndefined();
+
+    const seam = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollTop",
+    )!;
+    let placed = false;
+    const writes: { from: number; to: number }[] = [];
+    Object.defineProperty(document.body, "scrollTop", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return seam.get!.call(this) as number;
+      },
+      set(this: HTMLElement, value: number) {
+        if (placed)
+          writes.push({ from: seam.get!.call(this) as number, to: value });
+        seam.set!.call(this, value);
+      },
+    });
+    // Raised from a resize observation while the grid scrolls, as a column
+    // change's is: the anchor's row it draws is measured a frame later, after
+    // that frame's scroll events.
+    const observer = new ResizeObserver(() => {
+      observer.disconnect();
+      placed = true;
+      flushSync(() =>
+        handle.current!.place({ kind: "anchor", path: target, offset: -180 }),
+      );
+    });
+    // Outside `act`, which would hold every render back to its end while the
+    // frames, the scroll events and the measurements ran on: React renders
+    // when a browser's would.
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+    env.IS_REACT_ACT_ENVIRONMENT = false;
+    const frames = countPlacementFrames();
+    try {
+      document.body.scrollTop = 20;
+      observer.observe(document.querySelector("[data-grid-body]")!);
+      await new Promise((r) => setTimeout(r, 300));
+    } finally {
+      frames.restore();
+      env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+      delete (document.body as unknown as Record<string, unknown>).scrollTop;
+    }
+    expect(document.body.scrollTop).toBe(10 * 170 + 70 * 193 + 180);
+    expect(tileOf(target)!.getBoundingClientRect().top).toBe(-180);
+    // Every write before `applyIn`'s moved the view, and the landing
+    // converged rather than running out of tries or frames.
+    const toward = writes.slice(0, -1);
+    expect(toward.every((w) => Math.abs(w.to - w.from) >= 1)).toBe(true);
+    expect(toward.length).toBeLessThan(MAX_PLACE_TRIES);
     expect(frames.count()).toBeLessThan(MAX_PLACE_FRAMES);
   });
 

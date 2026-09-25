@@ -6,8 +6,9 @@
 // tall default before every happy-dom cell; a cell that needs a short viewport
 // installs its own, before the mount or again after it. Under `scrollTiming:
 // "production"` the scroll event comes a frame after the write and a
-// `ResizeObserver` reports sizes a frame after they appear or change, so a
-// cell sees a browser's order of events rather than a synchronous one.
+// `ResizeObserver` reports sizes a frame after they appear or change, after
+// that frame's scroll events, so a cell sees a browser's order of events
+// rather than a synchronous one.
 import {
   seamRowHeight,
   setGridGeometryForTests,
@@ -64,6 +65,25 @@ function compositionOf(row: HTMLElement): RowComposition {
   return models === 0 ? "dirs" : models === tiles ? "models" : "mixed";
 }
 
+/** Work for the next frame, run in a browser's order: every `scroll` event,
+ *  then every resize observation, so the commit a scroll causes runs before
+ *  the rows it drew are measured. */
+const frameWork: Record<"scroll" | "resize", (() => void)[]> = {
+  scroll: [],
+  resize: [],
+};
+let frameQueued = false;
+function nextFrame(phase: "scroll" | "resize", work: () => void): void {
+  frameWork[phase].push(work);
+  if (frameQueued) return;
+  frameQueued = true;
+  requestAnimationFrame(() => {
+    frameQueued = false;
+    for (const run of frameWork.scroll.splice(0)) run();
+    for (const run of frameWork.resize.splice(0)) run();
+  });
+}
+
 /**
  * A `ResizeObserver` that reports, on the next animation frame, every observed
  * element whose height (as the rect stub answers it) is new or changed —
@@ -74,7 +94,7 @@ class FrameResizeObserver {
   readonly #callback: ResizeObserverCallback;
   readonly #heights = new Map<Element, number | null>();
   readonly #mutations = new MutationObserver(() => this.#schedule());
-  #frame: number | null = null;
+  #queued = false;
   constructor(callback: ResizeObserverCallback) {
     this.#callback = callback;
   }
@@ -91,13 +111,14 @@ class FrameResizeObserver {
   disconnect(): void {
     this.#heights.clear();
     this.#mutations.disconnect();
-    if (this.#frame !== null) cancelAnimationFrame(this.#frame);
-    this.#frame = null;
+    this.#queued = false;
   }
   #schedule(): void {
-    if (this.#frame !== null) return;
-    this.#frame = requestAnimationFrame(() => {
-      this.#frame = null;
+    if (this.#queued) return;
+    this.#queued = true;
+    nextFrame("resize", () => {
+      if (!this.#queued) return;
+      this.#queued = false;
       const entries: ResizeObserverEntry[] = [];
       for (const [target, was] of this.#heights) {
         if (!target.isConnected) continue;
@@ -215,7 +236,7 @@ export function installGridGeometry(
         return;
       }
       if (written.size === 0)
-        requestAnimationFrame(() => {
+        nextFrame("scroll", () => {
           const scrollers = [...written];
           written.clear();
           for (const el of scrollers) el.dispatchEvent(new Event("scroll"));

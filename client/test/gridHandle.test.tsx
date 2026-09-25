@@ -165,6 +165,57 @@ describe("landing on a tile that is not drawn", () => {
     );
   });
 
+  it("Back to a tile scrolled nearly out of view lands it to the pixel past the estimates", async () => {
+    // Only a sliver of the anchor tile shows, so its offset is past the
+    // height every undrawn row is estimated at until a model row is measured.
+    // As a browser orders it: a write's scroll and the rows' measurements
+    // each arrive a frame later.
+    install({
+      ...SHORT,
+      rowHeight: 170,
+      rowHeights: { models: 210 },
+      scrollTiming: "production",
+    });
+    const PARENT: DirListing = {
+      path: "/models",
+      entries: [
+        ...Array.from({ length: 30 }, (_, i) => dir(`k${i}`)),
+        ...MODELS(570),
+      ],
+    };
+    await mountApp("/models", PARENT);
+    listDir.mockImplementation((_target: string, opts?: { q?: string }) =>
+      Promise.resolve(
+        structuredClone(
+          opts?.q !== undefined
+            ? { path: "/models", entries: [model("found.stl")] }
+            : PARENT,
+        ),
+      ),
+    );
+    // Row 80 at 10×170 + 70×210 once measured; then its 190px tile shows 5px.
+    await scrollTo(10 * 170 + 70 * 210);
+    await wait(100);
+    const drawnAt = tile("/models/m210.stl")!.getBoundingClientRect().top;
+    await scrollTo(main().scrollTop + drawnAt - SCROLLER_TOP + 185);
+    await wait(100);
+    const left = measureIn(main())!;
+    const leftAt = main().scrollTop;
+    expect(left).toEqual({ anchor: "/models/m210.stl", offset: -185 });
+
+    await type(searchInput(), "found");
+    await pressEnter(searchInput());
+    await wait(100);
+    expect(tile(left.anchor)).toBeUndefined();
+
+    await back();
+    await wait(300);
+    expect(main().scrollTop).toBe(leftAt);
+    expect(tile(left.anchor)!.getBoundingClientRect().top).toBe(
+      SCROLLER_TOP - 185,
+    );
+  });
+
   it("a reveal far down a folder centres and marks the model", async () => {
     const BIG: DirListing = {
       path: "/models/big",
@@ -397,6 +448,51 @@ describe("a column change keeps the top entry", () => {
     expect(main().scrollTop).toBe(151 * 200 + 50);
     expect(tile("/models/m303.stl")!.getBoundingClientRect().top).toBe(
       SCROLLER_TOP - 50,
+    );
+  });
+
+  it("keeps a thin top row's entry on top through changes to shorter rows", async () => {
+    await mountApp("/models", LONG);
+    // Row 101 on top with 110 of its 200px showing: m303 leads it, 45% of
+    // the row scrolled past.
+    await scrollTo(101 * 200 + 90);
+
+    install({ ...SHORT, cols: 5, rowHeight: 120 });
+    await click(
+      container.querySelector<HTMLButtonElement>('[data-tile-size="s"]')!,
+    );
+    await settle();
+    // Fourth in row 60, 45% of its 120px scrolled past.
+    expect(main().scrollTop).toBe(60 * 120 + 54);
+
+    // 90px, the offset in pixels, would lie wholly above an 80px row.
+    install({ ...SHORT, cols: 6, rowHeight: 80 });
+    await click(
+      container.querySelector<HTMLButtonElement>('[data-tile-size="m"]')!,
+    );
+    await settle();
+    // Fourth in row 50.
+    expect(main().scrollTop).toBe(50 * 80 + 36);
+    expect(tile("/models/m303.stl")!.getBoundingClientRect().top).toBe(
+      SCROLLER_TOP - 36,
+    );
+    expect(measureIn(main())!.anchor).toBe("/models/m300.stl");
+  });
+
+  it("takes the top entry from the next row when less than half of the top row shows", async () => {
+    await mountApp("/models", LONG);
+    // Row 100 shows 30px; row 101, led by m303, is what the user reads.
+    await scrollTo(100 * 200 + 170);
+
+    install({ ...SHORT, cols: 5 });
+    await click(
+      container.querySelector<HTMLButtonElement>('[data-tile-size="s"]')!,
+    );
+    await settle();
+    // m303 is fourth in row 60, which lands flush with the top.
+    expect(main().scrollTop).toBe(60 * 200);
+    expect(tile("/models/m303.stl")!.getBoundingClientRect().top).toBe(
+      SCROLLER_TOP,
     );
   });
 
