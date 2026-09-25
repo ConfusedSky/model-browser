@@ -241,10 +241,10 @@ App state passed to `Grid` as `size`, so both causes arrive through the same `co
 ### D10. Estimated heights by row composition
 
 `estimateSize(i)` returns the last measured height of a row of the same composition — all
-folders, all models, or mixed — else of any row, else a per-size constant. TanStack computes
-measurements once and does not re-ask `estimateSize` when its answers change, so the first time
-a composition is measured `Grid` calls `virtualizer.measure()` to re-estimate the rows not yet
-drawn (at most three times per listing). The composition is model against non-model — a zip's
+folders, all models, or mixed — else of any row, else a per-size constant. TanStack re-asks
+`estimateSize` only for the rows *after* one whose size changed, so rows above a composition's
+first measurement would keep the old estimate; the first time a composition is measured `Grid`
+calls `virtualizer.measure()` to re-estimate every row not yet drawn (at most three times per listing). The composition is model against non-model — a zip's
 tile has a folder's shape — and the record resets when the entries, `cols` or `size` change.
 `measure()` runs from a layout effect after the commit that first measured a composition, never
 re-entrantly inside TanStack's `resizeItem`. `measure()` clears every measured height, the mounted
