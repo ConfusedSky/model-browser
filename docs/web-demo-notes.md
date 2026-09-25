@@ -63,7 +63,8 @@ sequence):
    retired option (a)'s handoff objection). Re-derive before applying
 6. `folder-contact-sheets` — **archived 2026-08-31** — the decided row; per-tile bounded peek, zips excluded
 
-Not drafted — tracked as the change `web-demo-backlog` (2026-08-29, one task line each):
+Not drafted — tracked as the change `web-demo-backlog` (2026-08-29, one task line each;
+archived 2026-09-25, its open lines moved to issues #62–#64 and the IP gate to #2):
 the override store / credits (item 1), pose-for-every-model (was the other session's),
 the demo split itself (confinement is now free; guard, read-only thumbs, launcher off,
 chat tab hidden, static serving, bake, credits page), the decisions in items 3–6, and the
