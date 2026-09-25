@@ -181,16 +181,20 @@ marker") and `Grid`'s `Props` docs for `scrollRoot`, `onPeek` and `onBands`.
   seconds whenever a row's start moves (`reconcileScroll`, `MAX_RECONCILE_MS`), which the first
   measurement of an overscan row above the anchor causes, and would discard the offset `applyIn`
   just landed. A first-measure adjustment made against TanStack's own stale offset is corrected
-  by `applyIn`, which runs after `measureElement`'s ref-time measurement in the same commit.
+  by `applyIn`, provided the rows around the anchor have been measured before it runs — which in
+  a browser is *not* the commit that mounts them: that commit comes from the `scroll` event with
+  TanStack's `isScrolling` set, its ref-time measurement is skipped, and the rows are measured by
+  the `ResizeObserver` after the commit. The landing therefore waits for them (below).
 - `focusEntry(target: string | number, options?: FocusOptions): boolean` — the entry (by path
   or by index into the shown entries) is pinned, and in the layout effect after its row mounts
   `focus(options)` runs on its tile. Native focus scrolling is kept or suppressed exactly as
   the caller's options say, so each call site keeps today's scrolling. Returns false when the
   entry is not shown, so callers keep their fallbacks.
 
-Where no grid is mounted — the empty state, the error notice, the commit on which the skeleton
-comes down — `handle.current` is null and the call sites fall through exactly as `applyIn`
-returning false and an absent tile do today.
+Where no grid is mounted — the error notice, the library messages, the skeleton —
+`handle.current` is null and the call sites fall through exactly as `applyIn` returning false and
+an absent tile do today. A grid showing its own empty state is mounted and keeps its handle:
+`place(top)` zeroes the scroll and `focusEntry` answers false.
 
 **How a landing runs** (stage C check-in, 2026-09-25). The handle keeps two pending slots,
 `placing` and `focusing` — the ↑ landing places the parent's anchor and focuses the child folder in
@@ -201,7 +205,10 @@ at one column (D2), so everything waits for `colsReady`. A layout effect after e
 converges: while TanStack's offset has not caught up with `scrollTop` it waits; while the target
 row is not visible it writes `scrollTop` raw to the row's current start (the first pass is the
 phase 1 above); while a measurement has moved the row since this commit drew it, it waits again;
-then `applyIn` lands it. Measuring the rows around a write, and D10's `measure()` on a
+and while any row in the visible range is still unmeasured, or a D10 `measure()` is pending, it
+waits too; then `applyIn` lands it. (Implementation review, pass 1, 2026-09-25: without that wait
+a far anchor below rows of a composition not yet measured drifts after landing.) Measuring the
+rows around a write, and D10's `measure()` on a
 composition's first height, can both move a far row after a one-shot `applyIn`, which is why the
 landing converges rather than applying once. It is bounded: at most four passes, re-checked every
 animation frame while pending (not only on `scroll`, which a write equal to the current offset
@@ -328,7 +335,10 @@ one source of numbers for everything that measures:
   tiles by DOM position, is replaced by the seam;
 - the scroller's `clientHeight` is the viewport height, since `applyIn`'s `center` case reads it
   rather than a rect;
-- the seam's `observeElementOffset` always reports `isScrolling: false`: TanStack skips
+- by default the seam's `observeElementOffset` always reports `isScrolling: false`, and an opt-in
+  `scrollTiming: "production"` instead reports scrolling on each `scroll` and stops a frame after
+  the last, with a fake `ResizeObserver` delivering row measurements a frame after the commit, as
+  a browser does — the landing's wait for measured rows is only falsifiable under it. The default: TanStack skips
   measuring a row while scrolling, and happy-dom's `ResizeObserver` never fires, so a row mounted
   during a test's scroll would never be measured; it also keeps TanStack's debounce timers from
   firing outside `act`;
