@@ -52,11 +52,12 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   tailnet (`scripts/dev-remote.sh`). Both still bind loopback; what reaches them is
   `tailscale serve`, which terminates TLS at the tailnet name and proxies to those ports,
   so the difference is three names agreeing: Vite's `allowedHosts` (`VITE_ALLOWED_HOSTS`,
-  set from `tailscale status`), an `origins` entry for `https://<name>:5173` in the
-  deployment's configuration — Vite's proxy forwards the browser's `Host` rather than
-  rewriting it, so the guard sees the tailnet name — and a serve entry for 5173. The
-  script warns about the last two rather than fixing them: the configuration is read once
-  at server start, and `tailscale serve` needs root
+  set from `tailscale status`), an `origins` entry for `https://<name>:5173` (and
+  `:3177`, where the tailnet reaches the built client) in the deployment's
+  configuration — Vite's proxy forwards the browser's `Host` rather than rewriting it,
+  so the guard sees the tailnet name — and a serve entry for 5173. The script warns
+  about the last two rather than fixing them: the configuration is read once at server
+  start, and `tailscale serve` needs root
   (`sudo tailscale serve --bg --https=5173 127.0.0.1:5173`, once per port, persistent).
   `VITE_HOST=127.0.0.1` is why it works at all — Vite's default bind is IPv6-only and
   serve proxies to 127.0.0.1. 3177 is served on the tailnet the same way, but it runs
@@ -69,6 +70,24 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   like `dev:demo` does it, same default. The posture is the reason to prefer this one
   remotely: every capability off, so no `/api/open` and no thumbnail writes from another
   machine
+- `bun run preview:remote-demo` - the local production build, for judging performance
+  (phones especially) the way the live demo runs. **Never judge speed on 5173**: that is
+  Vite's development build, React dev mode and unminified. This builds `client/dist` and
+  runs the server alone, no Vite and no watch, under the `dev:remote-demo` posture, on
+  3177 over the tailnet. Stop a running `dev`/`dev:remote*` first, since it needs 3177.
+  It starts the index as a child and stops it on exit. The index cache defaults to the
+  one the local bake names (`<cache>/<id>/bake/bake.json` → `index.cacheDir`). Override
+  it with `INDEX_DIR`, and the checkout with `MINI_CLASSIFY_DIR`. **Without an index,
+  every baked posed render reads as stale**, so the device re-renders each thumbnail with
+  WebGL, which the live demo never does. To mirror the live thumbnails, pull the box's
+  bake first. Mesh and snapshots stay behind: meshes are large and rebuilt on demand,
+  and snapshots are the box's own.
+  `rsync -az --exclude mesh/ --exclude snapshots/ root@<box>:/srv/cache/<box id>/
+  ~/.cache/model-browser/<local id>/`. The local id is in
+  `<root>/.model-browser/library.json`, and a baked entry hits only when the local
+  corpus's file times match the box's. After a client edit, rerun it: 3177 has no hot
+  reload. `rm -rf client/dist` afterwards, or a later `bun run dev` serves that stale
+  bundle on 3177. `bun --watch` restarts on a content write, not on `touch`
 - A `*.localhost` dev name (`build-a.localhost:5173`) needs **no** `origins` entry: the
   guard counts the whole reserved TLD as loopback and Vite's `allowedHosts` admits it by
   default. A tailnet name is routable and still needs one — which is why `dev:remote` warns

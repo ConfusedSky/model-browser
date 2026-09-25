@@ -13,6 +13,7 @@
     "dev:demo": "MODEL_BROWSER_CONFIG=$PWD/deploy/demo/config.json MODEL_BROWSER_ROOT=${MODEL_BROWSER_ROOT:-$HOME/Documents/tests/test-models/miniatures/decimated} bun run --filter '*' dev",
     "dev:remote": "bash scripts/dev-remote.sh",
     "dev:remote-demo": "bash scripts/dev-remote.sh --demo",
+    "preview:remote-demo": "bash scripts/dev-remote.sh --demo --preview",
     "test": "bun run --filter '*' test",
     "typecheck": "bun run --filter '*' typecheck",
     "format": "bunx prettier@3.8.3 --write \"**/*.{ts,tsx,css,json}\"",
