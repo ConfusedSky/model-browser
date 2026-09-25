@@ -3036,8 +3036,8 @@ export default function App() {
               title="Narrow these by name (Ctrl-F)"
               className={
                 findOpen
-                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 bg-surface px-2.5 text-[13px] text-ink"
-                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 touch:rounded-[10px] touch:border-y-4 touch:border-transparent touch:bg-clip-padding touch:justify-center bg-surface px-2.5 text-[13px] text-ink"
+                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 touch:rounded-[10px] touch:border-y-4 touch:border-transparent touch:bg-clip-padding touch:justify-center px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
               }
             >
               <Icon name="filter" className="size-3.5" />
@@ -3051,8 +3051,8 @@ export default function App() {
               title="Show every model under this folder in one grid"
               className={
                 live.flat
-                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 bg-accent-soft px-2.5 text-[13px] font-medium text-accent"
-                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+                  ? "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 touch:rounded-[10px] touch:border-y-4 touch:border-transparent touch:bg-clip-padding touch:justify-center bg-accent-soft px-2.5 text-[13px] font-medium text-accent"
+                  : "flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 touch:rounded-[10px] touch:border-y-4 touch:border-transparent touch:bg-clip-padding touch:justify-center px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
               }
             >
               <Icon name="layers" className="size-3.5" />
@@ -3144,8 +3144,8 @@ export default function App() {
               }}
               className={
                 panelOpen
-                  ? "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 bg-surface px-2.5 text-[13px] text-ink"
-                  : "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
+                  ? "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 touch:rounded-[10px] touch:border-y-4 touch:border-transparent touch:bg-clip-padding touch:justify-center bg-surface px-2.5 text-[13px] text-ink"
+                  : "relative flex h-8 items-center gap-1.5 rounded-md touch:h-11 touch:min-w-11 touch:rounded-[10px] touch:border-y-4 touch:border-transparent touch:bg-clip-padding touch:justify-center px-2.5 text-[13px] text-ink-2 hover:bg-surface hover:text-ink"
               }
             >
               <Icon name="sliders" className="size-3.5" />
