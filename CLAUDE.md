@@ -87,7 +87,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   `<root>/.model-browser/library.json`, and a baked entry hits only when the local
   corpus's file times match the box's. After a client edit, rerun it: 3177 has no hot
   reload. `rm -rf client/dist` afterwards, or a later `bun run dev` serves that stale
-  bundle on 3177. `bun --watch` restarts on a content write, not on `touch`
+  bundle on 3177. `bun --watch` restarts on a content write, not on `touch`.
+  `node scripts/scroll-bench.mjs 'http://127.0.0.1:3177/?flat=1' --runs 2` benches a
+  phone-sized, 4x-throttled touch scroll of the grid against it (frame p50/p95, long
+  frames, main-thread ms, tiles in the document); always headless, since CDP touch does
+  not scroll a headed page
 - A `*.localhost` dev name (`build-a.localhost:5173`) needs **no** `origins` entry: the
   guard counts the whole reserved TLD as loopback and Vite's `allowedHosts` admits it by
   default. A tailnet name is routable and still needs one — which is why `dev:remote` warns
