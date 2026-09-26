@@ -1035,9 +1035,10 @@ document, relabelled `text/plain`. Robots parsers skip lines they cannot read, s
 directives still apply, but the tail is junk and it carries link-preview tags naming
 `/robots.txt`. The fix is `client/public/robots.txt` (allow-all; the AI rules stay
 Cloudflare's), which Vite copies into `dist` and the static handler serves as `text/plain`
-ahead of the SPA fallback. It rides with the next deploy of `main` rather than going out
-alone. After that deploy, `curl -s https://models.masamaeda.com/robots.txt | grep -c '<html'`
-should print 0; until then, read the managed block and ignore the rest.
+ahead of the SPA fallback. Live since the deploy of `0edf74d` (2026-09-25): the wire now
+carries the managed block followed by those two lines, and
+`curl -s https://models.masamaeda.com/robots.txt | grep -c '<html'` prints 0 — re-run it
+after any change to the static handler's fallback.
 
 ### What staying proxied costs, standing
 
