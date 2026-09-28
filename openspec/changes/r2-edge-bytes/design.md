@@ -121,14 +121,13 @@ origin's answer, not a second implementation of `thumbHitTiers`/`byteTiers` that
 from the server.
 
 Storing is `put` with an `ArrayBuffer` (a clone of the origin's response, read in
-`waitUntil`), because a teed `ReadableStream` has no known length. The corpus's largest STL is
-21.6 MB, ~5 MB as GLB at the ratio `MeshCache`'s header states (estimated, not measured on
-that file), well inside the 32 MB cap and the 128 MB isolate. `put` is conditional on the key
+`waitUntil`), because a teed `ReadableStream` has no known length. The corpus's largest GLB is 7.8 MB (every GLB derived locally from the demo corpus, 2026-09-28), well inside the 32 MB cap and the 128 MB isolate. `put` is conditional on the key
 not existing, and returns `null` when the condition fails. The object form
 `onlyIf: { etagDoesNotMatch: '*' }` refuses an existing key under the current runtime
 (verified locally under `wrangler dev`; the wildcard mis-parse of workerd issue #2572 was fixed
-by workerd PR #2611). R2's documentation describes only the `Headers` form for "absent only"
-(`If-None-Match: *`, RFC 7232), which is the fallback if the real bucket answers differently;
+by workerd PR #2611). R2's reference says the `Headers` form takes RFC 7232's conditional headers,
+which include `If-None-Match: *` ("absent only"), and locally it refuses an existing key too;
+it is the fallback if the real bucket answers differently;
 the live check against the real bucket (task 3.3) still decides. Two concurrent first touches racing to store
 identical bytes is benign either way.
 

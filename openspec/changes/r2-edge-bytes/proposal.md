@@ -14,9 +14,8 @@ still pays is distance:
 
 Neither is fixable from Falkenstein. A copy of the bytes stored in the US is, and R2 with a
 `wnam` location hint is the free way to have one: no egress fees, 10 GB-month and 10M reads
-free, and the demo's thumbnails and GLBs together come to roughly 1.2 GB (32 MB of renders,
-plus the corpus's 4.89 GB of STL at the ~0.24x `MeshCache` states for its GLBs — an
-estimate, not a measurement). Cache Reserve was
+free, and the demo's thumbnails and GLBs together come to about 1.2 GB (32 MB of renders
+and 1.19 GB of GLBs, measured by deriving every GLB from the demo corpus's 4.89 GB of STL). Cache Reserve was
 weighed and is not what the measurements ask for — it solves eviction, which the overnight
 run found no sign of, and it needs a paid plan.
 
