@@ -63,9 +63,8 @@ describe("classify: keyed requests", () => {
   });
 
   it("keys gen verbatim", () => {
-    expect(keyOf(thumbUrl(PATH, MTIME, `&gen=${GEN}`))).toContain(
-      `/${GEN}.webp`,
-    );
+    // Its own version at the origin, which compares text: keyed, never pinned.
+    expect(keyOf(thumbUrl(PATH, MTIME, "&gen=007"))).toMatch(/\/007\.webp$/);
   });
 
   it.each(["1789519399619.0", "1e12", " 123", "0x1F", ""])(
@@ -131,6 +130,10 @@ describe("classify: versions and parameters", () => {
       "route",
     );
   });
+
+  it("passes a URL that does not parse", () => {
+    expect(reasonOf("/api/model.glb?path=%2Fa.stl&mtime=1")).toBe("url");
+  });
 });
 
 describe("classify: paths", () => {
@@ -145,6 +148,12 @@ describe("classify: paths", () => {
   ])("passes a path %s", (_, path) => {
     expect(reasonOf(thumbUrl(path, MTIME))).toBe("path");
     expect(reasonOf(glbUrl(path, MTIME))).toBe("path");
+  });
+
+  it("keys 256 path components and passes 257, as the origin refuses", () => {
+    const deep = (n: number) => "/a".repeat(n);
+    expect(keyOf(glbUrl(deep(256), "1"))).toBe(`M1/m${deep(256)}/1.glb`);
+    expect(reasonOf(glbUrl(deep(257), "1"))).toBe("path");
   });
 
   it("passes a path that makes the key longer than 1,024 bytes", () => {

@@ -42,6 +42,10 @@ const ROUTES: Record<string, { kind: Kind; params: string[] }> = {
 // R2's key limit.
 const MAX_KEY_BYTES = 1024;
 
+// The origin refuses deeper paths (`MAX_COMPONENTS` in the server's `tooLong`);
+// copied rather than imported, since that module brings Node's filesystem with it.
+const MAX_COMPONENTS = 256;
+
 const pass = (reason: string): Classified => ({ action: "pass", reason });
 
 /**
@@ -52,7 +56,9 @@ function canonicalPath(path: string): boolean {
   if (!path.startsWith("/") || path.endsWith("/")) return false;
   if (path.includes("!") || path.includes("\0") || path.includes("//"))
     return false;
-  return !path.split("/").some((s) => s === "." || s === "..");
+  const segments = path.split("/");
+  if (segments.length - 1 > MAX_COMPONENTS) return false;
+  return !segments.some((s) => s === "." || s === "..");
 }
 
 export function classify(input: ClassifyInput): Classified {
@@ -61,7 +67,12 @@ export function classify(input: ClassifyInput): Classified {
   if (CONDITIONAL.some((h) => input.headers.get(h) !== null))
     return pass("conditional");
 
-  const url = new URL(input.url);
+  let url: URL;
+  try {
+    url = new URL(input.url);
+  } catch {
+    return pass("url");
+  }
   const route = ROUTES[url.pathname];
   if (route === undefined) return pass("route");
 
