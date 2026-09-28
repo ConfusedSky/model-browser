@@ -47,7 +47,11 @@ async function stored(
   if (object === null) return null;
   const { contentType, cacheControl } = object.httpMetadata ?? {};
   // An object without its headers cannot be replayed as the origin's answer.
-  if (contentType === undefined || cacheControl === undefined) return "fail";
+  if (contentType === undefined || cacheControl === undefined) {
+    // Never overwritten, so only an epoch advance or a manual delete clears it.
+    console.warn(`edge store: ${key} lacks its headers; passing through`);
+    return "fail";
+  }
   const headers = new Headers(
     replay(
       { contentType, cacheControl, custom: object.customMetadata ?? {} },
@@ -119,6 +123,8 @@ function originFor(env: Env): Origin {
 
 export default {
   fetch(request, env, ctx) {
+    // An uncaught throw then reaches the origin instead of answering an error it never gave.
+    ctx.passThroughOnException();
     return handle(request, env, ctx, originFor(env));
   },
 } satisfies ExportedHandler<Env>;

@@ -103,8 +103,10 @@ describe("handle", () => {
 
   it("passes a request without cf as another continent", async () => {
     const t = setup();
-    const { res } = await t.send(THUMB, null);
+    const { res, originCalls } = await t.send(THUMB, null);
     expect(res.headers.get("x-edge-store")).toBe("pass");
+    expect(await body(res)).toEqual(BYTES);
+    expect(originCalls).toBe(1);
     expect(t.bucket.gets).toBe(0);
   });
 
@@ -180,6 +182,7 @@ describe("handle", () => {
     expect(res.headers.get("x-edge-store")).toBe("pass");
     expect(await body(res)).toEqual(BYTES);
     expect(originCalls).toBe(1);
+    await t.settle();
     expect(t.bucket.puts).toBe(0);
   });
 
@@ -193,9 +196,11 @@ describe("handle", () => {
     expect(res.headers.get("x-edge-store")).toBe("pass");
     expect(await body(res)).toEqual(BYTES);
     expect(originCalls).toBe(1);
+    await t.settle();
+    expect(t.bucket.puts).toBe(0);
   });
 
-  it("puts only on an absent key", async () => {
+  it("passes the absent-only condition to the bucket (the fake emulates R2)", async () => {
     const t = setup();
     const store = t.bucket as unknown as R2Bucket;
     const first = new Uint8Array([7]);
