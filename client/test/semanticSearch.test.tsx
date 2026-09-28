@@ -15,6 +15,7 @@ import {
   container,
   dir,
   dismissButton,
+  findInput,
   flatButton,
   getThumb,
   indexAvailability,
@@ -25,6 +26,7 @@ import {
   mountAppAtCurrentUrl,
   nameMatchCount,
   offerNameProbe,
+  openFind,
   openPanel,
   pathInput,
   pressEnter,
@@ -1701,7 +1703,7 @@ describe("the search field names what and where it searches", () => {
   });
 });
 
-describe("a description asked of the names", () => {
+describe("a phrase asked of the names", () => {
   beforeEach(() => {
     indexAvailability.mockResolvedValue({
       state: "ready",
@@ -1710,21 +1712,81 @@ describe("a description asked of the names", () => {
     });
   });
 
-  it("runs by meaning, says so, and offers the names back for that search", async () => {
-    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+  it("runs as a name search even with the index ready, since names match term by term", async () => {
     await mountApp("/models", NESTED);
     await settle();
     await click(modeButton("name")!);
+    listDir.mockClear();
+    listDir.mockResolvedValue({
+      path: "/models",
+      entries: [model("Golems/stone_golem.stl")],
+    });
     await type(searchInput(), "a stone golem");
     await pressEnter(searchInput());
     await settle();
 
-    expect(semanticSearch).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain(
-      "Searched by meaning — “a stone golem” reads like a description.",
+    expect(listDir).toHaveBeenLastCalledWith(
+      "/models",
+      expect.objectContaining({ q: "a stone golem" }),
+      expect.any(AbortSignal),
     );
-    // The profile chose names; the one search does not rewrite that.
+    expect(semanticSearch).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("reads like a description");
+  });
+
+  it("that matches nothing offers meaning, which runs without becoming the profile's mode", async () => {
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("name")!);
+    listDir.mockResolvedValue({ path: "/models", entries: [] });
+    semanticSearch.mockResolvedValue(scoredSet(3, 4.2));
+    await type(searchInput(), "a knight riding a horse");
+    await pressEnter(searchInput());
+    await settle();
+    expect(semanticSearch).not.toHaveBeenCalled();
+
+    await click(noteButton("Search by meaning instead")!);
+    await settle();
+
+    expect(semanticSearch).toHaveBeenCalledTimes(1);
+    expect(semanticSearch.mock.calls[0]![0]).toBe("a knight riding a horse");
     expect(localStorage.getItem("model-browser:search-mode")).toBe("name");
+  });
+});
+
+describe("meaning results under the find filter", () => {
+  beforeEach(() => {
+    indexAvailability.mockResolvedValue({
+      state: "ready",
+      collectionRoot: "/models",
+      covers: ["stl"],
+    });
+  });
+
+  it("keeps a tile by a stored name along its path, and labels one by its own", async () => {
+    semanticSearch.mockResolvedValue({
+      ...MEANING,
+      entries: [
+        {
+          ...model("DD_minis_945822/paladin.stl"),
+          ancestorNames: ["D&D minis"],
+        },
+        { ...model("Kits/Baal/hero.stl"), displayName: "Baal the Hero" },
+      ],
+      scores: {},
+    });
+    await mountApp("/models", NESTED);
+    await settle();
+    await click(modeButton("meaning")!);
+    await type(searchInput(), "a paladin");
+    await pressEnter(searchInput());
+    await settle();
+    expect(labels()).toEqual(["paladin.stl", "Baal the Hero"]);
+
+    await openFind();
+    await type(findInput()!, "d&d");
+    await settle();
+    expect(labels()).toEqual(["paladin.stl"]);
   });
 });
 

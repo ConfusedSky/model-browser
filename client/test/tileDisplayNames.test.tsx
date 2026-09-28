@@ -179,6 +179,39 @@ describe("a tile labels itself with the stored name", () => {
     expect(tileFor(kit.path).getAttribute("title")).toBe(STEM);
   });
 
+  it("shows a folder’s stored name in the folder line, and the real path in the title", async () => {
+    const paladin = {
+      ...model("DD_minis_945822/paladin.stl"),
+      ancestorNames: ["D&D minis"],
+    };
+    await renderGrid([paladin]);
+    const el = tileFor(paladin.path);
+
+    expect(el.querySelector("[data-tile-parent]")?.textContent).toBe(
+      "D&D minis",
+    );
+    expect(el.getAttribute("title")).toBe("DD_minis_945822/paladin.stl");
+    expect(el.getAttribute("aria-label")).toBe("DD_minis_945822/paladin.stl");
+  });
+
+  it("keeps the real name of each folder the store does not name", async () => {
+    const deep = {
+      ...model("kit/sub/paladin.stl"),
+      ancestorNames: ["D&D minis", null],
+    };
+    const zipped = {
+      ...model("kit/a.zip!/inner/b.stl"),
+      ancestorNames: [null, "Archive Box", null],
+    };
+    await renderGrid([deep, zipped]);
+    const parent = (p: string) =>
+      tileFor(p).querySelector("[data-tile-parent]")?.textContent;
+
+    expect(parent(deep.path)).toBe("D&D minis/sub");
+    // The archive is still the part kept whole, under its stored name.
+    expect(parent(zipped.path)).toBe("kit/Archive Box › inner");
+  });
+
   it("is byte-identical on a library with no store", async () => {
     // The whole migration promise in one cell: nothing carries a display name,
     // so every label is what it was and no tile grew an attribute.
@@ -200,7 +233,7 @@ const LISTING: DirListing = {
   entries: [named(dir(STEM), TITLE), model("hero.stl")],
 };
 
-describe("matching still reads the real name", () => {
+describe("matching reads the stored name beside the real one", () => {
   beforeEach(async () => {
     await mountApp("/models", LISTING);
     listDir.mockResolvedValue(LISTING);
@@ -209,11 +242,11 @@ describe("matching still reads the real name", () => {
     await unmountApp();
   });
 
-  it("finds the kit by its stem and not by its stored title", async () => {
-    // Display only — the deciding question of `web-demo-backlog` 2.3. The
-    // fragments are chosen so neither name can answer for the other: `3750572`
-    // appears in the stem alone, and `character pack` (spaced) in the title
-    // alone, since the stem spells it with underscores.
+  it("finds the kit by its stem and by its stored title", async () => {
+    // `file-search`, *Names match term by term*. The fragments are chosen so
+    // neither name can answer for the other: `3750572` appears in the stem
+    // alone, and `character pack` (spaced) in the title alone, since the stem
+    // spells it with underscores.
     expect(labels()).toEqual([TITLE, "hero.stl"]);
 
     await openFind();
@@ -223,6 +256,6 @@ describe("matching still reads the real name", () => {
 
     await typeInto(findInput()!, "character pack");
     await settle();
-    expect(tiles()).toHaveLength(0);
+    expect(labels()).toEqual([TITLE]);
   });
 });

@@ -36,6 +36,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 import { createApp } from "../src/app";
 import { ThumbCache } from "../src/cache";
+import { MARKER_DIR } from "../src/library";
 import { resetIndexStatus } from "../src/semantic";
 import { SEARCH_TEXT_MAX } from "../../shared/types";
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from "./helpers";
@@ -411,10 +412,11 @@ describe("semantic query", () => {
     // Measured as a slope *and* an intercept because a request now pays a
     // couple of stats that are not the query's: since library-root 1.7
     // `library.state()` stats the library's top, and this route asks for the
-    // state twice — the gate, then `probeStatus`. Two constants, whatever the
-    // result count; three hits still cost exactly three stats more than none.
-    expect(await cost(0)).toBe(2);
-    expect(await cost(3)).toBe(5);
+    // state three times — the gate, `probeStatus`, then the override store the
+    // naming pass reads. Constants, whatever the result count; three hits still
+    // cost exactly three stats more than none.
+    expect(await cost(0)).toBe(3);
+    expect(await cost(3)).toBe(6);
     expect((await cost(3)) - (await cost(1))).toBe(2);
   });
 
@@ -932,5 +934,153 @@ describe("an index answering null roots", () => {
     expect(res.status).toBe(200);
     const entries = (await res.json()) as { name: string }[];
     expect(entries.map((e) => e.name)).toEqual(["a.stl"]);
+  });
+});
+
+describe("meaning results are named like any listing", () => {
+  const NAMED = {
+    version: 1,
+    entries: {
+      "/kit": { name: "Player Character Pack 03" },
+      "/kit/sub": { name: "Sub Assemblies" },
+      "/kit/x.stl": { name: "Kindle Cleric" },
+    },
+  };
+
+  /** A library of its own: the holder loads a store once per resolved library. */
+  function namedLibrary(withStore: boolean) {
+    const top = realTempDir("mb-sem-named-");
+    mkdirSync(join(top, "kit", "sub"), { recursive: true });
+    writeFileSync(join(top, "kit", "x.stl"), stlBytes(1));
+    writeFileSync(join(top, "kit", "sub", "y.stl"), stlBytes(2));
+    if (withStore) writeStore(top);
+    return top;
+  }
+
+  function writeStore(top: string): void {
+    mkdirSync(join(top, MARKER_DIR), { recursive: true });
+    writeFileSync(
+      join(top, MARKER_DIR, "overrides.json"),
+      JSON.stringify(NAMED),
+    );
+  }
+
+  function ask(top: string, rels: string[], body: Record<string, unknown>) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: { method?: string }) => {
+        if (String(url).endsWith("/status")) {
+          return new Response(
+            JSON.stringify({
+              ...READY,
+              collection_root: top,
+              volume: { present: true, root: top, missing: null },
+            }),
+          );
+        }
+        if (init?.method === "POST") {
+          return new Response(
+            JSON.stringify({
+              scope: { path: null, status: "all" },
+              results: rels.map((rel, i) => ({
+                ...hit(rel),
+                path: join(top, rel),
+                score: 0.5 - i / 10,
+              })),
+            }),
+          );
+        }
+        throw new Error(`unexpected fetch: ${String(url)}`);
+      }),
+    );
+    resetIndexStatus();
+    const named = createApp(
+      new ThumbCache(realTempDir("mb-sem-named-cache-")),
+      undefined,
+      undefined,
+      libraryFor(top),
+    );
+    return named.request("/api/semantic", {
+      method: "POST",
+      headers: { ...LOOPBACK, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  type Answer = {
+    entries: {
+      path: string;
+      name: string;
+      displayName?: string;
+      ancestorNames?: (string | null)[];
+    }[];
+    scores: Record<string, unknown>;
+  };
+
+  it("labels a hit with its own stored name and carries the names along it", async () => {
+    const top = namedLibrary(true);
+    const body = (await (
+      await ask(top, ["kit/x.stl"], { text: "cleric" })
+    ).json()) as Answer;
+    expect(body.entries[0]?.displayName).toBe("Kindle Cleric");
+    expect(body.entries[0]?.ancestorNames).toEqual([
+      "Player Character Pack 03",
+    ]);
+  });
+
+  it("keeps the index's order and scores, and changes nothing without a store", async () => {
+    const top = namedLibrary(false);
+    const rels = ["kit/sub/y.stl", "kit/x.stl"];
+    const before = await (await ask(top, rels, { text: "hero" })).text();
+    const bare = JSON.parse(before) as Answer;
+    for (const e of bare.entries) {
+      expect(Object.keys(e)).not.toContain("displayName");
+      expect(Object.keys(e)).not.toContain("ancestorNames");
+    }
+    writeStore(top);
+    const after = (await (
+      await ask(top, rels, { text: "hero" })
+    ).json()) as Answer;
+    expect(after.entries.map((e) => e.path)).toEqual([
+      "/kit/sub/y.stl",
+      "/kit/x.stl",
+    ]);
+    expect(after.entries[0]?.ancestorNames).toEqual([
+      "Player Character Pack 03",
+      "Sub Assemblies",
+    ]);
+    // Everything but the two naming fields is the store-less answer. Compared as
+    // values: `scores` keys land in stat-completion order, which varies per request.
+    const stripped = {
+      ...after,
+      entries: after.entries.map(
+        ({ displayName: _d, ancestorNames: _a, ...rest }) => rest,
+      ),
+    };
+    expect(JSON.parse(JSON.stringify(stripped))).toEqual(JSON.parse(before));
+  });
+
+  it("measures names along a hit from the collection root, even under a scope", async () => {
+    const top = namedLibrary(true);
+    const body = (await (
+      await ask(top, ["kit/sub/y.stl"], { text: "hero", path: "/kit" })
+    ).json()) as Answer;
+    // `name` is collection-relative, so the scope folder is passed through too.
+    expect(body.entries[0]?.name).toBe("kit/sub/y.stl");
+    expect(body.entries[0]?.ancestorNames).toEqual([
+      "Player Character Pack 03",
+      "Sub Assemblies",
+    ]);
+  });
+
+  it("returns a hit spelled unlike its path, with no names along it", async () => {
+    const top = namedLibrary(true);
+    const body = (await (
+      await ask(top, ["./kit/x.stl"], { text: "cleric" })
+    ).json()) as Answer;
+    expect(body.entries).toHaveLength(1);
+    expect(body.entries[0]?.path).toBe("/kit/x.stl");
+    expect(body.entries[0]?.displayName).toBe("Kindle Cleric");
+    expect(Object.keys(body.entries[0]!)).not.toContain("ancestorNames");
   });
 });

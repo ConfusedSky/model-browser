@@ -13,8 +13,15 @@ export interface DirEntry {
   size: number;
   /** mtime (ms). For zip entries this is the containing zip's mtime. */
   mtime: number;
-  /** The override store's name for this exact path. Display only — `name` stays the title and what search matches (library-overrides D7). */
+  /** The override store's name for this exact path: the label, and matched by search beside `name`, which stays the title (`file-search`, *Names match term by term*). */
   displayName?: string;
+  /**
+   * Models only: one slot per folder segment of `name` (every segment but the
+   * file), outermost first, holding that folder's or archive's stored name or
+   * `null`. Absent when every slot would be `null`. Matched so Narrow finds what a
+   * search would, and shown in the tile's folder line; never the title.
+   */
+  ancestorNames?: (string | null)[];
   /** What the server's caches already held when the listing was emitted; absent means not derived, not "none" (`listing-tree-cache`). */
   thumb?: ThumbInfo;
   /**

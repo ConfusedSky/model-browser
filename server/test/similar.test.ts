@@ -17,6 +17,7 @@ import {
 } from "vitest";
 import { createApp } from "../src/app";
 import { ThumbCache } from "../src/cache";
+import { MARKER_DIR } from "../src/library";
 import { resetIndexStatus } from "../src/semantic";
 import { LOOPBACK, libraryFor, realTempDir, stlBytes } from "./helpers";
 
@@ -504,5 +505,58 @@ describe("a collection beneath the library top", () => {
       globalThis.fetch as unknown as { mock: { calls: [string][] } }
     ).mock.calls.filter((c) => String(c[0]).endsWith("/similar"));
     expect(posts).toHaveLength(0);
+  });
+});
+
+describe("neighbours are named like any listing", () => {
+  it("names the neighbours and the anchor, along their paths too", async () => {
+    // A library of its own: the holder loads a store once per resolved library.
+    const top = realTempDir("mb-sim-named-");
+    mkdirSync(join(top, "kit"), { recursive: true });
+    writeFileSync(join(top, "kit", "hero.stl"), stlBytes(1));
+    writeFileSync(join(top, "kit", "base.stl"), stlBytes(2));
+    mkdirSync(join(top, MARKER_DIR), { recursive: true });
+    writeFileSync(
+      join(top, MARKER_DIR, "overrides.json"),
+      JSON.stringify({
+        version: 1,
+        entries: {
+          "/kit": { name: "Player Character Pack 03" },
+          "/kit/hero.stl": { name: "Kindle Cleric" },
+        },
+      }),
+    );
+    stubIndex(
+      {
+        ...READY,
+        collection_root: top,
+        volume: { present: true, root: top, missing: null },
+      },
+      {
+        scope: { path: null },
+        results: [{ ...hit("kit/base.stl"), path: join(top, "kit/base.stl") }],
+      },
+    );
+    const named = createApp(
+      new ThumbCache(realTempDir("mb-sim-named-cache-")),
+      undefined,
+      undefined,
+      libraryFor(top),
+    );
+    const body = (await (
+      await named.request("/api/semantic/similar", {
+        method: "POST",
+        headers: { ...LOOPBACK, "content-type": "application/json" },
+        body: JSON.stringify({ path: "/kit/hero.stl" }),
+      })
+    ).json()) as {
+      entries: { path: string; ancestorNames?: (string | null)[] }[];
+      anchor?: { displayName?: string; ancestorNames?: (string | null)[] };
+    };
+    expect(body.anchor?.displayName).toBe("Kindle Cleric");
+    expect(body.anchor?.ancestorNames).toEqual(["Player Character Pack 03"]);
+    expect(body.entries[0]?.ancestorNames).toEqual([
+      "Player Character Pack 03",
+    ]);
   });
 });

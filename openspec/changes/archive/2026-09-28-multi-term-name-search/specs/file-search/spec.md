@@ -1,9 +1,82 @@
-# file-search Specification
+## ADDED Requirements
 
-## Purpose
-TBD - created by archiving change file-name-search. Update Purpose after archive.
+### Requirement: Names match term by term
+A name query SHALL be read as **terms**: the text is trimmed and split on runs of whitespace,
+and text with no terms is no query. Each term SHALL match case-insensitively as a substring,
+and every character of a term other than whitespace SHALL be literal — underscores, hyphens
+and dots included, so `young_bronze` is one term and matches only names containing it. An
+entry SHALL match a query only when **every** term matches it, in any order. Different terms
+MAY match different names of the entry, but a single term SHALL match within one name, never
+across two.
 
-## Requirements
+Which names a term is tested against depends on the entry's kind, and is taken below the
+root the matching runs from — the folder a search runs from, or the location of the listing
+being narrowed:
+
+- A **model**, where folder matching is on, SHALL be tested against its root-relative path
+  and against every stored display name along it: its own, and that of each folder and
+  archive containing it below the root, a folder inside an archive included.
+- A **model**, where folder matching is off (see *Search options are sticky and
+  shareable*), SHALL be tested against its own file name and its own stored display name
+  only.
+- A **directory or archive** SHALL be tested against its own name and its own stored
+  display name only, never against the names of what contains it, so that one hit does not
+  return a whole subtree of folder tiles.
+
+A stored display name is the name the library's override store holds for that exact path
+(see `library-overrides`, and `directory-browsing`, *Entries display their stored name*),
+from the store as the server has loaded it — the same store the tiles' labels are drawn
+from, so a tile can be found by the name it shows for exactly as long as it shows it. The
+root's own stored name, and those of the folders above the root, SHALL NOT take part, just
+as the root's own real name does not. Where the entries on screen are named relative to some
+other root — meaning and similarity results, named relative to the index's collection — the
+folders taken are those the entry's relative name passes through.
+
+This SHALL be one rule wherever names are matched: the deep name search, the count of name
+matches offered beside a meaning search, and the live name filter, so that typing text and
+submitting it mean the same thing.
+
+#### Scenario: Terms match in any order
+- **WHEN** a name search for `Young Bronze`, and another for `Bronze Young`, runs from the top of a library holding `Bronze_Dragon_2832574/Young_Bronze_Dragon.stl`
+- **THEN** that model is among the results of both
+
+#### Scenario: A separator inside a term is literal
+- **WHEN** a name search for `young_bronze` runs over a library holding `Young_Bronze_Dragon.stl` and `Young-Bronze.stl`
+- **THEN** the first matches and the second does not, the query being one term that contains an underscore
+
+#### Scenario: Every term must match
+- **WHEN** a name search for `bronze paladin` runs over a library where no model's names hold both words
+- **THEN** nothing matches, although each word alone would match something
+
+#### Scenario: A folder is found by its stored name
+- **WHEN** the folder `DD_minis_945822` has the stored name "D&D minis" and a name search for `D&D` runs from the library's top
+- **THEN** that folder is a result tile, and the models inside it are results too
+
+#### Scenario: Terms may be split across names
+- **WHEN** a name search for `D&D paladin` runs from the library's top, "D&D" appearing only in the stored name "D&D minis" of the folder `DD_minis_945822`, and "paladin" only in the file name of `DD_minis_945822/paladin.stl`
+- **THEN** that model is a result
+
+#### Scenario: A container matches on its own names only
+- **WHEN** the folder `Kit` has the stored name "Heroes", its subfolder `Kit/bases` has none, and a name search for `heroes bases` runs from the library's top
+- **THEN** the models under `Kit/bases` are results, while `Kit/bases` itself is not a result tile, since "heroes" is in neither of its own names
+
+#### Scenario: The root's stored name does not match
+- **WHEN** the user searches by name for `D&D` from inside `DD_minis_945822`, whose stored name is "D&D minis"
+- **THEN** no entry is returned on the strength of that folder's stored name
+
+#### Scenario: File-name-only matching ignores the folders' stored names
+- **WHEN** folder matching is off and a name search for `D&D paladin` runs from the library's top
+- **THEN** `DD_minis_945822/paladin.stl` is not a result, since "d&d" is in neither its file name nor its own stored name
+
+#### Scenario: Typing what was submitted keeps every result
+- **WHEN** the user submits `D&D paladin` in name mode, then opens the find control over the results and types the same text
+- **THEN** every result stays visible
+
+#### Scenario: A library without stored names
+- **WHEN** a library has no override store and a query of one term is submitted
+- **THEN** a model matches exactly when its root-relative path contains the term, and a container when its own name does
+
+## MODIFIED Requirements
 
 ### Requirement: Live name filter
 The client SHALL offer a name filter that narrows the tiles currently on screen as the user types, matching each entry by *Names match term by term*, with folder matching on and the listing's own location as the root, across every entry kind (directories, zips, models) and in nested, flat, and deep-search views alike. Narrowing a nested, flat or name-search listing by some text SHALL therefore keep exactly those of its entries that a name search for the same text from the same location, with folder matching on, would match. Meaning and similarity results are named relative to the index's collection rather than to the listing's location, and SHALL be narrowed by the same rule over the names they carry: their real relative path, their own stored name, and the stored names of the folders that path passes through (see `directory-browsing`, *Entries display their stored name*). The filter SHALL be typed in a dedicated find control that the user summons — by the platform's find shortcut, pressed outside a text field or in the search input while it is empty, or by an equivalent visible control, a *Narrow* toggle in the toolbar that is shown whatever the grid holds and marked pressed while the find control is open — and dismisses, rather than in the input used to submit searches. That input SHALL NOT filter: the text that produced the current results SHALL remain in it, editable and re-submittable, for as long as those results are on screen.
@@ -164,179 +237,3 @@ Results of any mode SHALL render as an ordinary listing — thumbnails, orbit, l
 #### Scenario: Meaning results narrow by stored names too
 - **WHEN** meaning results include `DD_minis_945822/paladin.stl`, the folder's stored name is "D&D minis", and the user types `d&d` into the find control
 - **THEN** that tile stays visible
-
-### Requirement: Search options are sticky and shareable
-The client SHALL offer two options governing a deep search: whether matching considers a model's containing folders and archives or only its own file name, and whether results present containers, models, or both. Folder matching SHALL default to on, and the kind option SHALL default to both.
-
-Each option SHALL be persisted per browser profile, so a subsequent search in that profile uses the last settings the user chose, and each SHALL also be carried in the URL alongside the query, so a copied or bookmarked search reproduces the results its sender saw rather than the recipient's stored settings. Options carried in a URL SHALL govern searches made from it without being written to the recipient's stored settings; only the user operating a control SHALL change what is stored. Where a URL names a committed search, an option it does not carry SHALL be taken as that option's default rather than as the viewer's stored preference — otherwise a link written under default options would reproduce the recipient's settings instead of the sender's view. Restoring such a view from history SHALL restore the options it ran under, and two views differing only by their options SHALL be treated as different views.
-
-While a query is committed, changing an option SHALL take effect immediately rather than at the next search: an option that determines what the server returns SHALL re-issue the search, under the same latest-wins supersession, loading feedback, and history behavior as any other committed view change; an option that only selects among returned entries SHALL apply without a request. The truncation and empty-state reporting SHALL keep describing what the user is actually looking at under the options in force.
-
-#### Scenario: Options persist across searches and sessions
-- **WHEN** the user turns folder matching off, searches, navigates away, and later searches again in the same browser profile
-- **THEN** the later search still has folder matching off, without the user setting it again
-
-#### Scenario: A shared search reproduces the sender's results
-- **WHEN** a user copies the URL of a search made with particular options and another profile opens it
-- **THEN** that profile sees the same results the sender saw, under the sender's options rather than its own stored ones
-
-#### Scenario: A link written under default options still reproduces
-- **WHEN** a user whose options are the defaults shares a search URL, and a recipient whose stored options differ opens it
-- **THEN** the recipient sees the sender's results, because the options the URL omits are the defaults rather than the recipient's settings
-
-#### Scenario: History restores the options a view ran under
-- **WHEN** the user changes an option with a query committed and then goes back
-- **THEN** the earlier results return under the options they ran under, rather than the URL changing while the grid stays as it is
-
-#### Scenario: A shared link does not reconfigure the recipient
-- **WHEN** a profile opens a search link carrying options different from its stored ones, then navigates away and starts a fresh search
-- **THEN** the fresh search uses that profile's own stored options — the link governed only the view it named
-
-#### Scenario: Changing an option acts on the results on screen
-- **WHEN** the user changes an option while search results are displayed
-- **THEN** the grid reflects the new option immediately — re-searching if the option changes what the server returns, and re-presenting the existing results if it only selects among them
-
-#### Scenario: Narrowing to one kind
-- **WHEN** a search matches both folders and models and the user restricts results to folders
-- **THEN** only the matching folders are presented, and the empty-state and truncation wording describe that view rather than the unrestricted one
-
-#### Scenario: File-name-only matching still finds parts
-- **WHEN** the user turns folder matching off and searches a fragment that appears in folder names but not in any file name
-- **THEN** no models are returned on the strength of their folders, and the empty state says nothing matched rather than implying the search was incomplete
-
-### Requirement: Leaving a search puts the profile's own options back
-A committed search can run under options that are not the profile's own — a link's, or a
-corpus the query's shape chose (see `semantic-search`). Leaving it — by the results line's
-dismissal, by emptying the search input, by navigating, by pressing the flat toggle, which
-supersedes a committed search with an ordinary listing, or by finding models similar to one of
-its results, which supersedes it with a similarity view — SHALL put the profile's own stored
-options back in force, the search mode among them, so that the next phrase typed is read under
-the profile's choices rather than under the ones the departed search ran with. The view that
-dismissal returns to SHALL be named and retraced with those options (see `url-navigation`, *The
-URL names the committed view*; `directory-browsing`, *Retracing restores the grid's place*).
-
-#### Scenario: A link's options end with the link's search
-- **WHEN** a profile opens a search link carrying options different from its stored ones, dismisses the search, and submits a new query without navigating
-- **THEN** the new query runs under the profile's stored options
-
-#### Scenario: A routed search does not leave its corpus behind
-- **WHEN** a query was asked of the names because it looked like a file name, under a profile whose mode is meaning, and the user empties the search input
-- **THEN** meaning mode is in force again, and the next phrase submitted runs by meaning
-
-#### Scenario: The flat toggle leaves a routed search too
-- **WHEN** a query was asked of the names because it looked like a file name, under a profile whose mode is meaning, and the user presses the flat toggle over its results
-- **THEN** the flat listing replaces the results, meaning mode is in force again, and the next phrase submitted runs by meaning
-
-#### Scenario: Finding similar leaves a routed search too
-- **WHEN** a query was asked of the names because it looked like a file name, under a profile whose mode is meaning, and the user finds models similar to one of its results
-- **THEN** the neighbours replace the results and meaning mode is in force again over them
-
-### Requirement: An empty search offers a way onward
-A committed search that completed with nothing to show SHALL say where it looked — naming the
-folder it ran from where that is not the library's top — and SHALL offer the likeliest repairs
-as controls rather than leave a dead end. From a folder below the top it SHALL offer to run the
-same text over the whole library in the same corpus, where that corpus can run at the top. It
-SHALL offer to run the same text against the other corpus — names from an empty meaning search,
-meaning from an empty name search where meaning search can run at the location — without storing that corpus as the profile's mode (see `semantic-search`). The messages that already distinguish a truncated name
-search and an unindexed location keep their own wording and are not given these offers.
-
-#### Scenario: Nothing in this folder
-- **WHEN** a name search for "dragon" from the folder `Battletech` completes with no matches, and meaning search can run there
-- **THEN** the page says nothing matched “dragon” in Battletech, and offers "Search the whole library" and "Search by meaning instead"
-
-#### Scenario: Nothing by meaning
-- **WHEN** a meaning search from the library's top returns nothing
-- **THEN** the page says nothing matched and offers "Search names instead", and no whole-library offer, since it already covered the library
-
-### Requirement: The search field says what and where it searches
-The search input SHALL carry, inside it, the control that selects its mode wherever meaning
-search can run at the location or is in force (see `semantic-search`, *Meaning search is a mode
-of the search input*), and its placeholder SHALL say what a search will match and where it
-starts: file and folder names or a description of a model, at the library's top or in the
-current folder by name — except where the introduction offers an example phrase in its place
-(see `visitor-intro`, *Example queries reach a visitor who no longer sees the banner*). Its accessible name, and the submit control's description, SHALL follow
-the mode in force — and SHALL change only when the mode does, never with the placeholder.
-
-#### Scenario: The placeholder names the folder
-- **WHEN** the user is in the folder `Battletech` with name mode in force and the input empty
-- **THEN** the placeholder reads "Search names in Battletech…"
-
-#### Scenario: The accessible name follows the mode
-- **WHEN** the user switches the input's mode from Name to Meaning
-- **THEN** its accessible name changes from searching file and folder names to searching by meaning
-
-### Requirement: Names match term by term
-A name query SHALL be read as **terms**: the text is trimmed and split on runs of whitespace,
-and text with no terms is no query. Each term SHALL match case-insensitively as a substring,
-and every character of a term other than whitespace SHALL be literal — underscores, hyphens
-and dots included, so `young_bronze` is one term and matches only names containing it. An
-entry SHALL match a query only when **every** term matches it, in any order. Different terms
-MAY match different names of the entry, but a single term SHALL match within one name, never
-across two.
-
-Which names a term is tested against depends on the entry's kind, and is taken below the
-root the matching runs from — the folder a search runs from, or the location of the listing
-being narrowed:
-
-- A **model**, where folder matching is on, SHALL be tested against its root-relative path
-  and against every stored display name along it: its own, and that of each folder and
-  archive containing it below the root, a folder inside an archive included.
-- A **model**, where folder matching is off (see *Search options are sticky and
-  shareable*), SHALL be tested against its own file name and its own stored display name
-  only.
-- A **directory or archive** SHALL be tested against its own name and its own stored
-  display name only, never against the names of what contains it, so that one hit does not
-  return a whole subtree of folder tiles.
-
-A stored display name is the name the library's override store holds for that exact path
-(see `library-overrides`, and `directory-browsing`, *Entries display their stored name*),
-from the store as the server has loaded it — the same store the tiles' labels are drawn
-from, so a tile can be found by the name it shows for exactly as long as it shows it. The
-root's own stored name, and those of the folders above the root, SHALL NOT take part, just
-as the root's own real name does not. Where the entries on screen are named relative to some
-other root — meaning and similarity results, named relative to the index's collection — the
-folders taken are those the entry's relative name passes through.
-
-This SHALL be one rule wherever names are matched: the deep name search, the count of name
-matches offered beside a meaning search, and the live name filter, so that typing text and
-submitting it mean the same thing.
-
-#### Scenario: Terms match in any order
-- **WHEN** a name search for `Young Bronze`, and another for `Bronze Young`, runs from the top of a library holding `Bronze_Dragon_2832574/Young_Bronze_Dragon.stl`
-- **THEN** that model is among the results of both
-
-#### Scenario: A separator inside a term is literal
-- **WHEN** a name search for `young_bronze` runs over a library holding `Young_Bronze_Dragon.stl` and `Young-Bronze.stl`
-- **THEN** the first matches and the second does not, the query being one term that contains an underscore
-
-#### Scenario: Every term must match
-- **WHEN** a name search for `bronze paladin` runs over a library where no model's names hold both words
-- **THEN** nothing matches, although each word alone would match something
-
-#### Scenario: A folder is found by its stored name
-- **WHEN** the folder `DD_minis_945822` has the stored name "D&D minis" and a name search for `D&D` runs from the library's top
-- **THEN** that folder is a result tile, and the models inside it are results too
-
-#### Scenario: Terms may be split across names
-- **WHEN** a name search for `D&D paladin` runs from the library's top, "D&D" appearing only in the stored name "D&D minis" of the folder `DD_minis_945822`, and "paladin" only in the file name of `DD_minis_945822/paladin.stl`
-- **THEN** that model is a result
-
-#### Scenario: A container matches on its own names only
-- **WHEN** the folder `Kit` has the stored name "Heroes", its subfolder `Kit/bases` has none, and a name search for `heroes bases` runs from the library's top
-- **THEN** the models under `Kit/bases` are results, while `Kit/bases` itself is not a result tile, since "heroes" is in neither of its own names
-
-#### Scenario: The root's stored name does not match
-- **WHEN** the user searches by name for `D&D` from inside `DD_minis_945822`, whose stored name is "D&D minis"
-- **THEN** no entry is returned on the strength of that folder's stored name
-
-#### Scenario: File-name-only matching ignores the folders' stored names
-- **WHEN** folder matching is off and a name search for `D&D paladin` runs from the library's top
-- **THEN** `DD_minis_945822/paladin.stl` is not a result, since "d&d" is in neither its file name nor its own stored name
-
-#### Scenario: Typing what was submitted keeps every result
-- **WHEN** the user submits `D&D paladin` in name mode, then opens the find control over the results and types the same text
-- **THEN** every result stays visible
-
-#### Scenario: A library without stored names
-- **WHEN** a library has no override store and a query of one term is submitted
-- **THEN** a model matches exactly when its root-relative path contains the term, and a container when its own name does

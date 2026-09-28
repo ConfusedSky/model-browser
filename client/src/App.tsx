@@ -20,6 +20,7 @@ import type {
   OrbitAxis,
 } from "../../shared/types";
 import { EXAMPLE_QUERIES } from "../../shared/exampleQueries";
+import { matchesTerms, queryTerms } from "../../shared/nameMatch";
 import { HttpApiClient, HttpError, type ApiClient } from "./api/client";
 import { withLocalFramings } from "./api/localFramings";
 import EntryMenu from "./components/EntryMenu";
@@ -82,7 +83,6 @@ import {
   setSearchTuning,
   resolveTuning,
   optionsOffDefault,
-  looksLikeDescription,
   looksLikeFileName,
   type SearchKinds,
   type SearchMode,
@@ -634,11 +634,11 @@ export default function App() {
   /** The GPU context is gone: nothing more will draw until it comes back. */
   const [glLost, setGlLost] = useState(false);
   useEffect(() => onContextLost(setGlLost), []);
-  /** The query last sent to the other corpus because its words belonged
-   *  there: a file name to the names, a description to meaning. */
+  /** The query last sent to the names from meaning mode because it looked like
+   *  a file name, which meaning search cannot find. */
   const [autoMode, setAutoMode] = useState<{
     text: string;
-    mode: SearchMode;
+    mode: "name";
   } | null>(null);
   const [tileSize, setTileSize] = useState<TileSize>(() =>
     tileSizeStore.read(),
@@ -1410,15 +1410,6 @@ export default function App() {
       commit({ type: "submit", mode: "name" });
       return;
     }
-    if (
-      live.mode === "name" &&
-      looksLikeDescription(text) &&
-      meaningRunnableAt(state.index, target)
-    ) {
-      setAutoMode({ text, mode: "meaning" });
-      commit({ type: "submit", mode: "meaning" });
-      return;
-    }
     setAutoMode(null);
     commit({ type: "submit" });
   }
@@ -1811,10 +1802,10 @@ export default function App() {
     dispatch({ type: "modelClose" });
   }, [dispatch]);
 
-  // Matches the full `name`, which in flat views is a relative path rather than
-  // the tile's label. Trimmed, because a trailing space must not blank a grid
-  // of names with spaces in them.
-  const needle = findText.trim().toLowerCase();
+  // The server search's own matcher (`file-search`, *Names match term by
+  // term*), so typing a query keeps what submitting it from here would match —
+  // containers by their own names only, as the search does.
+  const terms = useMemo(() => queryTerms(findText), [findText]);
   // Kind first, then the filter, so an empty grid can name what emptied it. The
   // dep is deliberately narrower than the selector's argument: a fresh array
   // per state change would re-render every tile for an availability tick.
@@ -1895,12 +1886,12 @@ export default function App() {
 
   const filteredListing = useMemo(() => {
     const narrowed =
-      needle === ""
+      terms.length === 0
         ? kept
-        : kept.filter((e) => e.name.toLowerCase().includes(needle));
+        : kept.filter((e) => matchesTerms(terms, e, true));
     // A weak set is a row of guesses, not a page of them, until asked.
     return guessesCapped ? narrowed.slice(0, WEAK_SHOWN) : narrowed;
-  }, [kept, needle, guessesCapped]);
+  }, [kept, terms, guessesCapped]);
   // Prepended here and nowhere earlier, so it is shown and never counted —
   // **exempt from the find filter** too, or the neighbours have nothing to say
   // what they are near.
@@ -2002,7 +1993,7 @@ export default function App() {
   );
   const kindHidesAll = entries.length > 0 && kept.length === 0;
   const filterHidesAll =
-    needle !== "" && kept.length > 0 && filteredListing.length === 0;
+    terms.length > 0 && kept.length > 0 && filteredListing.length === 0;
   // On the subject, not a phrase: an empty *similarity* result is an answer
   // that found nothing, and no query string says so (4.6b).
   const searchHasNoMatches =
@@ -2554,21 +2545,6 @@ export default function App() {
                         className={NOTE_ACTION_CLASS}
                       >
                         Search by meaning instead
-                      </button>
-                    </>
-                  ),
-                label.meaning &&
-                  autoMode?.mode === "meaning" &&
-                  autoMode.text === labelQuery && (
-                    <>
-                      Searched by meaning — “{labelQuery}” reads like a
-                      description.{" "}
-                      <button
-                        type="button"
-                        onClick={() => switchModeOnce("name")}
-                        className={NOTE_ACTION_CLASS}
-                      >
-                        Search names instead
                       </button>
                     </>
                   ),

@@ -258,18 +258,60 @@ export function displayNameOf(
 }
 
 /**
- * Names attached in place, where a listing becomes wire bytes (D7) — not inside
- * `listing.ts`, since not every listing leaves it through `wire`. **Exact key,
- * never the prefix resolution**: a kit's name labels its own tile only.
+ * One slot per folder or archive `libPath` passes through below `prefix`,
+ * outermost first: its stored name, or `null`. `prefix` is the entry's path less
+ * its `name`, so the slots line up with the folder segments of `name`, and the
+ * search filter and the naming pass cannot disagree about which folders count;
+ * the root itself is never one (`multi-term-name-search` D2, D3). `[]` from an
+ * empty store.
+ */
+export function namesBelow(
+  store: OverrideStore,
+  prefix: string,
+  libPath: string,
+): (string | null)[] {
+  if (store.size === 0) return [];
+  const slots: (string | null)[] = [];
+  for (const key of ancestorKeys(libPath)) {
+    if (key.length <= prefix.length || !key.startsWith(prefix)) continue;
+    if (key === libPath) continue;
+    slots.push(store.get(key)?.name ?? null);
+  }
+  return slots;
+}
+
+/**
+ * Names ride every answer that holds tiles — listings, meaning and similarity
+ * results — rather than a lookup per tile (D7), attached in place where the
+ * answer becomes wire bytes. Not inside `listing.ts`: not every answer leaves
+ * through `wire`, and the search filter there reads the store without writing onto
+ * entries a snapshot may share. **Exact key, never the prefix resolution**: a kit's
+ * name labels its own tile only. `along` adds a model's `ancestorNames`, which
+ * Narrow matches on and the tile's folder line shows.
  */
 export function applyDisplayNames(
   entries: DirEntry[],
   store: OverrideStore,
+  opts: { along?: boolean } = {},
 ): void {
   if (store.size === 0) return;
   for (const entry of entries) {
     const name = displayNameOf(store, entry.path);
     if (name !== undefined) entry.displayName = name;
+    // A meaning hit's `name` is the index's raw `rel_path`, which may be spelled
+    // unlike its normalised `path`; then no prefix can be derived from the pair.
+    if (
+      opts.along === true &&
+      entry.kind === "model" &&
+      entry.path.endsWith(entry.name)
+    ) {
+      const along = namesBelow(
+        store,
+        entry.path.slice(0, -entry.name.length),
+        entry.path,
+      );
+      if (along.some((n) => n !== null)) entry.ancestorNames = along;
+    }
     // An inline contact sheet (`listing-tree-cache` 6.3) holds model tiles the
     // client labels like any other (D7), and the preview layer stores them
     // pre-naming, so this pass is the only thing that names them.

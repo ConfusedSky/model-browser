@@ -494,7 +494,7 @@ describe("deep name search (q parameter)", () => {
       src.indexOf("function envLimit"),
     );
     expect(walkSrc).not.toMatch(
-      /matchesQuery|matchesOwnName|\bhasQuery\b|walk\.q\b/,
+      /matchesTerms|matchesNamed|queryTerms|\bhasQuery\b|walk\.q\b/,
     );
   });
 

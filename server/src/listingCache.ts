@@ -8,6 +8,7 @@
 import type { DirEntry, DirListing } from "../../shared/types";
 import { DerivedLayers } from "./layers";
 import type { Library } from "./library";
+import type { OverrideStore } from "./overrides";
 import {
   ListingError,
   RevalidationError,
@@ -45,7 +46,7 @@ export class ListingCache {
     library: Library,
     libPath: string,
     query?: string,
-    opts: { folderMatching?: boolean } = {},
+    opts: { folderMatching?: boolean; names?: OverrideStore } = {},
   ): Promise<DirListing> {
     const store = this.store;
     if (store === undefined)
