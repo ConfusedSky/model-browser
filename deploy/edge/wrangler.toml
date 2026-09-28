@@ -1,0 +1,20 @@
+name = "model-browser-edge"
+main = "worker.ts"
+compatibility_date = "2026-09-01"
+workers_dev = false
+
+# The trailing `*` is load-bearing: route matching covers the query string.
+routes = [
+  { pattern = "models.masamaeda.com/api/thumb/image*", zone_name = "masamaeda.com" },
+  { pattern = "models.masamaeda.com/api/model.glb*", zone_name = "masamaeda.com" },
+]
+
+[[r2_buckets]]
+binding = "STORE"
+bucket_name = "model-browser-edge"
+
+# Advance after the change reaches the box, never before: a thumbnail epoch per
+# bake ship, a mesh epoch per corpus change, both when the byte routes' headers change.
+[vars]
+THUMB_EPOCH = "2026-09-28"
+MESH_EPOCH = "2026-09-28"

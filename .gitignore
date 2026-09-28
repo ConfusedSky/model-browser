@@ -10,3 +10,6 @@ deploy/demo/cache/
 # frame-ab harness (scripts/frame-ab/README.md): per-run renders, and the machine-local config
 scripts/frame-ab/out/
 scripts/frame-ab/config.json
+
+# wrangler dev's local state (deploy/edge/wrangler.toml)
+deploy/edge/.wrangler/
