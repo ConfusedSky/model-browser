@@ -4,9 +4,10 @@
  * never touches R2. A second pass over the same URLs is the check: a `filled`
  * answer only says the Worker tried, the put running after the response.
  *
- *   bun deploy/edge/backfill.ts [--host <url>] [--concurrency <n>] [--dry] [--limit <n>]
+ *   bun deploy/edge/backfill.ts [--host <url>] [--concurrency <n>] [--limit <n>] [--dry]
  *
- * Exits 0 only when every second-pass answer is a store `hit`.
+ * Exits 0 only when every model was annotated and every second-pass answer is
+ * a store `hit`; 2 on a usage error.
  */
 import type { DirEntry, DirListing } from "../../shared/types";
 import { thumbImageUrl } from "../../client/src/api/thumbUrl";
@@ -42,7 +43,41 @@ export function step(listing: DirListing): {
   };
 }
 
-export async function walk(host: string): Promise<DirEntry[]> {
+/** A walk that cannot vouch for what it found; the message names the folder. */
+export class WalkError extends Error {}
+
+export interface WalkOptions {
+  fetchFn?: typeof fetch;
+  /** How many times a `stale` listing is re-asked before the walk gives up. */
+  retries?: number;
+  backoffMs?: number;
+}
+
+export interface Walked {
+  models: DirEntry[];
+  /** Models listed before the server annotated them, whose thumbnails go unasked. */
+  unannotated: number;
+}
+
+export async function walk(
+  host: string,
+  { fetchFn = fetch, retries = 5, backoffMs = 1000 }: WalkOptions = {},
+): Promise<Walked> {
+  const list = async (folder: string): Promise<DirListing> => {
+    let res: Response;
+    try {
+      res = await fetchFn(`${host}/api/dir?path=${encodeURIComponent(folder)}`);
+    } catch (e) {
+      throw new WalkError(`${folder}: /api/dir failed: ${String(e)}`);
+    }
+    if (!res.ok)
+      throw new WalkError(`${folder}: /api/dir answered ${res.status}`);
+    try {
+      return (await res.json()) as DirListing;
+    } catch {
+      throw new WalkError(`${folder}: /api/dir answered something not JSON`);
+    }
+  };
   const models: DirEntry[] = [];
   const queue = ["/"];
   for (
@@ -50,15 +85,26 @@ export async function walk(host: string): Promise<DirEntry[]> {
     folder !== undefined;
     folder = queue.shift()
   ) {
-    const res = await fetch(
-      `${host}/api/dir?path=${encodeURIComponent(folder)}`,
-    );
-    if (!res.ok) throw new Error(`${folder}: /api/dir answered ${res.status}`);
-    const next = step((await res.json()) as DirListing);
+    let listing = await list(folder);
+    // A stale listing's annotations predate the revalidation it announces.
+    for (let tries = 0; listing.stale === true; tries++) {
+      if (tries === retries)
+        throw new WalkError(
+          `${folder}: still stale after ${retries} re-asks; the server has not settled`,
+        );
+      await new Promise((r) => setTimeout(r, backoffMs * (tries + 1)));
+      listing = await list(folder);
+    }
+    if (listing.truncated === true)
+      throw new WalkError(`${folder}: the listing was truncated`);
+    const next = step(listing);
     queue.push(...next.folders);
     models.push(...next.models);
   }
-  return models;
+  return {
+    models,
+    unannotated: models.filter((m) => m.thumb === undefined).length,
+  };
 }
 
 export interface Answer {
@@ -99,58 +145,113 @@ async function get(host: string, url: string): Promise<Answer> {
   }
 }
 
-function tally(answers: Answer[], key: (a: Answer) => string) {
+function tally(keys: string[]): Record<string, number> {
   const counts: Record<string, number> = {};
-  for (const a of answers) counts[key(a)] = (counts[key(a)] ?? 0) + 1;
+  for (const k of keys) counts[k] = (counts[k] ?? 0) + 1;
   return counts;
 }
 
 function report(label: string, answers: Answer[]): void {
+  const stores = tally(answers.map((a) => a.store));
+  const statuses = tally(answers.map((a) => String(a.status)));
   console.log(
-    `${label}: ${answers.length} GETs; store ${JSON.stringify(tally(answers, (a) => a.store))}; status ${JSON.stringify(tally(answers, (a) => String(a.status)))}`,
+    `${label}: ${answers.length} GETs; store ${JSON.stringify(stores)}; status ${JSON.stringify(statuses)}`,
   );
 }
 
-function args(argv: string[]) {
-  const opt = (name: string) => {
-    const i = argv.indexOf(name);
-    return i === -1 ? undefined : argv[i + 1];
-  };
-  return {
-    host: (opt("--host") ?? "https://models.masamaeda.com").replace(/\/$/, ""),
-    concurrency: Number(opt("--concurrency") ?? 2),
-    limit: opt("--limit") === undefined ? Infinity : Number(opt("--limit")),
-    dry: argv.includes("--dry"),
-  };
+const USAGE =
+  "usage: bun deploy/edge/backfill.ts [--host <url>] [--concurrency <n>] [--limit <n>] [--dry]";
+
+export interface Options {
+  host: string;
+  concurrency: number;
+  limit: number;
+  dry: boolean;
 }
+
+export function parseArgs(
+  argv: string[],
+): { ok: true; options: Options } | { ok: false; error: string } {
+  const options: Options = {
+    host: "https://models.masamaeda.com",
+    concurrency: 2,
+    limit: Infinity,
+    dry: false,
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const name = argv[i];
+    if (name === "--dry") {
+      options.dry = true;
+      continue;
+    }
+    if (name !== "--host" && name !== "--concurrency" && name !== "--limit")
+      return { ok: false, error: `unknown option "${name}"` };
+    const v = argv[++i];
+    if (v === undefined || v.startsWith("--"))
+      return { ok: false, error: `${name} needs a value` };
+    if (name === "--host") {
+      options.host = v.replace(/\/$/, "");
+      continue;
+    }
+    if (!/^[1-9][0-9]*$/.test(v))
+      return {
+        ok: false,
+        error: `${name} needs an integer above 0, not "${v}"`,
+      };
+    options[name === "--limit" ? "limit" : "concurrency"] = Number(v);
+  }
+  return { ok: true, options };
+}
+
+const kindOf = (url: string) =>
+  url.startsWith("/api/model.glb")
+    ? "glb"
+    : url.includes("&ao=off")
+      ? "noao"
+      : "ao";
 
 async function main(): Promise<number> {
-  const { host, concurrency, limit, dry } = args(process.argv.slice(2));
-  const models = await walk(host);
-  const urls = models.flatMap(urlsFor);
-  const kinds = tally(
-    urls.map((url) => ({ url, status: 0, store: "" })),
-    (a) =>
-      a.url.startsWith("/api/model.glb")
-        ? "glb"
-        : a.url.includes("&ao=off")
-          ? "noao"
-          : "ao",
-  );
+  const parsed = parseArgs(process.argv.slice(2));
+  if (!parsed.ok) {
+    console.error(`${parsed.error}\n${USAGE}`);
+    return 2;
+  }
+  const { host, concurrency, limit, dry } = parsed.options;
+  let walked: Walked;
+  try {
+    walked = await walk(host);
+  } catch (e) {
+    if (!(e instanceof WalkError)) throw e;
+    console.error(`walk failed: ${e.message}`);
+    return 1;
+  }
+  const { models, unannotated } = walked;
+  const all = models.flatMap(urlsFor);
+  const urls = all.slice(0, limit);
   console.log(
-    `${host}: ${models.length} models, ${urls.length} URLs ${JSON.stringify(kinds)}`,
+    `${host}: ${models.length} models, ${unannotated} unannotated, ${all.length} URLs ${JSON.stringify(tally(all.map(kindOf)))}`,
   );
-  if (dry) return 0;
-  const chosen = urls.slice(0, limit);
-  if (chosen.length < urls.length)
-    console.log(`limited to the first ${chosen.length}`);
-  report("pass 1", await pool(chosen, concurrency, (u) => get(host, u)));
-  const second = await pool(chosen, concurrency, (u) => get(host, u));
+  if (urls.length < all.length)
+    console.log(`limited to the first ${urls.length}`);
+  const settled = () => {
+    if (unannotated === 0) return true;
+    console.log(
+      `${unannotated} models carry no thumbnail annotation, so their thumbnails went unasked; rerun once the server's startup sweep has finished`,
+    );
+    return false;
+  };
+  if (urls.length === 0) {
+    console.log("no URLs to fetch");
+    return 1;
+  }
+  if (dry) return settled() ? 0 : 1;
+  report("pass 1", await pool(urls, concurrency, (u) => get(host, u)));
+  const second = await pool(urls, concurrency, (u) => get(host, u));
   report("pass 2", second);
   const missed = second.filter((a) => a.store !== "hit");
   for (const a of missed)
     console.log(`not hit: ${a.store} ${a.status} ${a.url}`);
-  return missed.length === 0 ? 0 : 1;
+  return settled() && missed.length === 0 ? 0 : 1;
 }
 
 if (import.meta.main) process.exit(await main());
