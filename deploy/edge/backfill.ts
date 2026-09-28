@@ -6,10 +6,14 @@
  *
  *   bun deploy/edge/backfill.ts [--host <url>] [--concurrency <n>] [--limit <n>] [--dry]
  *
- * Exits 0 only when every model was annotated and every second-pass answer is
- * a store `hit`; 2 on a usage error.
+ * Exits 0 only when every second-pass answer is a store `hit`; 2 on a usage
+ * error.
  */
-import type { DirEntry, DirListing } from "../../shared/types";
+import type {
+  DirEntry,
+  DirListing,
+  ThumbGetResponse,
+} from "../../shared/types";
 import { thumbImageUrl } from "../../client/src/api/thumbUrl";
 
 /** Relative URLs for every byte the store could hold for one listing entry. */
@@ -43,8 +47,8 @@ export function step(listing: DirListing): {
   };
 }
 
-/** A walk that cannot vouch for what it found; the message names the folder. */
-export class WalkError extends Error {}
+/** A run that cannot vouch for what it found; the message names the folder or model. */
+export class BackfillError extends Error {}
 
 export interface WalkOptions {
   fetchFn?: typeof fetch;
@@ -53,29 +57,25 @@ export interface WalkOptions {
   backoffMs?: number;
 }
 
-export interface Walked {
-  models: DirEntry[];
-  /** Models listed before the server annotated them, whose thumbnails go unasked. */
-  unannotated: number;
-}
-
 export async function walk(
   host: string,
   { fetchFn = fetch, retries = 5, backoffMs = 1000 }: WalkOptions = {},
-): Promise<Walked> {
+): Promise<DirEntry[]> {
   const list = async (folder: string): Promise<DirListing> => {
     let res: Response;
     try {
       res = await fetchFn(`${host}/api/dir?path=${encodeURIComponent(folder)}`);
     } catch (e) {
-      throw new WalkError(`${folder}: /api/dir failed: ${String(e)}`);
+      throw new BackfillError(`${folder}: /api/dir failed: ${String(e)}`);
     }
     if (!res.ok)
-      throw new WalkError(`${folder}: /api/dir answered ${res.status}`);
+      throw new BackfillError(`${folder}: /api/dir answered ${res.status}`);
     try {
       return (await res.json()) as DirListing;
     } catch {
-      throw new WalkError(`${folder}: /api/dir answered something not JSON`);
+      throw new BackfillError(
+        `${folder}: /api/dir answered something not JSON`,
+      );
     }
   };
   const models: DirEntry[] = [];
@@ -89,22 +89,81 @@ export async function walk(
     // A stale listing's annotations predate the revalidation it announces.
     for (let tries = 0; listing.stale === true; tries++) {
       if (tries === retries)
-        throw new WalkError(
+        throw new BackfillError(
           `${folder}: still stale after ${retries} re-asks; the server has not settled`,
         );
       await new Promise((r) => setTimeout(r, backoffMs * (tries + 1)));
       listing = await list(folder);
     }
     if (listing.truncated === true)
-      throw new WalkError(`${folder}: the listing was truncated`);
+      throw new BackfillError(`${folder}: the listing was truncated`);
     const next = step(listing);
     queue.push(...next.folders);
     models.push(...next.models);
   }
-  return {
-    models,
-    unannotated: models.filter((m) => m.thumb === undefined).length,
+  return models;
+}
+
+export interface Collected {
+  urls: string[];
+  /** Models the listing left unannotated, whose variants were asked for one by one. */
+  lookedUp: number;
+  /** Variants with no stored render to fill from: not asked for, and not a failure. */
+  absent: { ao: number; noao: number };
+}
+
+/**
+ * Every URL the models' stored bytes answer to. A listing annotates only what
+ * the server has already remembered, so an entry without `thumb` may still have
+ * a render on disk; `/api/thumb` is asked for each variant of those.
+ */
+export async function collect(
+  host: string,
+  models: DirEntry[],
+  { fetchFn = fetch, concurrency = 2 } = {},
+): Promise<Collected> {
+  const absent = { ao: 0, noao: 0 };
+  let lookedUp = 0;
+  const lookup = async (m: DirEntry, ao: boolean) => {
+    // `ApiClient.getThumb`'s shape with no known gen and `pixels=off`.
+    const url = `${host}/api/thumb?path=${encodeURIComponent(m.path)}&mtime=${m.mtime}${ao ? "" : "&ao=off"}&pixels=off`;
+    let res: Response;
+    try {
+      res = await fetchFn(url);
+    } catch (e) {
+      throw new BackfillError(`${m.path}: /api/thumb failed: ${String(e)}`);
+    }
+    if (!res.ok)
+      throw new BackfillError(`${m.path}: /api/thumb answered ${res.status}`);
+    let body: ThumbGetResponse;
+    try {
+      body = (await res.json()) as ThumbGetResponse;
+    } catch {
+      throw new BackfillError(
+        `${m.path}: /api/thumb answered something not JSON`,
+      );
+    }
+    // The route's own reading of an absent gen.
+    return body.status === "hit" ? (body.gen ?? 0) : undefined;
   };
+  const per = await pool(models, concurrency, async (m) => {
+    if (m.path.includes("!")) return [];
+    if (m.thumb !== undefined) {
+      if (m.thumb.ao?.state !== "hit") absent.ao++;
+      if (m.thumb.noao?.state !== "hit") absent.noao++;
+      return urlsFor(m);
+    }
+    lookedUp++;
+    const thumbs: string[] = [];
+    for (const variant of ["ao", "noao"] as const) {
+      const gen = await lookup(m, variant === "ao");
+      if (gen === undefined) absent[variant]++;
+      else thumbs.push(thumbImageUrl(m.path, m.mtime, variant === "ao", gen));
+    }
+    // Without `thumb`, `urlsFor` names the GLB alone.
+    return [...thumbs, ...urlsFor(m)];
+  });
+  return { urls: per.flat(), lookedUp, absent };
 }
 
 export interface Answer {
@@ -217,41 +276,36 @@ async function main(): Promise<number> {
     return 2;
   }
   const { host, concurrency, limit, dry } = parsed.options;
-  let walked: Walked;
+  let models: DirEntry[];
+  let collected: Collected;
   try {
-    walked = await walk(host);
+    models = await walk(host);
+    collected = await collect(host, models, { concurrency });
   } catch (e) {
-    if (!(e instanceof WalkError)) throw e;
-    console.error(`walk failed: ${e.message}`);
+    if (!(e instanceof BackfillError)) throw e;
+    console.error(`backfill failed: ${e.message}`);
     return 1;
   }
-  const { models, unannotated } = walked;
-  const all = models.flatMap(urlsFor);
+  const { lookedUp, absent } = collected;
+  const all = collected.urls;
   const urls = all.slice(0, limit);
   console.log(
-    `${host}: ${models.length} models, ${unannotated} unannotated, ${all.length} URLs ${JSON.stringify(tally(all.map(kindOf)))}`,
+    `${host}: ${models.length} models, ${lookedUp} looked up, absent ${JSON.stringify(absent)}, ${all.length} URLs ${JSON.stringify(tally(all.map(kindOf)))}`,
   );
   if (urls.length < all.length)
     console.log(`limited to the first ${urls.length}`);
-  const settled = () => {
-    if (unannotated === 0) return true;
-    console.log(
-      `${unannotated} models carry no thumbnail annotation, so their thumbnails went unasked; rerun once the server's startup sweep has finished`,
-    );
-    return false;
-  };
   if (urls.length === 0) {
     console.log("no URLs to fetch");
     return 1;
   }
-  if (dry) return settled() ? 0 : 1;
+  if (dry) return 0;
   report("pass 1", await pool(urls, concurrency, (u) => get(host, u)));
   const second = await pool(urls, concurrency, (u) => get(host, u));
   report("pass 2", second);
   const missed = second.filter((a) => a.store !== "hit");
   for (const a of missed)
     console.log(`not hit: ${a.store} ${a.status} ${a.url}`);
-  return settled() && missed.length === 0 ? 0 : 1;
+  return missed.length === 0 ? 0 : 1;
 }
 
 if (import.meta.main) process.exit(await main());

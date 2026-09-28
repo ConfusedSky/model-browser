@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { DirEntry, ThumbStatus } from "../../shared/types";
-import { parseArgs, step, urlsFor, walk, WalkError } from "./backfill";
+import {
+  BackfillError,
+  collect,
+  parseArgs,
+  step,
+  urlsFor,
+  walk,
+} from "./backfill";
 
 const PATH = "/Kit/model.stl";
 const MTIME = 1789446597239.1736;
@@ -138,7 +145,7 @@ describe("walk", () => {
     });
     const walked = await walk(HOST, opts(s.fetchFn));
     expect(s.asked).toEqual(["/", "/"]);
-    expect(walked).toEqual({ models: [m], unannotated: 0 });
+    expect(walked).toEqual([m]);
   });
 
   it("gives up on a listing that stays stale, naming the folder", async () => {
@@ -147,23 +154,9 @@ describe("walk", () => {
       "/Kit": [{ path: "/Kit", entries: [], stale: true }],
     });
     const run = walk(HOST, opts(s.fetchFn));
-    await expect(run).rejects.toThrow(WalkError);
+    await expect(run).rejects.toThrow(BackfillError);
     await expect(run).rejects.toThrow(/^\/Kit: still stale after 3 re-asks/);
     expect(s.asked.filter((f) => f === "/Kit")).toHaveLength(4);
-  });
-
-  it("counts the models that carry no annotation", async () => {
-    const bare = model("hit", "hit", {
-      path: "/Kit/bare.stl",
-      thumb: undefined,
-    });
-    const s = serve({
-      "/": [{ path: "/", entries: [dir("/Kit"), model("hit", "hit")] }],
-      "/Kit": [{ path: "/Kit", entries: [bare] }],
-    });
-    const walked = await walk(HOST, opts(s.fetchFn));
-    expect(walked.models).toHaveLength(2);
-    expect(walked.unannotated).toBe(1);
   });
 
   it("refuses a truncated listing, naming the folder", async () => {
@@ -192,6 +185,82 @@ describe("walk", () => {
     }) as typeof fetch;
     await expect(walk(HOST, opts(fetchFn))).rejects.toThrow(
       "/: /api/dir failed: TypeError: fetch failed",
+    );
+  });
+});
+
+describe("collect", () => {
+  const HOST = "http://origin.test";
+  const BARE = "/Kit/bare.stl";
+  const bare = model("hit", "hit", { path: BARE, thumb: undefined });
+  const bareQ = `path=%2FKit%2Fbare.stl&mtime=${MTIME}`;
+
+  /** `/api/thumb` answering per variant; every lookup's URL is recorded. */
+  function thumbs(answers: { ao: unknown; noao: unknown }, status = 200) {
+    const asked: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url.slice(HOST.length));
+      const body = url.includes("&ao=off") ? answers.noao : answers.ao;
+      return new Response(JSON.stringify(body), { status });
+    }) as typeof fetch;
+    return { asked, fetchFn };
+  }
+
+  it("asks nothing for an annotated model, counting its missing variants absent", async () => {
+    const s = thumbs({ ao: {}, noao: {} });
+    const got = await collect(HOST, [model("hit", "stale")], s);
+    expect(s.asked).toEqual([]);
+    expect(got).toEqual({
+      urls: [AO, GLB],
+      lookedUp: 0,
+      absent: { ao: 0, noao: 1 },
+    });
+  });
+
+  it("names an unannotated model's hit variants with the gen the lookup gave", async () => {
+    const s = thumbs({
+      ao: { status: "hit", gen: 7 },
+      noao: { status: "hit", gen: 7 },
+    });
+    const got = await collect(HOST, [bare], s);
+    expect(s.asked).toEqual([
+      `/api/thumb?${bareQ}&pixels=off`,
+      `/api/thumb?${bareQ}&ao=off&pixels=off`,
+    ]);
+    expect(got).toEqual({
+      urls: [
+        `/api/thumb/image?${bareQ}&gen=7`,
+        `/api/thumb/image?${bareQ}&ao=off&gen=7`,
+        `/api/model.glb?${bareQ}`,
+      ],
+      lookedUp: 1,
+      absent: { ao: 0, noao: 0 },
+    });
+  });
+
+  it("counts an unannotated model's unrendered variants absent, without failing", async () => {
+    const s = thumbs({ ao: { status: "miss" }, noao: { status: "stale" } });
+    await expect(collect(HOST, [bare], s)).resolves.toEqual({
+      urls: [`/api/model.glb?${bareQ}`],
+      lookedUp: 1,
+      absent: { ao: 1, noao: 1 },
+    });
+  });
+
+  it("fails on a lookup the server refuses, naming the model", async () => {
+    const s = thumbs({ ao: {}, noao: {} }, 500);
+    const run = collect(HOST, [bare], s);
+    await expect(run).rejects.toThrow(BackfillError);
+    await expect(run).rejects.toThrow(`${BARE}: /api/thumb answered 500`);
+  });
+
+  it("fails on a lookup that cannot connect, naming the model", async () => {
+    const fetchFn = (async () => {
+      throw new TypeError("fetch failed");
+    }) as typeof fetch;
+    await expect(collect(HOST, [bare], { fetchFn })).rejects.toThrow(
+      `${BARE}: /api/thumb failed: TypeError: fetch failed`,
     );
   });
 });
