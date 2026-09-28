@@ -101,6 +101,10 @@ A request is keyed only if all of these hold; otherwise it passes through:
   that the key stays within R2's 1,024 bytes. It is kept as raw bytes with **no Unicode
   normalisation**, since the origin does none. A non-canonical spelling passes through rather
   than being normalised here, so the Worker never re-implements the server's path rules.
+- **Percent-encoding**: the query string must decode (`decodeURIComponent`, `+` as a space)
+  or the request passes through. `URLSearchParams` replaces an undecodable `%XX` run with
+  U+FFFD while the origin's decoder keeps it raw, so `/%FF.stl` and `/%EF%BF%BD.stl` would
+  otherwise be one key for two origin files. A genuine U+FFFD name, sent encoded, is keyed.
 
 The version is in the key and the key is never overwritten, so a key's bytes are immutable
 like the URL's.

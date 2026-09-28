@@ -6,7 +6,8 @@
   },
   "workspaces": [
     "server",
-    "client"
+    "client",
+    "deploy/edge"
   ],
   "scripts": {
     "dev": "bun run --filter '*' dev",
