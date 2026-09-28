@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { zipSync } from "fflate";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DirEntry, DirListing } from "../../shared/types";
 
 /**
@@ -30,6 +30,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 
 import { createApp } from "../src/app";
 import { resetIndexStatus } from "../src/semantic";
+import { SnapshotStore } from "../src/snapshot";
 import { ThumbCache } from "../src/cache";
 import { MARKER_DIR, createLibrary } from "../src/library";
 import {
@@ -37,6 +38,7 @@ import {
   createOverrideHolder,
   listCredits,
   loadOverrides,
+  namesBelow,
   resolveOverrides,
   writeOverrides,
 } from "../src/overrides";
@@ -430,6 +432,62 @@ describe("listing the store’s credits", () => {
     expect(listCredits(await loadOverrides(top, () => {}))).toEqual([]);
     const { store } = await loadWith(v1({ "/kit": { name: "The Kit" } }));
     expect(listCredits(store)).toEqual([]);
+  });
+});
+
+describe("names along a path", () => {
+  const store = (entries: Record<string, string>): OverrideStore =>
+    new Map(Object.entries(entries).map(([k, name]) => [k, { name }]));
+
+  it("names the folders below a filesystem root, never the root key", () => {
+    const names = store({
+      "/": "Library",
+      "/kit": "Kit",
+      "/kit/sub": "Sub",
+      "/kit/sub/y.stl": "Own",
+    });
+    expect(namesBelow(names, "/", "/kit/sub/y.stl")).toEqual(["Kit", "Sub"]);
+  });
+
+  it("walks into an archive below a filesystem root", () => {
+    const names = store({
+      "/kit": "Kit",
+      "/kit/a.zip": "Archive",
+      "/kit/a.zip!/parts": "Parts",
+    });
+    expect(namesBelow(names, "/", "/kit/a.zip!/parts/x.stl")).toEqual([
+      "Kit",
+      "Archive",
+      "Parts",
+    ]);
+    // One slot per level, so the client can line them up with the path.
+    expect(
+      namesBelow(
+        store({ "/kit/a.zip": "Archive" }),
+        "/",
+        "/kit/a.zip!/parts/x.stl",
+      ),
+    ).toEqual([null, "Archive", null]);
+  });
+
+  it("excludes the archive a zip-root listing is rooted at", () => {
+    const names = store({
+      "/kit/a.zip": "Archive",
+      "/kit/a.zip!/parts": "Parts",
+    });
+    expect(
+      namesBelow(names, "/kit/a.zip!/", "/kit/a.zip!/parts/x.stl"),
+    ).toEqual(["Parts"]);
+  });
+
+  it("keeps a slot for an unnamed folder below a named one", () => {
+    expect(namesBelow(store({ "/kit": "Kit" }), "/", "/kit/sub/y.stl")).toEqual(
+      ["Kit", null],
+    );
+  });
+
+  it("answers nothing from an empty store", () => {
+    expect(namesBelow(new Map(), "/", "/kit/sub/y.stl")).toEqual([]);
   });
 });
 
@@ -839,7 +897,7 @@ describe("display names ride the listing", () => {
     expect(named(listing.entries, "/kit/sub").displayName).toBe(
       "Sub Assemblies",
     );
-    // Matching is untouched: the query matched the real name, not the stored one.
+    // The query matched the real name here (`sub`); the stored name took no part.
     expect(named(listing.entries, "/kit/sub").name).toBe("kit/sub");
   });
 
@@ -945,5 +1003,211 @@ describe("display names ride the listing", () => {
     expect(after.entries.map(({ displayName, ...rest }) => rest)).toEqual(
       before.entries,
     );
+  });
+});
+
+describe("stored names are searched", () => {
+  /** `NAMES` above, plus the archive's own name for the zip-root cells. */
+  const STORED = v1({
+    "/kit": { name: "Player Character Pack 03" },
+    "/kit/sub": { name: "Sub Assemblies" },
+    "/kit/x.stl": { name: "Kindle Cleric" },
+    "/kit/a.zip": { name: "Archive Box" },
+    "/kit/a.zip!/parts": { name: "Loose Parts" },
+  });
+
+  // Hermetic: a flat listing can fill annotations from the index, so a refused
+  // probe keeps these cells off whatever runs on 8077.
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed");
+      }),
+    );
+    resetIndexStatus();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  async function dir(
+    app: ReturnType<typeof appOn>,
+    query: string,
+  ): Promise<DirListing> {
+    const res = await app.request(`/api/dir?${query}`, { headers: LOOPBACK });
+    expect(res.status).toBe(200);
+    return (await res.json()) as DirListing;
+  }
+
+  const paths = (l: DirListing) => l.entries.map((e) => e.path);
+
+  it("matches terms split across a model's names, and a folder's own stored name", async () => {
+    const libTop = fixtureLibrary();
+    storeAt(libTop, STORED);
+    const app = appOn(libTop);
+    // "character" is only in `/kit`'s stored name, "x" only in the file name.
+    const split = await dir(app, "path=/&flat=true&q=character%20x");
+    expect(paths(split)).toContain("/kit/x.stl");
+    expect(paths(split)).not.toContain("/kit2/y.stl");
+    const own = await dir(app, "path=/&flat=true&q=character%20pack");
+    expect(paths(own)).toContain("/kit");
+  });
+
+  it("matches a container on its own names only", async () => {
+    const libTop = fixtureLibrary();
+    storeAt(libTop, STORED);
+    const app = appOn(libTop);
+    expect(paths(await dir(app, "path=/&flat=true&q=assemblies"))).toContain(
+      "/kit/sub",
+    );
+    const parent = paths(await dir(app, "path=/&flat=true&q=character"));
+    expect(parent).not.toContain("/kit/sub");
+    expect(parent).toContain("/kit/sub/y.stl");
+  });
+
+  it("never matches on the searched folder's own stored name", async () => {
+    const libTop = fixtureLibrary();
+    storeAt(libTop, STORED);
+    const body = await dir(appOn(libTop), "path=/kit&flat=true&q=character");
+    expect(body.entries).toEqual([]);
+  });
+
+  it("with folder matching off, a name along the path no longer counts", async () => {
+    const libTop = fixtureLibrary();
+    storeAt(libTop, STORED);
+    const body = await dir(
+      appOn(libTop),
+      "path=/&flat=true&q=character%20x&folders=false",
+    );
+    expect(paths(body)).not.toContain("/kit/x.stl");
+  });
+
+  it("caps matches that come only through stored names", async () => {
+    vi.stubEnv("MODEL_BROWSER_FLAT_CAP", "1");
+    const libTop = fixtureLibrary();
+    storeAt(libTop, STORED);
+    const body = await dir(appOn(libTop), "path=/&flat=true&q=character");
+    // Four models under `/kit`, none with "character" in its own name.
+    expect(body.entries.filter((e) => e.kind === "model")).toHaveLength(1);
+    expect(body.truncated).toBe(true);
+  });
+
+  it("carries ancestorNames on a flat listing's models, and on no nested one", async () => {
+    const libTop = fixtureLibrary();
+    storeAt(libTop, STORED);
+    const app = appOn(libTop);
+    const flat = await dir(app, "path=/&flat=true");
+    const y = flat.entries.find((e) => e.path === "/kit/sub/y.stl")!;
+    expect(y.ancestorNames).toEqual([
+      "Player Character Pack 03",
+      "Sub Assemblies",
+    ]);
+    expect(Object.keys(y)).not.toContain("displayName");
+    const nested = await dir(app, "path=/kit");
+    for (const e of nested.entries) {
+      expect(Object.keys(e)).not.toContain("ancestorNames");
+    }
+  });
+
+  it("aligns ancestorNames with the folders of the name, named or not", async () => {
+    const libTop = fixtureLibrary();
+    storeAt(libTop, v1({ "/kit": { name: "Player Character Pack 03" } }));
+    const flat = await dir(appOn(libTop), "path=/&flat=true");
+    const at = (p: string) => flat.entries.find((e) => e.path === p)!;
+    expect(at("/kit/sub/y.stl").ancestorNames).toEqual([
+      "Player Character Pack 03",
+      null,
+    ]);
+    expect(at("/kit/a.zip!/parts/lid.stl").ancestorNames).toEqual([
+      "Player Character Pack 03",
+      null,
+      null,
+    ]);
+    // Every slot null: omitted, as for a library with no store.
+    expect(Object.keys(at("/kit2/y.stl"))).not.toContain("ancestorNames");
+  });
+
+  it("names an archive and the folder inside it on a zip interior", async () => {
+    const libTop = fixtureLibrary();
+    storeAt(libTop, STORED);
+    const flat = await dir(appOn(libTop), "path=/&flat=true");
+    const at = (p: string) => flat.entries.find((e) => e.path === p)!;
+    expect(at("/kit/a.zip!/parts/lid.stl").ancestorNames).toEqual([
+      "Player Character Pack 03",
+      "Archive Box",
+      "Loose Parts",
+    ]);
+    expect(at("/kit/a.zip!/box.stl").ancestorNames).toEqual([
+      "Player Character Pack 03",
+      "Archive Box",
+    ]);
+  });
+
+  it("a library with no store emits no ancestorNames", async () => {
+    const app = appOn(fixtureLibrary());
+    for (const query of ["path=/&flat=true", "path=/&flat=true&q=stl"]) {
+      const body = await dir(app, query);
+      expect(body.entries.length).toBeGreaterThan(0);
+      for (const e of body.entries) {
+        expect(Object.keys(e)).not.toContain("ancestorNames");
+      }
+    }
+  });
+
+  it("writes no names into the cached tree", async () => {
+    const libTop = fixtureLibrary();
+    storeAt(libTop, STORED);
+    const library = libraryFor(libTop);
+    const snapshots = new SnapshotStore(
+      realTempDir("mb-ovr-snap-"),
+      undefined,
+      library,
+    );
+    const app = createApp(
+      new ThumbCache(realTempDir("mb-ovr-cache-")),
+      undefined,
+      undefined,
+      library,
+      undefined,
+      undefined,
+      snapshots,
+    );
+    const searched = await dir(app, "path=/&flat=true&q=character");
+    expect(paths(searched)).toContain("/kit/x.stl");
+    const stored = await snapshots.load("/");
+    expect(stored).not.toBeNull();
+    for (const e of stored!.entries) {
+      expect(Object.keys(e)).not.toContain("displayName");
+      expect(Object.keys(e)).not.toContain("ancestorNames");
+    }
+    // Served from that snapshot: only what this request's own pass attached.
+    const plain = await dir(app, "path=/&flat=true");
+    const kit2 = plain.entries.find((e) => e.path === "/kit2/y.stl")!;
+    expect(Object.keys(kit2)).not.toContain("ancestorNames");
+    expect(Object.keys(kit2)).not.toContain("displayName");
+    const x = plain.entries.find((e) => e.path === "/kit/x.stl")!;
+    expect(x.displayName).toBe("Kindle Cleric");
+    expect(x.ancestorNames).toEqual(["Player Character Pack 03"]);
+  });
+
+  it("measures names from a zip root, never the archive's own", async () => {
+    const libTop = fixtureLibrary();
+    storeAt(libTop, STORED);
+    const app = appOn(libTop);
+    const loose = paths(await dir(app, "path=/kit/a.zip&flat=true&q=loose"));
+    expect(loose).toContain("/kit/a.zip!/parts/lid.stl");
+    expect(loose).not.toContain("/kit/a.zip!/box.stl");
+    expect(
+      (await dir(app, "path=/kit/a.zip&flat=true&q=archive")).entries,
+    ).toEqual([]);
+    const plain = await dir(app, "path=/kit/a.zip&flat=true");
+    const lid = plain.entries.find(
+      (e) => e.path === "/kit/a.zip!/parts/lid.stl",
+    )!;
+    expect(lid.ancestorNames).toEqual(["Loose Parts"]);
+    const box = plain.entries.find((e) => e.path === "/kit/a.zip!/box.stl")!;
+    expect(Object.keys(box)).not.toContain("ancestorNames");
   });
 });

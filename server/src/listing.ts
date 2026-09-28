@@ -1,10 +1,12 @@
 import { constants as fsConstants } from "node:fs";
 import { access, readdir, realpath, stat } from "node:fs/promises";
 import { join, posix, sep } from "node:path";
+import { matchesTerms, queryTerms } from "../../shared/nameMatch";
 import { baseName } from "../../shared/names";
 import type { DirEntry, DirListing, ModelFormat } from "../../shared/types";
 import { envPositiveInt } from "./env";
 import type { Library } from "./library";
+import { displayNameOf, namesBelow, type OverrideStore } from "./overrides";
 import type { SnapshotEntry, SnapshotStore, TreeSnapshot } from "./snapshot";
 import { isZipName, joinVPath, parseVPath, VPathError } from "./vpath";
 import { ZipError, type ZipDirCache, listZipEntries } from "./zip";
@@ -347,19 +349,25 @@ async function listZipDir(
 }
 
 /**
- * Matches anywhere in the path below the root (D1), and on the same string the
- * client's live filter uses, so typing and submitting mean the same thing.
+ * The shared matcher over a subject built here and never written onto `e`, which
+ * may be the object a snapshot is copied from (`multi-term-name-search` D2).
  */
-function matchesQuery(name: string, q: string): boolean {
-  return name.toLowerCase().includes(q);
-}
-
-/**
- * A container matches on its **own** name (D2): a folder inside a matching folder
- * is not itself a tile, or one hit would return a subtree of them.
- */
-function matchesOwnName(name: string, q: string): boolean {
-  return baseName(name).toLowerCase().includes(q);
+function matchesNamed(
+  terms: readonly string[],
+  e: DirEntry,
+  folderMatching: boolean,
+  names: OverrideStore,
+): boolean {
+  return matchesTerms(
+    terms,
+    {
+      name: e.name,
+      kind: e.kind,
+      displayName: displayNameOf(names, e.path),
+      ancestorNames: namesBelow(names, e.path.slice(0, -e.name.length), e.path),
+    },
+    folderMatching,
+  );
 }
 
 const KIND_RANK: Record<string, number> = { dir: 0, zip: 1, model: 2 };
@@ -830,7 +838,7 @@ export async function listFlat(
   library: Library,
   libPath: string,
   query?: string,
-  opts: { folderMatching?: boolean } = {},
+  opts: { folderMatching?: boolean; names?: OverrideStore } = {},
   store?: SnapshotStore,
 ): Promise<DirListing> {
   return (await walkFlat(library, libPath, query, opts, store)).listing;
@@ -1205,7 +1213,7 @@ export async function walkFlat(
   library: Library,
   libPath: string,
   query?: string,
-  opts: { folderMatching?: boolean } = {},
+  opts: { folderMatching?: boolean; names?: OverrideStore } = {},
   store?: SnapshotStore,
 ): Promise<{
   listing: DirListing;
@@ -1213,8 +1221,9 @@ export async function walkFlat(
   capped: boolean;
   fromSnapshot: boolean;
 }> {
-  const q = query?.trim().toLowerCase();
-  const hasQuery = q !== undefined && q !== "";
+  const terms = queryTerms(query ?? "");
+  const hasQuery = terms.length > 0;
+  const names: OverrideStore = opts.names ?? new Map();
   // Default on, so an old client and a hand-written URL get the shipped predicate.
   const folderMatching = opts.folderMatching !== false;
   // Confinement was settled when the snapshot was written — only a walk that
@@ -1265,14 +1274,12 @@ export async function walkFlat(
   // Filter before sorting: a sorted subset equals the sorted set filtered, and
   // the comparator below is `localeCompare` over everything a search walked.
   if (hasQuery) {
-    containers = containers.filter((e) => matchesOwnName(e.name, q));
-    // The option narrows the *model* predicate only; containers are unaffected.
-    const modelMatches = folderMatching ? matchesQuery : matchesOwnName;
-    models = models.filter((m) => modelMatches(m.name, q));
-    containers = [
-      ...containers,
-      ...gathered.dirs.filter((d) => matchesOwnName(d.name, q)),
-    ];
+    // Inside the walk, not after it: the caps bound matches, so a model found
+    // only through a stored name must be tested before they cut (D2).
+    const matches = (e: DirEntry) =>
+      matchesNamed(terms, e, folderMatching, names);
+    containers = [...containers, ...gathered.dirs].filter(matches);
+    models = models.filter(matches);
     // Containers arrive pre-ranked and are not re-sorted, but appending deeper
     // matches breaks that, so a queried listing sorts the block. The tiebreak is
     // the root-relative path, which a bare name already is (D3).

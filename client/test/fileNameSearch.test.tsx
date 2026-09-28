@@ -63,7 +63,7 @@ beforeEach(() => mountApp("/models", NESTED));
 afterEach(() => unmountApp());
 
 describe("file name search", () => {
-  it("the find control filters every entry kind by full name, with no requests", async () => {
+  it("the find control filters every entry kind by name, with no requests", async () => {
     listDir.mockClear();
 
     await openFind();
@@ -624,5 +624,99 @@ describe("file name search", () => {
     await settle();
 
     expect(findInput()).toBeNull();
+  });
+});
+
+describe("the find filter matches term by term, as the search does", () => {
+  const DRAGONS: DirListing = {
+    path: "/models",
+    entries: [
+      model("Bronze_Dragon_2832574/Young_Bronze_Dragon.stl"),
+      model("Bronze_Dragon_2832574/Adult_Bronze_Dragon.stl"),
+    ],
+  };
+  const PALADINS: DirListing = {
+    path: "/models",
+    entries: [
+      { ...model("DD_minis_945822/paladin.stl"), ancestorNames: ["D&D minis"] },
+      model("Heroes/paladin.stl"),
+    ],
+  };
+  const KIT: DirListing = {
+    path: "/models",
+    entries: [
+      model("Kit/bases/round.stl"),
+      model("Kit/hero.stl"),
+      dir("Kit/bases"),
+    ],
+  };
+  /** Mount over `listing` as the answer to a submitted name search for `q`. */
+  async function searched(q: string, listing: DirListing): Promise<void> {
+    listDir.mockImplementation((_t: string, opts?: { q?: string }) =>
+      Promise.resolve(opts?.q === q ? listing : NESTED),
+    );
+    await type(searchInput(), q);
+    await pressEnter(searchInput());
+    await settle();
+  }
+
+  it("keeps a model holding every term, in any order, with no requests", async () => {
+    await unmountApp();
+    await mountApp("/models", DRAGONS);
+    listDir.mockClear();
+
+    await openFind();
+    await type(findInput()!, "bronze young");
+
+    expect(labels()).toEqual(["Young_Bronze_Dragon.stl"]);
+    expect(listDir).not.toHaveBeenCalled();
+  });
+
+  it("matches a term on a stored name along the path", async () => {
+    await unmountApp();
+    await mountApp("/models", PALADINS);
+
+    await openFind();
+    await type(findInput()!, "d&d paladin");
+
+    expect(tiles().map((b) => b.getAttribute("title"))).toEqual([
+      "DD_minis_945822/paladin.stl",
+    ]);
+  });
+
+  it("typing a submitted search's text keeps every result", async () => {
+    await searched("D&D paladin", {
+      ...PALADINS,
+      entries: PALADINS.entries.slice(0, 1),
+    });
+    expect(tiles()).toHaveLength(1);
+
+    await openFind();
+    await type(findInput()!, "D&D paladin");
+
+    expect(tiles()).toHaveLength(1);
+  });
+
+  it("matches a container on its own names only, never its path", async () => {
+    await searched("bases", KIT);
+    expect(labels()).toEqual(["round.stl", "hero.stl", "bases"]);
+
+    await openFind();
+    await type(findInput()!, "kit");
+
+    expect(labels()).toEqual(["round.stl", "hero.stl"]);
+  });
+
+  it("says the filter hides everything when one of two terms misses", async () => {
+    await unmountApp();
+    await mountApp("/models", DRAGONS);
+
+    await openFind();
+    await type(findInput()!, "bronze zzz");
+
+    expect(tiles()).toHaveLength(0);
+    expect(container.textContent).toContain(
+      "The filter is hiding everything below.",
+    );
   });
 });

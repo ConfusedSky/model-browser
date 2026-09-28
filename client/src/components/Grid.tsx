@@ -968,9 +968,16 @@ function relevanceWidth(z: number): number {
 /**
  * Where a result lives, under its name. A deep search or a flat view carries
  * the path relative to where it ran; without this line two same-named files
- * from different kits look like duplicates.
+ * from different kits look like duplicates. A folder with a stored name shows
+ * it here; the tile's title and accessible name keep the real path (D7).
  */
-function ParentLine({ name }: { name: string }) {
+function ParentLine({
+  name,
+  folderNames,
+}: {
+  name: string;
+  folderNames?: readonly (string | null)[];
+}) {
   const slash = name.lastIndexOf("/");
   if (slash <= 0) return null;
   const inArchive = name.includes("!/");
@@ -979,7 +986,7 @@ function ParentLine({ name }: { name: string }) {
   // extracted twin, so its name is the part kept whole.
   const zipAt = raw.findIndex((p) => p.endsWith("!"));
   const keep = inArchive && zipAt >= 0 ? zipAt : raw.length - 1;
-  const clean = raw.map((p) => p.replace(/!$/, ""));
+  const clean = raw.map((p, i) => folderNames?.[i] ?? p.replace(/!$/, ""));
   const last =
     keep === raw.length - 1
       ? clean[keep]!
@@ -1386,8 +1393,9 @@ const Tile = memo(function Tile({
           )}
           {/* The leaf, not the relative path a deep search carries — truncating
               that shows the head of the path rather than the folder searched for.
-              A stored name displaces it, for display only: the title, the
-              accessible name and every matcher still read `entry.name` (D7). */}
+              A stored name displaces it; the title and the accessible name
+              still read `entry.name` (D7), while search matches both
+              (`file-search`, *Names match term by term*). */}
           <span
             data-tile-name
             className="flex w-full min-w-0 items-center gap-1.5 px-2.5 py-2 text-[13px] leading-tight"
@@ -1530,7 +1538,7 @@ const Tile = memo(function Tile({
         >
           <TileName name={entry.displayName ?? baseName(entry.name)} />
         </span>
-        <ParentLine name={entry.name} />
+        <ParentLine name={entry.name} folderNames={entry.ancestorNames} />
       </button>
       {actions}
     </div>

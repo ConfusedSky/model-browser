@@ -736,10 +736,13 @@ export function createApp(
     const folderMatching = c.req.query("folders") !== "false";
     // Canonicalised once: a listing's `path` is what the client asks for next.
     const libPath = canonicalLibPath(path);
-    // Names ride the listing rather than a lookup per tile (library-overrides D7).
     if (flat) {
+      // One store for the search and the naming pass, so a tile found by a name
+      // also carries it.
+      const names = await overrides.store();
       const listing = await listings.list(library, libPath, q, {
         folderMatching,
+        names,
       });
       // Fill first, annotate second (§6.9).
       await fillAnnotations(
@@ -748,7 +751,7 @@ export function createApp(
       );
       // Annotate first: it attaches preview cells the naming pass must also reach.
       annotate(listing.entries);
-      applyDisplayNames(listing.entries, await overrides.store());
+      applyDisplayNames(listing.entries, names, { along: true });
       return c.json(listing);
     }
     const listing = await listDir(library, libPath, snapshots?.archiveCache());
@@ -1322,6 +1325,8 @@ export function createApp(
       collectionRootFs,
     );
     annotate(entries);
+    // After the answer is assembled, so the index's order and scores stand.
+    applyDisplayNames(entries, await overrides.store(), { along: true });
     const scopePath = await scopeLibPath(library, result.scope.path);
     return c.json({
       // A library path like every other (D2): the scope's, else the collection's.
@@ -1415,7 +1420,12 @@ export function createApp(
       library.libPathOf(model),
       relative(collectionRootFs, model),
     );
-    if (anchor !== null) annotate([anchor]);
+    const names = await overrides.store();
+    applyDisplayNames(entries, names, { along: true });
+    if (anchor !== null) {
+      annotate([anchor]);
+      applyDisplayNames([anchor], names, { along: true });
+    }
     // Without the index's `scope` dict: its residue is about a *phrase's* result.
     return c.json({
       // The collection as a library path (D2), the library root where it has none.
