@@ -4,5 +4,12 @@
     "lib": ["ES2022", "DOM"],
     "types": []
   },
-  "include": ["route.ts", "route.test.ts", "../../shared"]
+  "include": [
+    "route.ts",
+    "route.test.ts",
+    "backfill.ts",
+    "backfill.test.ts",
+    "../../shared",
+    "../../client/src/api/thumbUrl.ts"
+  ]
 }
