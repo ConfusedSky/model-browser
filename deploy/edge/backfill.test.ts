@@ -263,6 +263,60 @@ describe("collect", () => {
       `${BARE}: /api/thumb failed: TypeError: fetch failed`,
     );
   });
+
+  it("reads a hit without a gen as gen 0", async () => {
+    const s = thumbs({ ao: { status: "hit" }, noao: { status: "miss" } });
+    const got = await collect(HOST, [bare], s);
+    expect(got.urls).toEqual([
+      `/api/thumb/image?${bareQ}&gen=0`,
+      `/api/model.glb?${bareQ}`,
+    ]);
+  });
+
+  it("asks nothing and names nothing inside an archive", async () => {
+    const s = thumbs({ ao: { status: "hit" }, noao: { status: "hit" } });
+    const inZip = model("hit", "hit", {
+      path: "/Kit/a.zip!/m.stl",
+      thumb: undefined,
+    });
+    await expect(collect(HOST, [inZip], s)).resolves.toEqual({
+      urls: [],
+      lookedUp: 0,
+      absent: { ao: 0, noao: 0 },
+    });
+    expect(s.asked).toEqual([]);
+  });
+
+  it("fails on a lookup answer that is not JSON, naming the model", async () => {
+    const fetchFn = (async () => new Response("<html>")) as typeof fetch;
+    const run = collect(HOST, [bare], { fetchFn });
+    await expect(run).rejects.toThrow(BackfillError);
+    await expect(run).rejects.toThrow(
+      `${BARE}: /api/thumb answered something not JSON`,
+    );
+  });
+
+  it("counts an annotated model's non-hit ao variant absent", async () => {
+    const got = await collect(
+      HOST,
+      [model("stale", "hit")],
+      thumbs({ ao: {}, noao: {} }),
+    );
+    expect(got.absent).toEqual({ ao: 1, noao: 0 });
+    expect(got.urls).toEqual([NOAO, GLB]);
+  });
+
+  it.each([[{ status: "gone" }], [{}]])(
+    "fails on a lookup status it does not know (%j), naming the model",
+    async (answer) => {
+      const s = thumbs({ ao: answer, noao: { status: "miss" } });
+      const run = collect(HOST, [bare], s);
+      await expect(run).rejects.toThrow(BackfillError);
+      await expect(run).rejects.toThrow(
+        `${BARE}: /api/thumb answered status ${JSON.stringify((answer as { status?: string }).status)}`,
+      );
+    },
+  );
 });
 
 describe("parseArgs", () => {

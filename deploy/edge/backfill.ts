@@ -143,8 +143,13 @@ export async function collect(
         `${m.path}: /api/thumb answered something not JSON`,
       );
     }
+    if (body.status === "miss" || body.status === "stale") return undefined;
+    if (body.status !== "hit")
+      throw new BackfillError(
+        `${m.path}: /api/thumb answered status ${JSON.stringify(body.status)}`,
+      );
     // The route's own reading of an absent gen.
-    return body.status === "hit" ? (body.gen ?? 0) : undefined;
+    return body.gen ?? 0;
   };
   const per = await pool(models, concurrency, async (m) => {
     if (m.path.includes("!")) return [];
