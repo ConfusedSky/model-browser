@@ -14,7 +14,9 @@ still pays is distance:
 
 Neither is fixable from Falkenstein. A copy of the bytes stored in the US is, and R2 with a
 `wnam` location hint is the free way to have one: no egress fees, 10 GB-month and 10M reads
-free, and the demo's thumbnails and GLBs together are about 1.9 GB. Cache Reserve was
+free, and the demo's thumbnails and GLBs together come to roughly 1.2 GB (32 MB of renders,
+plus the corpus's 4.89 GB of STL at the ~0.24x `MeshCache` states for its GLBs — an
+estimate, not a measurement). Cache Reserve was
 weighed and is not what the measurements ask for — it solves eviction, which the overnight
 run found no sign of, and it needs a paid plan.
 
@@ -41,8 +43,9 @@ run found no sign of, and it needs a paid plan.
   and the route is set to **fail open** past the Workers free-tier daily limit.
 - A **backfill** script that requests every current thumbnail (both variants) and GLB once
   through the site, so first touch is paid by the script rather than by a visitor.
-- The latency probe records the **colo** of every request, since the answer now depends on
-  which continent a request is served from, and the PoP this machine reaches is not fixed.
+- The latency probe records the **colo** and the path that served each request, since the
+  answer now depends on the visitor's continent, the PoP this machine reaches is not fixed,
+  and an answer from the store carries no `cf-cache-status` for the existing columns to read.
 - **No application change.** The client keeps asking the origin's own URLs; the server's
   answers are unchanged; the desktop build never sees any of this. Removing the routes
   restores today's behaviour exactly.
@@ -70,8 +73,11 @@ None.
   demo's hostname stays proxied permanently, so the 125-second origin timeout already
   recorded in §10 becomes a standing condition rather than an experiment's.
 - **Cost**: $0 at this scale — Workers 100,000 requests/day free, then fail-open; R2 storage,
-  reads and writes all inside the free tier with the corpus stored once per version.
-- **`.ai/probe-demo-latency.sh`**: a `colo` column.
+  reads and writes all inside the free tier with the corpus stored once per epoch.
+- **Operator steps**: two epochs (thumbnails, meshes), advanced after a bake ship and after a
+  corpus change respectively — README §7 and §6.
+- **`.ai/probe-demo-latency.sh`**: `colo` and store-path columns; `batch_hit` stops meaning
+  "served without the origin" once the Worker answers, and a `batch_store` count replaces it.
 - **Docs**: `deploy/demo/README.md` §10 (the Worker, its kill switch, the backfill, the
   measurements), and issue #39 closes on the after-measurement.
 - **Not in scope**: `/api/file` (STL for `obj`/`3mf` only on this corpus, and ranged), pruning
