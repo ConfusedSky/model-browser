@@ -191,6 +191,13 @@ hostname so they pass through the Worker, which does the storing; the script nev
 Concurrency 2, and it must run from North America (this machine)
 or D5 makes it a no-op.
 
+A listing's `thumb` annotation says what the server has *seen*, not what exists: a model whose
+render the server has not read yet, or never made, carries none. For those the backfill asks
+`/api/thumb` (`pixels=off`, as `ApiClient.getThumb` would) per variant — a `hit` gives the
+`gen` to name, a `miss` or `stale` counts the variant absent as information, and anything else
+fails naming the model. A listing still `stale` after bounded re-asks, or `truncated`, fails
+naming the folder, so the URL set is never a silent subset.
+
 A `filled` answer says the Worker *tried* to store — the put runs after the response. So the
 backfill makes a **second pass** over the same URLs and reports every one that does not answer
 `hit`; that, not the first pass, is the check.
@@ -212,11 +219,16 @@ comparability with earlier runs, and is documented as void for rows the Worker a
 
 ### D10. `deploy/edge/` is its own workspace
 
-`worker.ts` (the fetch handler: the only file that touches Workers APIs), `route.ts` (pure:
+`worker.ts` (the fetch handler: the only file that touches Workers APIs; it calls
+`passThroughOnException` so an uncaught throw fails open to the origin), `route.ts` (pure:
 classify a request into pass-through or a key; decide whether a response is storable and what
 it replays), `route.test.ts`, `backfill.ts`, `wrangler.toml`, and a `package.json` so `bun run
-test` and `bun run typecheck` cover it. `@cloudflare/workers-types` is a dev dependency of that
-workspace. Wrangler is run pinned through `bunx` (`bunx wrangler@<version>`), the Prettier
+test` and `bun run typecheck` cover it. Three tsconfigs, all run by `typecheck`: `tsconfig.route.json` holds `route.ts`
+alone with no ambient types, so it stays runnable on Workers, Node and Bun (a `Buffer` or a
+Workers global there fails the check); `tsconfig.worker.json` holds `worker.ts` and its test
+under `@cloudflare/workers-types`; `tsconfig.json` holds the backfill and the tests under
+Node's types. The test files cannot share `route.ts`'s config, because vitest's own types pull
+Node's in. Wrangler is run pinned through `bunx` (`bunx wrangler@<version>`), the Prettier
 pattern — not a dependency. The Prettier glob covers `deploy/edge/*.ts` by design.
 
 Under `wrangler dev`, `fetch(request)` targets the dev server itself rather than an origin, so
