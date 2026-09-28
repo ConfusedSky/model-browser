@@ -33,10 +33,9 @@ run found no sign of, and it needs a paid plan.
   version**, stores it. There is no publisher, no upload step and no coupling to the bake:
   the bucket holds only bytes the origin itself has vouched for, under the version it vouched
   for them at.
-- **Reads are routed by the visitor's continent.** Requests from Europe and Africa are passed
-  straight through to today's path, where the upper tier beside the box is already the near
-  copy; everywhere else is served from the bucket. The bucket is the US copy and the box is
-  the European one.
+- **Only North America reads the bucket.** The demo's audience that matters is in the US,
+  so requests from any other continent pass straight through to today's path, unchanged —
+  nothing outside North America gets faster, and nothing gets slower.
 - **Everything the Worker does not recognise goes to the origin untouched**: a request naming
   no version, an archive entry (`foo.zip!/entry`), a ranged or conditional request, a
   malformed parameter, any method but GET. So does any failure of the Worker or the bucket,
@@ -44,7 +43,7 @@ run found no sign of, and it needs a paid plan.
 - A **backfill** script that requests every current thumbnail (both variants) and GLB once
   through the site, so first touch is paid by the script rather than by a visitor.
 - The latency probe records the **colo** and the path that served each request, since the
-  answer now depends on the visitor's continent, the PoP this machine reaches is not fixed,
+  answer now depends on whether the Worker served it, the PoP this machine reaches is not fixed,
   and an answer from the store carries no `cf-cache-status` for the existing columns to read.
 - **No application change.** The client keeps asking the origin's own URLs; the server's
   answers are unchanged; the desktop build never sees any of this. Removing the routes

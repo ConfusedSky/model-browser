@@ -44,14 +44,14 @@ Every request the rule does not cover SHALL reach the origin exactly as it would
 this rule: one that names no version; one whose version is not written as the origin
 would pin it; one carrying a parameter the route does not define, or a parameter twice; a
 path that is not in the form the origin would itself resolve it to; an entry inside an
-archive; a ranged or conditional request; any method other than GET; a request from a
-region for which the origin is itself the near copy; and any request arriving while the
+archive; a ranged or conditional request; any method other than GET; a request from
+outside the region the store is held for; and any request arriving while the
 store or the edge layer serving it is failing or over its limits. Removing the edge layer
 SHALL restore the deployment's behaviour as it was before this rule, with no change to the
 application, its configuration or its client.
 
 #### Scenario: A versioned thumbnail is answered from the store
-- **WHEN** a visitor outside the origin's region requests a thumbnail naming its current generation, and the store already holds that generation's render
+- **WHEN** a visitor in the region the store is held for requests a thumbnail naming its current generation, and the store already holds that generation's render
 - **THEN** the render is served from the store with the same status, bytes, length and application headers the origin's immutable answer carries, and the origin is not asked
 
 #### Scenario: First touch fills the store
@@ -78,8 +78,8 @@ application, its configuration or its client.
 - **WHEN** a mesh is requested for an entry inside an archive
 - **THEN** it reaches the origin as it does without the edge layer, whatever version it names
 
-#### Scenario: The near copy for the origin's region is the origin
-- **WHEN** a visitor in the origin's region requests a versioned thumbnail or mesh
+#### Scenario: A visitor outside the store's region is untouched
+- **WHEN** a visitor outside the region the store is held for requests a versioned thumbnail or mesh
 - **THEN** the request is served by the path it takes without the edge layer, not from the store
 
 #### Scenario: A store failure is not the visitor's

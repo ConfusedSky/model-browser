@@ -14,8 +14,7 @@ See proposal.md — Why, for the measurements. What the design has to fit around
   does not match. `canonicalLibPath` normalises the path (`posix.normalize`, trailing `/`
   dropped) before either route uses it.
 - **The zone is proxied, with three cache rules and Smart Tiered Cache** (README §10). The
-  upper tier sits beside the origin, so Europe already has a near copy; the rest of the world
-  does not. Workers run before the cache, so a route puts *every* request on its paths
+  upper tier sits beside the origin, in Europe; a US visitor's miss crosses the Atlantic. Workers run before the cache, so a route puts *every* request on its paths
   through the Worker — edge-warm ones included.
 - **The demo supersedes versions only when the operator ships.** `thumbWrites` is off and
   the corpus is read-only between changes; a bake ship moves every thumbnail's `gen`, a
@@ -32,7 +31,7 @@ See proposal.md — Why, for the measurements. What the design has to fit around
 ## Goals / Non-Goals
 
 **Goals:**
-- A non-European first touch or PoP miss costs an R2 read in the visitor's region, not a
+- A North American first touch or PoP miss costs an R2 read in the visitor's region, not a
   crossing to Falkenstein — without making today's warm answers slower.
 - Zero application change; removing the routes is a complete rollback.
 - The bucket can only ever hold bytes the origin pinned, under the version it pinned them at.
@@ -40,7 +39,7 @@ See proposal.md — Why, for the measurements. What the design has to fit around
 **Non-Goals:**
 - Edge-caching the Worker's own answers (the Cache API) — measure first, see D6.
 - Pruning retired epochs and versions from the bucket.
-- Serving the pass-through continents from R2, `/api/file`, archive entries, ranged or
+- Any continent but North America, `/api/file`, archive entries, ranged or
   conditional reads.
 - Making the desktop build aware of any of this.
 
@@ -126,18 +125,20 @@ confirmed against the real bucket (task 3.3), because local development is known
 `etagDoesNotMatch: '*'` (workerd issue #2572). Two concurrent first touches racing to store
 identical bytes is benign either way.
 
-### D5. Continent routing: a first cut
+### D5. Only North America reads the store
 
-`request.cf.continent` in the pass-through set → pass through untouched, no read, no write.
-Everyone else reads the store. The set starts as `EU` and `AF`, and is a variable
-(`PASS_CONTINENTS`) rather than code. A bucket hinted `wnam` read from a European PoP would
-cross the Atlantic, where today the upper tier beside the box answers from a few milliseconds
-away. An absent `continent` passes through.
+`request.cf.continent === "NA"` → the store; any other value, or none, → pass through
+untouched, no read and no write. The US is the only audience this change is for (decided
+2026-09-28), so an allow-list of one is the whole rule: every other continent keeps exactly
+today's path, which means nothing outside North America gets faster and — the reason not to
+serve the world from `wnam` — nothing gets slower. A bucket in western North America read
+from a European PoP would cross the Atlantic where today the upper tier beside the box
+answers, and whether Asia or South America would gain was a question with no vantage to
+measure it from. A pass-through list (`EU`, `AF`) was the earlier draft; dropped with that
+question.
 
-This is **a first cut, not a measurement**: continents are coarse. `AS` includes the Middle
-East and India, which are nearer Falkenstein than western North America, and `SA` may gain
-little. Every probe vantage is in the US, so nothing here can measure it; the set is a
-variable so that moving `AS` (or part of it) to pass-through is a redeploy, not a redesign.
+It is a constant in `route.ts`, not a variable: widening it would be a decision that needs
+measurement, not a redeploy.
 
 `wnam` rather than `enam` is the 2026-09-17 plan's choice and the measurements' vantage (US
 Pacific). The hint is best-effort and permanent per bucket name
@@ -181,7 +182,7 @@ says so.
 model's current `mtime` and thumbnail `gen` with each variant's hit state, and GET each URL
 once — the thumbnail for every variant that is a hit, and the GLB. Requests go to the public
 hostname so they pass through the Worker, which does the storing; the script never touches R2.
-Concurrency 2, and it must run from a continent outside `PASS_CONTINENTS` (from this machine)
+Concurrency 2, and it must run from North America (this machine)
 or D5 makes it a no-op.
 
 A `filled` answer says the Worker *tried* to store — the put runs after the response. So the
@@ -229,16 +230,16 @@ production it is unset and `fetch(request)` goes to the zone's origin.
   in, which is why D7 orders the advance after the restart and D8 the backfill after the advance.
 - [The window between a change and the epoch advance] → accepted and specified; the operator
   closes it and it is minutes wide.
-- [Daily request limit] → every request on the two paths invokes the Worker — pass-through
+- [Daily request limit] → every request on the two paths invokes the Worker — other
   continents, PoP-warm objects and other visitors' repeats included; only the same browser's
   `immutable` cache avoids it. A first screen is ~114 requests (`.ai/todo.md` §1 at `e5ca7e7`),
   so ~877 first screens a day before fail-open, which is today's behaviour.
 - [The warm path regresses] → gated per colo (D6, step 5).
 - [Worker bug] → removing the routes is the rollback (spec), and every error path passes
   through; `route.ts` carries the logic that can be wrong, and is where the tests are.
-- [Continent routing is untestable from here] → every probe vantage is in the US; the
-  pass-through branch is covered by `route.test.ts` only, and its failure mode is a slower
-  answer, not a wrong one.
+- [The pass-through branch is untestable from here] → every probe vantage is in North
+  America; the other-continent branch is covered by `route.test.ts` only, and a live check of
+  it would need a vantage elsewhere. Its failure mode is a slower answer, not a wrong one.
 - [Terms] → R2 and Workers fall under Cloudflare's Developer Platform terms, which lack the
   CDN's "large files" clause — per the 2026-09-17 plan, not re-read for this proposal.
 - [Proxied permanently] → the 125-second origin timeout (a 524) is already a standing condition
@@ -267,6 +268,5 @@ is unreachable without them.
 
 - Whether a store hit is fast enough without the Cache API (D6) — answered by step 5's probe;
   adding it changes no spec and no task above.
-- Whether `AS` belongs in `PASS_CONTINENTS` (D5) — a variable, and unmeasurable from here.
 - `enam` vs `wnam` if the demo's audience turns out East-coast-heavy — the hint is per bucket
   name, so a second bucket and a variable, not a redesign.
