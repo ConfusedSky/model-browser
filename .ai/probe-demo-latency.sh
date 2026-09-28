@@ -44,6 +44,13 @@ export LC_ALL=C   # $EPOCHREALTIME and awk both parse decimals; a comma locale b
 #     thumbnails. They fail `glb_ok`, never `ok`, so the first baseline's exclusion rule
 #     still means the same thing. GLB has no size in the listing; truncation is checked
 #     against `Content-Length`.
+#   - `colo` is the edge that served the row's first request, the standalone thumbnail
+#     (`cf-ray`'s suffix), so rows can be split by colo. The `*_store` columns are the
+#     Worker's `x-edge-store` (`hit`, `filled`, `pass`; `none` without a Worker), and
+#     `batch_store` counts the batch's `hit`s. A Worker's store hit carries no
+#     `cf-cache-status`, so where `batch_store` is non-zero `batch_hit` understates what was
+#     served without the origin — read `batch_store` there. `batch_hit` stays so earlier
+#     runs remain comparable.
 #   - `%header{}` needs curl 7.84 or newer; the startup check refuses to run without it.
 set -uo pipefail
 HOST=${HOST:-https://models.masamaeda.com}
@@ -110,16 +117,16 @@ enc() { python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]
 sub() { awk "BEGIN{printf \"%.4f\", $1-$2}"; }
 bps() { awk "BEGIN{d=$2-$3; printf \"%d\", (d>0)? $1/d : 0}"; }
 glburl() { printf '%s/api/model.glb?path=%s&mtime=%s' "$HOST" "$(enc "$1")" "$2"; }
-# code,exit,cf,ttfb_net,total,bytes,content-length
+# code,exit,cf,ttfb_net,total,bytes,content-length,store
 glb() {
-  curl -s -o /dev/null -m 150 -w '%{http_code},%{exitcode},%header{cf-cache-status},%{time_appconnect},%{time_starttransfer},%{time_total},%{size_download},%header{content-length}' "$1" \
-    | awk -F, '{printf "%s,%s,%s,%.4f,%s,%s,%s", $1, $2, ($3==""?"none":$3), $5-$4, $6, $7, $8}'
+  curl -s -o /dev/null -m 150 -w '%{http_code},%{exitcode},%header{cf-cache-status},%{time_appconnect},%{time_starttransfer},%{time_total},%{size_download},%header{content-length},%header{x-edge-store}' "$1" \
+    | awk -F, '{printf "%s,%s,%s,%.4f,%s,%s,%s,%s", $1, $2, ($3==""?"none":$3), $5-$4, $6, $7, $8, ($9==""?"none":tolower($9))}'
 }
 
 IFS=$'\t' read -r WPATH _ WMTIME <<<"${MODELS[0]}"   # the fixed warm model
 COLD=( "${MODELS[@]:1}" )
 
-echo "ts,ok,why,thumb_code,thumb_exit,thumb_cf,thumb_cc_immutable,thumb_ttfb,thumb_ttfb_net,thumb_bytes,batch_total,batch_total_net,batch_ok,batch_hit,batch_cf,model_code,model_exit,model_cf,model_ttfb,model_ttfb_net,model_total,model_bytes,model_expected,model_bps,model_path,dir_code,dir_exit,dir_ttfb,dir_ttfb_net,glb_ok,glb_why,glbcold_code,glbcold_exit,glbcold_cf,glbcold_ttfb_net,glbcold_total,glbcold_bytes,glbcold_path,glbwarm_code,glbwarm_exit,glbwarm_cf,glbwarm_ttfb_net,glbwarm_total,glbwarm_bytes" >"$OUT"
+echo "ts,ok,why,thumb_code,thumb_exit,thumb_cf,thumb_cc_immutable,thumb_ttfb,thumb_ttfb_net,thumb_bytes,batch_total,batch_total_net,batch_ok,batch_hit,batch_cf,model_code,model_exit,model_cf,model_ttfb,model_ttfb_net,model_total,model_bytes,model_expected,model_bps,model_path,dir_code,dir_exit,dir_ttfb,dir_ttfb_net,glb_ok,glb_why,glbcold_code,glbcold_exit,glbcold_cf,glbcold_ttfb_net,glbcold_total,glbcold_bytes,glbcold_path,glbwarm_code,glbwarm_exit,glbwarm_cf,glbwarm_ttfb_net,glbwarm_total,glbwarm_bytes,colo,thumb_store,batch_store,glbcold_store,glbwarm_store" >"$OUT"
 for ((i=0;i<SAMPLES;i++)); do
   DEADLINE=$(( $(date +%s) + INTERVAL ))
   TS=$(date -Is)
@@ -130,17 +137,24 @@ for ((i=0;i<SAMPLES;i++)); do
   T=$(curl -s -o /dev/null -m 30 -D "$H" -w "$W" "$HOST$TURL")
   TCF=$(grep -ai '^cf-cache-status:' "$H" | tr -d '\r' | awk '{print $2}')
   grep -qai '^cache-control:.*immutable' "$H" && TCC=1 || TCC=0
+  RAY=$(grep -ai '^cf-ray:' "$H" | tr -d '\r' | awk '{print $2}')
+  [[ -n $RAY ]] && COLO=${RAY##*-} || COLO=none
+  TSTORE=$(grep -ai '^x-edge-store:' "$H" | tr -d '\r' | awk '{print tolower($2)}')
   IFS=, read -r TCODE TEXIT TTLS TTTFB _ TBYTES <<<"$T"
 
   # One connection, no concurrency cap: HTTP/2 multiplexes, which is the shape a browser
   # gives a screen of tiles. `-Z` is what makes curl do that rather than 20 in a row.
   BARGS=(); for u in "${BATCH[@]}"; do
-    BARGS+=( -o /dev/null -w '%{http_code} %{time_appconnect} %{exitcode} %{size_download} %header{cf-cache-status}\n' "$HOST$u" )
+    BARGS+=( -o /dev/null -w '%{http_code} %{time_appconnect} %{exitcode} %{size_download} %header{cf-cache-status}\t%header{x-edge-store}\n' "$HOST$u" )
   done
   BS=$EPOCHREALTIME
-  BOUT=$(curl -s -m 60 --http2 -Z "${BARGS[@]}")
+  # The store rides after a tab: an absent cf-cache-status leaves an empty space-split
+  # field, and a store value appended with a space would slide into it.
+  BRAW=$(curl -s -m 60 --http2 -Z "${BARGS[@]}")
   BE=$EPOCHREALTIME
   BTOTAL=$(sub "$BE" "$BS")
+  BOUT=$(cut -f1 <<<"$BRAW")
+  BSTORE=$(awk -F'\t' 'BEGIN{n=0} $2=="hit"{n++} END{print n}' <<<"$BRAW")
   BOK=$(awk '$1=="200" && $3=="0" && $4+0 > 0' <<<"$BOUT" | wc -l)
   BHIT=$(awk 'BEGIN{n=0} {s=toupper($5)} s=="HIT"||s=="STALE"||s=="UPDATING"{n++} END{print n}' <<<"$BOUT")
   BCF=$(awk '{s=toupper($5); if (s=="") s="NONE"; print s}' <<<"$BOUT" \
@@ -168,15 +182,15 @@ for ((i=0;i<SAMPLES;i++)); do
   [[ -z $WHY ]] && OK=1 || OK=0
 
   IFS=$'\t' read -r CPATH _ CMTIME <<<"${COLD[RANDOM % ${#COLD[@]}]}"
-  IFS=, read -r GCCODE GCEXIT GCCF GCNET GCTOTAL GCBYTES GCLEN <<<"$(glb "$(glburl "$CPATH" "$CMTIME")")"
-  IFS=, read -r GWCODE GWEXIT GWCF GWNET GWTOTAL GWBYTES GWLEN <<<"$(glb "$(glburl "$WPATH" "$WMTIME")")"
+  IFS=, read -r GCCODE GCEXIT GCCF GCNET GCTOTAL GCBYTES GCLEN GCSTORE <<<"$(glb "$(glburl "$CPATH" "$CMTIME")")"
+  IFS=, read -r GWCODE GWEXIT GWCF GWNET GWTOTAL GWBYTES GWLEN GWSTORE <<<"$(glb "$(glburl "$WPATH" "$WMTIME")")"
   GWHY=""
   [[ $GCCODE == 200 && $GWCODE == 200 ]] || GWHY="$GWHY status"
   [[ $GCEXIT == 0 && $GWEXIT == 0 ]] || GWHY="$GWHY curlexit"
   [[ -n $GCLEN && $GCBYTES == "$GCLEN" && -n $GWLEN && $GWBYTES == "$GWLEN" ]] || GWHY="$GWHY short"
   [[ -z $GWHY ]] && GOK=1 || GOK=0
 
-  echo "$TS,$OK,\"${WHY# }\",$TCODE,$TEXIT,${TCF:-none},$TCC,$TTTFB,$(sub "$TTTFB" "$TTLS"),$TBYTES,$BTOTAL,$BNET,$BOK,$BHIT,$BCF,$MCODE,$MEXIT,${MCF:-none},$MTTFB,$(sub "$MTTFB" "$MTLS"),$MTOTAL,$MBYTES,$MSIZE,$MBPS,\"$MPATH\",$DCODE,$DEXIT,$DTTFB,$(sub "$DTTFB" "$DTLS"),$GOK,\"${GWHY# }\",$GCCODE,$GCEXIT,$GCCF,$GCNET,$GCTOTAL,$GCBYTES,\"$CPATH\",$GWCODE,$GWEXIT,$GWCF,$GWNET,$GWTOTAL,$GWBYTES" >>"$OUT"
+  echo "$TS,$OK,\"${WHY# }\",$TCODE,$TEXIT,${TCF:-none},$TCC,$TTTFB,$(sub "$TTTFB" "$TTLS"),$TBYTES,$BTOTAL,$BNET,$BOK,$BHIT,$BCF,$MCODE,$MEXIT,${MCF:-none},$MTTFB,$(sub "$MTTFB" "$MTLS"),$MTOTAL,$MBYTES,$MSIZE,$MBPS,\"$MPATH\",$DCODE,$DEXIT,$DTTFB,$(sub "$DTTFB" "$DTLS"),$GOK,\"${GWHY# }\",$GCCODE,$GCEXIT,$GCCF,$GCNET,$GCTOTAL,$GCBYTES,\"$CPATH\",$GWCODE,$GWEXIT,$GWCF,$GWNET,$GWTOTAL,$GWBYTES,$COLO,${TSTORE:-none},$BSTORE,$GCSTORE,$GWSTORE" >>"$OUT"
 
   (( i + 1 < SAMPLES )) || break
   NOW=$(date +%s); (( DEADLINE > NOW )) && sleep $(( DEADLINE - NOW ))
