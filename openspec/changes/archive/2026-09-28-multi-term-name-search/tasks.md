@@ -234,7 +234,7 @@
 - [x] 5.2 `grep -rn "display only\|every matcher" client/src server/src shared` finds no
       claim that matching ignores stored names. `bunx vitest run` in both workspaces, and
       `bun run typecheck`, are green. `bun run format:check` is clean.
-- [ ] 5.3 `openspec validate multi-term-name-search` is clean. Before archiving, dry-run it
+- [x] 5.3 `openspec validate multi-term-name-search` is clean. Before archiving, dry-run it
       in a temp copy (the repo CLAUDE.md procedure). Afterwards, check
       `openspec/specs/file-search/spec.md`, `openspec/specs/directory-browsing/spec.md` and
       `openspec/specs/semantic-search/spec.md` for anything change-scoped that landed verbatim.
