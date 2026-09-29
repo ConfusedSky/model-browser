@@ -59,7 +59,7 @@ None.
 ### Modified Capabilities
 
 - `deployment-infrastructure`: ADDS a requirement that versioned byte requests are served
-  from a copy near the visitor, filled only with what the origin declared immutable for that
+  from a copy near the answering edge location, filled only with what the origin declared immutable for that
   version, and that anything else — and any failure — reaches the origin as it does today.
 
 ## Impact

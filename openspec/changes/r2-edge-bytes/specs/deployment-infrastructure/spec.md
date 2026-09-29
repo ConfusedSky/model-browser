@@ -1,8 +1,8 @@
 ## ADDED Requirements
 
-### Requirement: Versioned byte requests are served from a copy near the visitor
+### Requirement: Versioned byte requests are served from a copy near the answering edge location
 The public deployment SHALL serve a request for a thumbnail's pixels or a model's derived
-mesh from a store held near the visitor, instead of from the origin, when and only when
+mesh from a store held near the edge location answering it, instead of from the origin, when and only when
 the request is answered by an edge location in the region the store is held for and
 names the version it is asking for — the thumbnail's generation, or the source's
 modification time — as the application's own cacheability rules define them (see
