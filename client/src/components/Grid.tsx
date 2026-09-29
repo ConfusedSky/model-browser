@@ -70,6 +70,10 @@ const ROW_ESTIMATE: Record<TileSize, number> = { s: 170, m: 220, l: 300 };
 
 const OVERSCAN_ROWS = 3;
 
+/** How long the scroller goes without a `scroll` event before it stops
+ *  carrying `data-scrolling`. */
+export const SCROLL_QUIET_MS = 150;
+
 /** What App reaches the grid's tiles through, mounted or not (D6). */
 export interface GridHandle {
   /** Land the grid as `applyIn` would, bringing the entry's row in first. */
@@ -765,6 +769,19 @@ function Grid({
     const scroller = scrollRootRef.current.current;
     if (scroller === null) return;
     let frame = 0;
+    // Tiles sliding under a resting pointer would each start a hover
+    // transition and repaint the grid; index.css turns them off under this
+    // attribute. Written once per burst, not per event, so the style engine is
+    // not invalidated on every scroll event.
+    let quiet: ReturnType<typeof setTimeout> | null = null;
+    const flagScrolling = (): void => {
+      if (quiet === null) scroller.setAttribute("data-scrolling", "");
+      else clearTimeout(quiet);
+      quiet = setTimeout(() => {
+        quiet = null;
+        scroller.removeAttribute("data-scrolling");
+      }, SCROLL_QUIET_MS);
+    };
     const schedule = (): void => {
       if (frame !== 0) return;
       frame = requestAnimationFrame(() => {
@@ -785,12 +802,16 @@ function Grid({
         sync();
       });
     };
+    scroller.addEventListener("scroll", flagScrolling, { passive: true });
     scroller.addEventListener("scroll", schedule, { passive: true });
     window.addEventListener("resize", schedule);
     return () => {
+      scroller.removeEventListener("scroll", flagScrolling);
       scroller.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
       cancelAnimationFrame(frame);
+      if (quiet !== null) clearTimeout(quiet);
+      scroller.removeAttribute("data-scrolling");
     };
   }, [readMargin, readRanges, recordTop, sync]);
 

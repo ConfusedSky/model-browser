@@ -64,6 +64,15 @@
   animation-play-state: paused;
 }
 
+/** Tiles stop transitioning their hover while the grid's scroller scrolls:
+ *  each one sliding under a resting pointer would otherwise start a transition
+ *  and repaint. `Grid` sets `data-scrolling` on the scroller. Unlayered, so it
+ *  beats the `transition-*` utilities. */
+[data-scrolling] [data-entry-tile],
+[data-scrolling] [data-tile-actions] {
+  transition: none;
+}
+
 /** One focus ring for every control, drawn only for keyboard focus. In the
  *  base layer, so a control that draws its own focus can still opt out. */
 @layer base {
