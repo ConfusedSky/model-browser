@@ -31,15 +31,15 @@ See proposal.md — Why, for the measurements. What the design has to fit around
 ## Goals / Non-Goals
 
 **Goals:**
-- A North American first touch or PoP miss costs an R2 read in the visitor's region, not a
-  crossing to Falkenstein — without making today's warm answers slower.
+- A first touch or PoP miss answered by a North American PoP costs a read of the `wnam`
+  bucket, not a crossing to Falkenstein — without making today's warm answers slower.
 - Zero application change; removing the routes is a complete rollback.
 - The bucket can only ever hold bytes the origin pinned, under the version it pinned them at.
 
 **Non-Goals:**
 - Edge-caching the Worker's own answers (the Cache API) — measure first, see D6.
 - Pruning retired epochs and versions from the bucket.
-- Any continent but North America, `/api/file`, archive entries, ranged or
+- Any edge location outside North America, `/api/file`, archive entries, ranged or
   conditional reads.
 - Making the desktop build aware of any of this.
 
@@ -131,20 +131,35 @@ it is the fallback if the real bucket answers differently;
 the live check against the real bucket (task 3.3) still decides. Two concurrent first touches racing to store
 identical bytes is benign either way.
 
-### D5. Only North America reads the store
+### D5. Only requests answered in North America read the store
 
-`request.cf.continent === "NA"` → the store; any other value, or none, → pass through
-untouched, no read and no write. The US is the only audience this change is for (decided
-2026-09-28), so an allow-list of one is the whole rule: every other continent keeps exactly
-today's path, which means nothing outside North America gets faster and — the reason not to
-serve the world from `wnam` — nothing gets slower. A bucket in western North America read
-from a European PoP would cross the Atlantic where today the upper tier beside the box
-answers, and whether Asia or South America would gain was a question with no vantage to
-measure it from. A pass-through list (`EU`, `AF`) was the earlier draft; dropped with that
-question.
+`request.cf.colo` — the IATA code of the edge location answering the request — in the North
+American set → the store; any other colo, or none, → pass through untouched, no read and no
+write.
 
-It is a constant in `route.ts`, not a variable: widening it would be a decision that needs
-measurement, not a redeploy.
+The rule keys on the answering PoP, not on the client's continent (`request.cf.continent`,
+the first draft), because the latency argument is about the distance between the PoP and the
+copy. Measured 2026-09-29: this project's own US client (Starlink, `loc=US`) was answered by
+European PoPs (MAD, FRA, MAN, MXP, VIE, DUB, …) on 48 of 60 probe rows, over IPv4 and IPv6
+alike. Under a continent rule each of those requests would run in Europe and read a `wnam`
+bucket across the Atlantic, where today the Smart Tiered Cache upper tier beside the box
+answers — slower than without the Worker. Keyed on the colo, the same request passes through
+and is served as today.
+
+The audience is still the US (decided 2026-09-28). A US visitor answered in North America
+gains; one routed to a European PoP is served exactly as today, not slower; nothing
+answered outside North America gets faster, and — the reason not to serve the world from
+`wnam` — nothing gets slower. Whether PoPs in Asia or South America would gain was a
+question with no vantage to measure it from.
+
+The set is a constant in `route.ts`, generated once from the "North America" group of
+Cloudflare's status page (`https://www.cloudflarestatus.com/api/v2/components.json`, whose
+component names end in the code, `Atlanta, GA, United States - (ATL)`). Cloudflare's group
+includes Mexico and the Caribbean (`MEX`, `QRO`, `GDL`, `KIN`); they are nearer `wnam` than
+the box, so they stay. Codes are matched as Cloudflare sends them, upper case. An unlisted
+colo passes through, which is the safe side: a PoP opened after the list was taken costs
+only speed until the list is refreshed, never a wrong answer. Widening the set beyond North
+America is a decision that needs measurement, not a redeploy.
 
 `wnam` rather than `enam` is the 2026-09-17 plan's choice and the measurements' vantage (US
 Pacific). The hint is best-effort and permanent per bucket name
@@ -188,8 +203,10 @@ says so.
 model's current `mtime` and thumbnail `gen` with each variant's hit state, and GET each URL
 once — the thumbnail for every variant that is a hit, and the GLB. Requests go to the public
 hostname so they pass through the Worker, which does the storing; the script never touches R2.
-Concurrency 2, and it must run from North America (this machine)
-or D5 makes it a no-op.
+Concurrency 2. It fills only through a North American PoP (D5), so it must run from a
+machine that is answered by one — check with
+`curl -s https://models.masamaeda.com/cdn-cgi/trace | grep colo` before a run, since this
+machine is often answered in Europe.
 
 A listing's `thumb` annotation says what the server has *seen*, not what exists: a model whose
 render the server has not read yet, or never made, carries none. For those the backfill asks
@@ -248,16 +265,17 @@ production it is unset and `fetch(request)` goes to the zone's origin.
   in, which is why D7 orders the advance after the restart and D8 the backfill after the advance.
 - [The window between a change and the epoch advance] → accepted and specified; the operator
   closes it and it is minutes wide.
-- [Daily request limit] → every request on the two paths invokes the Worker — other
-  continents, PoP-warm objects and other visitors' repeats included; only the same browser's
+- [Daily request limit] → every request on the two paths invokes the Worker — those
+  answered outside North America, PoP-warm objects and other visitors' repeats included; only the same browser's
   `immutable` cache avoids it. A first screen is ~114 requests (`.ai/todo.md` §1 at `e5ca7e7`),
   so ~877 first screens a day before fail-open, which is today's behaviour.
 - [The warm path regresses] → gated per colo (D6, step 5).
 - [Worker bug] → removing the routes is the rollback (spec), and every error path passes
   through; `route.ts` carries the logic that can be wrong, and is where the tests are.
-- [The pass-through branch is untestable from here] → every probe vantage is in North
-  America; the other-continent branch is covered by `route.test.ts` only, and a live check of
-  it would need a vantage elsewhere. Its failure mode is a slower answer, not a wrong one.
+- [A colo missing from the set] → a North American PoP opened after the list was taken
+  passes through and is served as today; the cost is speed, not correctness. The probe's
+  `colo` column shows which PoP answered each row, so both branches are observable live — a
+  row answered in Europe must read `pass`.
 - [Terms] → R2 and Workers fall under Cloudflare's Developer Platform terms, which lack the
   CDN's "large files" clause — per the 2026-09-17 plan, not re-read for this proposal.
 - [Proxied permanently] → the 125-second origin timeout (a 524) is already a standing condition

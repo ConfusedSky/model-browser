@@ -68,14 +68,14 @@ export async function handle(
   ctx: Ctx,
   origin: Origin,
 ): Promise<Response> {
-  const continent = request.cf?.continent;
+  const colo = request.cf?.colo;
   let route: Classified;
   try {
     route = classify({
       method: request.method,
       url: request.url,
       headers: request.headers,
-      continent: typeof continent === "string" ? continent : null,
+      colo: typeof colo === "string" ? colo : null,
       thumbEpoch: env.THUMB_EPOCH,
       meshEpoch: env.MESH_EPOCH,
     });

@@ -32,9 +32,11 @@ run found no sign of, and it needs a paid plan.
   version**, stores it. There is no publisher, no upload step and no coupling to the bake:
   the bucket holds only bytes the origin itself has vouched for, under the version it vouched
   for them at.
-- **Only North America reads the bucket.** The demo's audience that matters is in the US,
-  so requests from any other continent pass straight through to today's path, unchanged —
-  nothing outside North America gets faster, and nothing gets slower.
+- **Only requests answered by North American edge locations read the bucket.** The demo's
+  audience that matters is in the US, so a request answered by any other Cloudflare PoP —
+  including a US visitor routed to one in Europe — passes straight through to today's path,
+  unchanged: nothing answered outside North America gets faster, and nothing anywhere gets
+  slower.
 - **Everything the Worker does not recognise goes to the origin untouched**: a request naming
   no version, an archive entry (`foo.zip!/entry`), a ranged or conditional request, a
   malformed parameter, any method but GET. So does any failure of the Worker or the bucket,

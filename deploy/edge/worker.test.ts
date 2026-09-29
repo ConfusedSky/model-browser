@@ -73,10 +73,9 @@ function setup(answer: () => Response = () => pinned()) {
     calls.push(r);
     return answer();
   };
-  const send = async (url: string, continent: string | null = "NA") => {
+  const send = async (url: string, colo: string | null = "SJC") => {
     const req = new Request(url);
-    if (continent !== null)
-      Object.defineProperty(req, "cf", { value: { continent } });
+    if (colo !== null) Object.defineProperty(req, "cf", { value: { colo } });
     const before = calls.length;
     const res = await handle(req, env, ctx, origin);
     return { res, originCalls: calls.length - before };
@@ -92,16 +91,16 @@ function pinned(over: Record<string, string> = {}, status = 200): Response {
 const body = async (res: Response) => new Uint8Array(await res.arrayBuffer());
 
 describe("handle", () => {
-  it("passes another continent through untouched", async () => {
+  it("passes a request answered in Europe through untouched", async () => {
     const t = setup();
-    const { res, originCalls } = await t.send(THUMB, "EU");
+    const { res, originCalls } = await t.send(THUMB, "FRA");
     expect(res.headers.get("x-edge-store")).toBe("pass");
     expect(await body(res)).toEqual(BYTES);
     expect(originCalls).toBe(1);
     expect(t.bucket.gets + t.bucket.puts).toBe(0);
   });
 
-  it("passes a request without cf as another continent", async () => {
+  it("passes a request without cf as one answered elsewhere", async () => {
     const t = setup();
     const { res, originCalls } = await t.send(THUMB, null);
     expect(res.headers.get("x-edge-store")).toBe("pass");

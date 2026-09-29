@@ -17,13 +17,75 @@ export interface ClassifyInput {
   method: string;
   url: string;
   headers: HeaderReader;
-  continent: string | null | undefined;
+  colo: string | null | undefined;
   thumbEpoch: string;
   meshEpoch: string;
 }
 
-// A constant, not a variable: widening it is a decision that needs measurement (D5).
-const STORE_CONTINENT = "NA";
+// Cloudflare's North American PoPs, from the "North America" group of
+// https://www.cloudflarestatus.com/api/v2/components.json. An unlisted colo passes
+// through, the safe side, so a new PoP only costs speed until the list is refreshed (D5).
+const STORE_COLOS: ReadonlySet<string> = new Set([
+  "ABQ",
+  "ANC",
+  "ATL",
+  "AUS",
+  "BGR",
+  "BNA",
+  "BOS",
+  "BUF",
+  "CLE",
+  "CLT",
+  "CMH",
+  "CVG",
+  "DEN",
+  "DFW",
+  "DTW",
+  "EWR",
+  "FSD",
+  "GDL",
+  "HNL",
+  "IAD",
+  "IAH",
+  "IND",
+  "JAX",
+  "KIN",
+  "LAS",
+  "LAX",
+  "MCI",
+  "MEM",
+  "MEX",
+  "MIA",
+  "MSP",
+  "OKC",
+  "OMA",
+  "ORD",
+  "ORF",
+  "PDX",
+  "PHL",
+  "PHX",
+  "PIT",
+  "QRO",
+  "RDU",
+  "RIC",
+  "SAN",
+  "SAT",
+  "SEA",
+  "SFO",
+  "SJC",
+  "SLC",
+  "SMF",
+  "STL",
+  "TLH",
+  "TPA",
+  "YHZ",
+  "YUL",
+  "YVR",
+  "YWG",
+  "YXE",
+  "YYC",
+  "YYZ",
+]);
 
 const CONDITIONAL = [
   "range",
@@ -63,7 +125,8 @@ function canonicalPath(path: string): boolean {
 
 export function classify(input: ClassifyInput): Classified {
   if (input.method !== "GET") return pass("method");
-  if (input.continent !== STORE_CONTINENT) return pass("continent");
+  if (typeof input.colo !== "string" || !STORE_COLOS.has(input.colo))
+    return pass("colo");
   if (CONDITIONAL.some((h) => input.headers.get(h) !== null))
     return pass("conditional");
 

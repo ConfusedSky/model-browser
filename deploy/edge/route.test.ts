@@ -26,7 +26,7 @@ function run(url: string, over: Partial<ClassifyInput> = {}) {
     method: "GET",
     url,
     headers: new Headers(),
-    continent: "NA",
+    colo: "SJC",
     thumbEpoch: "T1",
     meshEpoch: "M1",
     ...over,
@@ -193,7 +193,7 @@ describe("classify: paths", () => {
   });
 });
 
-describe("classify: method, headers and continent", () => {
+describe("classify: method, headers and colo", () => {
   it.each(["HEAD", "POST"])("passes %s", (method) => {
     expect(reasonOf(thumbUrl(PATH, MTIME), { method })).toBe("method");
   });
@@ -214,13 +214,16 @@ describe("classify: method, headers and continent", () => {
     expect(reasonOf(thumbUrl(PATH, MTIME), { headers })).toBe("conditional");
   });
 
-  it("keys NA and passes every other continent, or none", () => {
-    expect(run(thumbUrl(PATH, MTIME), { continent: "NA" }).action).toBe(
-      "store",
-    );
-    for (const continent of ["EU", "AS", "SA", null, undefined])
-      expect(reasonOf(thumbUrl(PATH, MTIME), { continent })).toBe("continent");
+  it.each(["SJC", "ATL", "YYZ"])("keys a request answered in %s", (colo) => {
+    expect(run(thumbUrl(PATH, MTIME), { colo }).action).toBe("store");
   });
+
+  it.each(["FRA", "MAD", "DUB", "ZZZ", "", null, undefined, "sjc"])(
+    "passes a request answered in %s",
+    (colo) => {
+      expect(reasonOf(thumbUrl(PATH, MTIME), { colo })).toBe("colo");
+    },
+  );
 });
 
 const pinned = (over: Record<string, string> = {}) =>
