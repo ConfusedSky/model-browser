@@ -155,8 +155,9 @@ question with no vantage to measure it from.
 The set is a constant in `route.ts`, generated once from the "North America" group of
 Cloudflare's status page (`https://www.cloudflarestatus.com/api/v2/components.json`, whose
 component names end in the code, `Atlanta, GA, United States - (ATL)`). Cloudflare's group
-includes Mexico and the Caribbean (`MEX`, `QRO`, `GDL`, `KIN`); they are nearer `wnam` than
-the box, so they stay. Codes are matched as Cloudflare sends them, upper case. An unlisted
+includes Mexico (`MEX`, `QRO`, `GDL`) and Kingston (`KIN`), which are nearer `wnam` than the
+box, so they stay; the rest of Central America and the Caribbean sit in Cloudflare's "Latin
+America & the Caribbean" group and pass through — the safe side, costing only speed. Codes are matched as Cloudflare sends them, upper case. An unlisted
 colo passes through, which is the safe side: a PoP opened after the list was taken costs
 only speed until the list is refreshed, never a wrong answer. Widening the set beyond North
 America is a decision that needs measurement, not a redeploy.
