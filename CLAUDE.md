@@ -144,11 +144,13 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   schema is `{scripts:{setup,run},ports}`; `run` is left null, so Jean's Run button
   reports "No run script configured in jean.json" by design. What a fresh worktree is
   actually missing is `node_modules` (gitignored, per-directory, ~0.3 s to restore) —
-  **not** the hooks path: `core.hooksPath` lives in the shared `.git/config`, and the
-  relative `.githooks` resolves against each worktree's own top level, so the pre-commit
-  hook already fires in a new worktree with no dependencies installed at all (Prettier
-  comes from `bunx`, not from `node_modules`). `hooks:install` stays in the setup line
-  only because it is idempotent and covers a fresh *clone*
+  **not** the hooks path: `core.hooksPath` lives in the shared `.git/config`, so the
+  pre-commit hook already fires in a new worktree with no dependencies installed at all
+  (Prettier comes from `bunx`, not from `node_modules`). `hooks:install` writes the
+  relative `.githooks`, which resolves against each worktree's own top level; an absolute
+  value (this clone's `.git/config` holds one) runs the main checkout's copy of the hook
+  in every worktree instead. `hooks:install` stays in the setup line only because it is
+  idempotent and covers a fresh *clone*
 - `scripts/spec-diff.sh [change | capability change [requirement]]` - diff delta specs
   vs main specs (no args = all active changes; prints `new spec <path>` for new capabilities)
 - `openspec validate <name>` takes the change name positionally (`--change` works on
@@ -316,11 +318,11 @@ client (5173, proxies /api). Spec-driven via OpenSpec — specs in openspec/, wo
   mid-session, drive a standalone loop through `scripts/playwright-found.mjs` rather than
   waiting on it — better for repro loops anyway, since `browser_run_code_unsafe` is one
   shot per call
-  - E2E fixture models: there is no dedicated fixture set. The six STLs this line used to
-    name (Enforcer, paint-rack, bod_test_cube, fat_cat) lived under
-    `.superpowers/sdd/tasks/e2e-models/`, which no longer exists and whose contents were not
-    tracked — do not go looking for it. Drive E2E against a leaf directory of the real
-    library instead, e.g.
+  - E2E fixture models: there is no dedicated fixture set. The six STLs under
+    `.superpowers/sdd/tasks/e2e-models/` (Enforcer, paint-rack, bod_test_cube, fat_cat,
+    3DBenchy, bigmakerbottable4) are gitignored, so only the main checkout on the owner's
+    machine has them — a clone or a worktree does not; do not build a test on them. Drive
+    E2E against a leaf directory of the real library instead, e.g.
     `~/Documents/tests/test-models/miniatures/original/Locked_Chest_3040102`
     (one STL, `case_meshmixed.stl`). Since `library-root` a model is addressed as a **root
     plus a library path**, never a filesystem path: run with
